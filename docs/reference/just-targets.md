@@ -207,6 +207,7 @@ For how the planes work and how to add one, read
 | `just sel4_crossing_check` | B22 gate: a graph outlives `MAX_CHANNELS` and still sends on every live one. |
 | `just sel4_loan_check` | P5.3.2 gate: a loan crosses between components on seL4, against quotas the generation declared. |
 | `just sel4_reclamation_check` | B38 gate: exceed old task CSlot/untyped lifetime watermarks with bounded live use. |
+| `just sel4_large_image_check` | Large component images on `sel4-large-image`: a probe past every former image and generation bound verifies its own pages across four launches, faults once on read-only data and is reclaimed to the same watermarks, while builder, checker and root refuse every ceiling, with the host, generation, boot-layout, C runtime and reclamation regressions; fails until the composition lands. |
 | `just sel4_sample_check` | P5.3.4 gate: the C7 sample plane, composed on seL4. |
 | `just sel4_spawn_check` | P5.3.3 gate: a component constructs children on seL4 and supervises them. |
 | `just sel4_supervision_check` | B16 gate: a graph outlives `MAX_RECORDS` and still answers every live handle. |
@@ -303,6 +304,12 @@ For how the planes work and how to add one, read
 | `just rpi5_media_check` | Flatten via the media builder: objcopy drops the sectionless loader payload. |
 | `just rpi5_ros2_demo_contract_check` | RP0 target-qualified Raspberry Pi 5 ROS 2 demo contract gate. |
 | `just rpi5_ros2_demo_contract_v2_check` | RP0 format-2 Raspberry Pi 5 ROS 2 demo contract gate. |
+| `just zenoh_encoder_check` | Zenoh Profile 0 encoder reproduces every upstream-encoded batch in the decoder corpus byte for byte, after the host wire reference proves itself against the same corpus, and refuses seven named bad inputs; fails until the encoder lands. |
+| `just zenoh_session_check` | Zenoh Profile 0 session machine completes five named scenarios and refuses seven named inputs, as pure state transitions with injected time; fails until the session machine lands. |
+| `just zenoh_cdr_check` | Classic-CDR codec reproduces the demo fixture's four Counter samples, recomputed from their field values, and refuses seven malformed inputs; fails until the codec lands. |
+| `just zenoh_transport_check` | Zenoh transport runtime over a scripted byte link: six scenarios (split and coalesced batches, backpressure, peer close, restart) and seven refusals; fails until the runtime lands. |
+| `just zenoh_composition_check` | The derived `sel4-zenoh` composition grants the two nodes exactly the demo's authority, judged against 15 mutations of an honest composition; fails until the composition lands. |
+| `just rpi5_ros2_zenoh_check` | R0's end-to-end claim: the composition and the four host recipes, then two node components exchange the declared topic over Zenoh Profile 0 under AArch64 QEMU, each reported batch judged byte for byte against the host wire reference; explicit, never part of `all`; fails until every slice lands. |
 | `just rpi5_serial_monitor serial timeout` | Bring-up aid only: monitor debug UART without qualifying the board. |
 | `just sel4_duo_image_check` | One seL4 build platform: the board or machine an image targets. |
 | `just sel4_rpi5_image_check` | Uses the board-specific bcm2712 prefix, target directory, generation, image, and pinned hashes; it is not interchangeable with the qemu-arm-virt build. |

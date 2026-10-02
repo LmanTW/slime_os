@@ -124,6 +124,16 @@ sel4_supervision_check: sel4_pin_check
 sel4_reclamation_check: sel4_pin_check
     python3 scripts/check/check-sel4-reclamation-plane.py
 
+# Large component images on aarch64 QEMU: a probe past every former image and
+# generation bound is launched four times, verifies its own pages, faults once
+# on its read-only data and is reclaimed to the same watermarks, while the
+# builder, checker and root refuse every ceiling. The arm also runs
+# `test_sel4_root` for the root's named refusal tests. Explicit, never part of
+# `all`; fails until the `sel4-large-image` composition lands.
+[group('planes / mechanism')]
+sel4_large_image_check: sel4_pin_check test_host generation_check sel4_boot_layout_check sel4_c_runtime_check sel4_reclamation_check
+    python3 scripts/check/check-sel4-reclamation-plane.py --arm large-image
+
 [group('planes / mechanism')]
 sel4_crossing_check: sel4_pin_check
     python3 scripts/check/check-sel4-crossing-plane.py

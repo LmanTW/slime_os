@@ -57,6 +57,7 @@ import http_peer  # noqa: E402
 import http_capture  # noqa: E402
 import network_launch as launch  # noqa: E402
 import devloop_observations  # noqa: E402
+import zenoh_exchange  # noqa: E402
 from sel4_gate_markers import match_marker_contract  # noqa: E402
 from sel4_plane import run_plane  # noqa: E402
 
@@ -95,6 +96,8 @@ NET_DESTINATIONS = {
     ("http-get", NET_PEER, "ipv4", str(http_peer.HTTP_PORT), "tcp"),
     ("http-get", "1.1.1.1", "ipv4", "80", "tcp"),
 }
+ZENOH_CLOSURE = zenoh_exchange.CLOSURE
+ZENOH_FIXTURE = COMPOSITIONS / "sel4-zenoh.zti"
 NETWORK_SERVICE_MANIFEST = ROOT / "components" / "services" / "network-service" / "Cargo.toml"
 TIMEOUT = 240
 # The MAC the composition declares for the service, which is also the one the
@@ -502,8 +505,49 @@ NET_COUNTS: tuple[tuple[str, str, int], ...] = (
     ("link releases", r"\[network-service\] link released", 0),
 )
 
+
+ZENOH_CHAINS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("zenoh admission", (rf"SLIME_ROOT generation admitted number={zenoh_exchange.GENERATION} executables=\d+ instances=4 grants=\d+ ",)),
+    ("zenoh service", (
+        r"\[network-service\] loopback interface=127\.0\.0\.1 external_nic=none",
+        r"\[network-service\] loopback frames=[1-9]\d* rejected=0 handles=0 external_frames=0 resets=0 syns=2 fins=2",
+    )),
+    ("zenoh sessions", (
+        r"\[ros2-demo-subscriber\] session open role=listener initial_sn=0 lease_ms=2000",
+        r"\[ros2-demo-publisher\] session open role=connector initial_sn=0 lease_ms=2000",
+        r"\[ros2-demo-subscriber\] declared subscriber id=1 key=0/slime_demo/counter/slime_demo_msgs::msg::dds_::Counter_/RIHS01_[0-9a-f]{64}",
+        r"\[ros2-demo-publisher\] declaration matched key=0/slime_demo/counter/slime_demo_msgs::msg::dds_::Counter_/RIHS01_[0-9a-f]{64}",
+    )),
+    ("zenoh samples", (
+        r"\[ros2-demo-publisher\] wire sent sample=0 hex=[0-9a-f]+",
+        r"\[ros2-demo-subscriber\] sample validated sequence=0 value=10",
+        r"\[ros2-demo-publisher\] wire sent sample=1 hex=[0-9a-f]+",
+        r"\[ros2-demo-subscriber\] sample validated sequence=1 value=20",
+        r"\[ros2-demo-publisher\] wire sent sample=2 hex=[0-9a-f]+",
+        r"\[ros2-demo-subscriber\] sample validated sequence=2 value=30",
+        r"\[ros2-demo-publisher\] wire sent sample=3 hex=[0-9a-f]+",
+        r"\[ros2-demo-subscriber\] sample validated sequence=3 value=40",
+        r"\[rpi5-ros2-demo\] received count=4 sequences=0,1,2,3 values=10,20,30,40",
+    )),
+    ("zenoh teardown", (
+        r"\[ros2-demo-subscriber\] undeclared subscriber id=1",
+        r"\[ros2-demo-subscriber\] session closing samples=4",
+        r"\[ros2-demo-publisher\] session closed samples=4",
+    )),
+    ("zenoh denials", (
+        r"\[ros2-demo-publisher\] denial class=undeclared-endpoint refused=1",
+        r"\[ros2-demo-publisher\] denial class=listen refused=1",
+        r"\[ros2-demo-publisher\] denial class=scouting refused=1",
+        r"\[ros2-demo-subscriber\] denial class=connect refused=1",
+    )),
+    ("zenoh success", (
+        r"\[rpi5-ros2-demo\] success profile=rpi5-ros2-demo-v2 samples=4",
+        rf"SLIME_GRAPH HEALTHY generation={zenoh_exchange.GENERATION} required=4 live=0 completed=4 failed=0",
+    )),
+)
+
 # Every arm participates in the shared missing/reordered/failure controls.
-CHAINS = AUTHORITY_CHAINS + TCP_CHAINS + LOCAL_CHAINS + LIFETIME_CHAINS + SERVICE_FAULT_CHAINS + DRIVER_RESET_CHAINS + HTTP_CHAINS + IMPAIRMENT_CHAINS + LISTENER_CHAINS + OPTIONS_CHAINS + NET_CHAINS
+CHAINS = AUTHORITY_CHAINS + TCP_CHAINS + LOCAL_CHAINS + LIFETIME_CHAINS + SERVICE_FAULT_CHAINS + DRIVER_RESET_CHAINS + HTTP_CHAINS + IMPAIRMENT_CHAINS + LISTENER_CHAINS + OPTIONS_CHAINS + NET_CHAINS + ZENOH_CHAINS
 FAILURE_MARKERS: tuple[str, ...] = (
     r"SLIME_ROOT FATAL",
     r"SLIME_GRAPH FAIL",
@@ -516,6 +560,9 @@ FAILURE_MARKERS: tuple[str, ...] = (
     r"\[io-tcp-listener-probe\] fail: ",
     r"\[io-tcp-options-probe\] fail: ",
     r"\[io-local-network-probe\] fail: ",
+    r"\[ros2-demo-publisher\] fail: ",
+    r"\[ros2-demo-subscriber\] fail: ",
+    r"\[rpi5-ros2-demo\] failure class=",
     r"\[io-network-lifetime-probe\] fail: ",
     r"\[virtio-net-driver\] fail: ",
     r"\[http-get\] fail: ",
@@ -1028,6 +1075,44 @@ def run_net_arm(image: Path, mac: str, transcript_path: Path | None) -> None:
     devloop_observations.record(casesObserved=cases, bytesObserved=count, negativeControlsRefused=refused)
 
 
+def run_zenoh_arm(transcript_path: Path | None) -> None:
+    """Boot the two nodes over loopback and judge the exchange from the guest's reports.
+
+    The composition must exist and grant exactly the demo's authority before QEMU
+    starts. The batches the nodes report are judged byte for byte against the host
+    wire reference, itself proved against the upstream-encoded corpus first. The
+    exchange crosses the service's loopback backend, so there is no packet capture:
+    this observes the node codecs and session, not the stack's wire.
+    """
+    contract = zenoh_exchange.demo()
+    if not ZENOH_FIXTURE.is_file():
+        fail(f"{ZENOH_FIXTURE.relative_to(ROOT)} does not exist; the sel4-zenoh composition has not landed")
+    try:
+        facts = zenoh_exchange.check_composition_rows(*zenoh_exchange.composition_from_text(ZENOH_FIXTURE.read_text(encoding="utf-8")), contract)
+        zenoh_exchange.reference_self_test(ROOT / "components" / "lib" / "src" / "zenoh_profile0" / "vectors.txt")
+    except (zenoh_exchange.ExchangeError, zenoh_exchange.zenoh_wire.WireError) as error:
+        fail(str(error))
+    image = build_image(ZENOH_CLOSURE)
+    terminal = re.compile(ZENOH_CHAINS[-1][1][-1] + "|" + "|".join(FAILURE_MARKERS))
+    transcript = run_plane(image=image, timeout=TIMEOUT, terminal_condition=terminal, fail=fail, pins_path=PINS)
+    if transcript_path is not None:
+        transcript_path.write_text(transcript, encoding="utf-8")
+    try:
+        match_marker_contract(transcript, ZENOH_CHAINS, FAILURE_MARKERS, fail)
+    except SystemExit:
+        print(transcript)
+        raise
+    lines = [line.strip() for line in transcript.splitlines() if re.match(r"\[(ros2-demo-publisher|ros2-demo-subscriber|rpi5-ros2-demo)\] ", line.strip())]
+    try:
+        samples, wire_bytes, denials = zenoh_exchange.judge_transcript(lines, contract)
+        controls = zenoh_exchange.transcript_controls(contract)[1] + zenoh_exchange.composition_controls(contract)[1]
+    except zenoh_exchange.ExchangeError as error:
+        print(transcript)
+        fail(str(error))
+    print(f"[zenoh-exchange] samples={samples} wire-bytes={wire_bytes} denials={denials} authority-facts={facts} controls-refused={controls}")
+    devloop_observations.record(casesObserved=samples, bytesObserved=wire_bytes, negativeControlsRefused=controls)
+
+
 def http_launch_text(url: str) -> str:
     """Serialize only through the schema-generated launch binding."""
     encoded = url.encode("ascii")
@@ -1216,7 +1301,7 @@ def run_http_public_arm(image: Path, transcript_path: Path | None) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Boot and check the seL4 I/O network proof planes")
     parser.add_argument("--no-build", action="store_true")
-    parser.add_argument("--arm", choices=("authority", "tcp", "local", "lifetime", "service-fault", "driver-reset", "tcp-impairment", "tcp-listener", "tcp-options", "net", "http", "http-public", "all"), default="all")
+    parser.add_argument("--arm", choices=("authority", "tcp", "local", "lifetime", "service-fault", "driver-reset", "tcp-impairment", "tcp-listener", "tcp-options", "net", "zenoh", "http", "http-public", "all"), default="all")
     parser.add_argument("--allow-public", action="store_true", help="explicitly authorize the opt-in public DNS/HTTP smoke")
     parser.add_argument("--http-case", choices=tuple(case.name for case in http_peer.cases()))
     parser.add_argument(
@@ -1318,6 +1403,9 @@ def main() -> None:
             print(transcript)
             raise
         print("seL4 I/O local plane check: real TCP listen/connect/accept, independent bidirectional bytes, EOF and normal teardown without a NIC proved")
+    if arguments.arm == "zenoh":
+        run_zenoh_arm(arguments.transcript)
+        print("seL4 zenoh plane check: two nodes exchanged four samples over one Zenoh Profile 0 session, byte-exact against the host reference, with exactly the declared authority and every denial observed")
     if arguments.arm in ("tcp", "all"):
         mac = check_tcp_fixture()
         image = build_image(TCP_CLOSURE)

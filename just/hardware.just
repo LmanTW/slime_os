@@ -6,6 +6,48 @@ rpi5_ros2_demo_contract_check:
 rpi5_ros2_demo_contract_v2_check:
     python3 scripts/check/check-rpi5-ros2-demo-contract-v2.py
 
+# Zenoh Profile 0 encoder: every batch the upstream eclipse-zenoh 1.0.0 encoder
+# produced in the decoder corpus, reproduced byte for byte, with each encoder
+# refusal observed. Fails until the encoder lands.
+[group('hardware')]
+zenoh_encoder_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice encoder
+
+# Zenoh Profile 0 session machine: handshake, declaration, delivery, teardown and
+# lease expiry as pure state transitions, with each refusal observed. Fails until
+# the session machine lands.
+[group('hardware')]
+zenoh_session_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice session
+
+# Classic-CDR codec for slime_demo_msgs/msg/Counter against the frozen demo
+# contract's four sample byte strings, with each malformed input refused. Fails
+# until the codec lands.
+[group('hardware')]
+zenoh_cdr_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice cdr
+
+# Transport runtime over a scripted byte link: split and coalesced batches,
+# backpressure, peer close and restart, with each refusal observed. Fails until
+# the runtime lands.
+[group('hardware')]
+zenoh_transport_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice transport
+
+# The derived sel4-zenoh composition grants the two nodes exactly the demo's
+# authority and nothing more, judged against 15 mutations. Fails until the
+# composition lands.
+[group('hardware')]
+zenoh_composition_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice composition
+
+# R0's end-to-end claim: two node components exchange the declared topic over
+# Zenoh Profile 0 under AArch64 QEMU, judged byte for byte against the host wire
+# reference. Explicit, never part of `all`; fails until the composition lands.
+[group('hardware')]
+rpi5_ros2_zenoh_check: sel4_pin_check zenoh_composition_check zenoh_encoder_check zenoh_session_check zenoh_cdr_check zenoh_transport_check
+    python3 scripts/check/check-sel4-io-network-plane.py --arm zenoh
+
 [group('hardware')]
 rpi5_artifact_check: architecture_contract_check rpi5_ros2_demo_contract_check rpi5_ros2_demo_contract_v2_check
     python3 scripts/check/check-rpi5-artifacts.py

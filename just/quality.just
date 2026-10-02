@@ -426,7 +426,7 @@ test_sel4_root:
     # Do not use command substitution: `set -e` must preserve build failures,
     # and the per-checkout capture under `build/` avoids concurrent-run clashes.
     SEL4_PREFIX="$prefix" RUSTUP_TOOLCHAIN="$toolchain" \
-        cargo test -p slime-root --target "$target" --lib -- --format=terse \
+        cargo test -p slime-root --target "$target" --lib \
         | tee "$capture"
     output="$(cat "$capture")"
     actual="$(printf '%s\n' "$output" | sed -n 's/^running \([0-9]*\) test.*/\1/p' | head -1)"

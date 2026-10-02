@@ -47,3 +47,7 @@ readable and link to the decision that replaced them.
 - [Instance lifetime](instance-lifetime.md) — accepted; a composition declares
   an instance `resident` or `bounded`, and the root treats a resident
   instance's exit as a failure rather than as completion.
+- [Zenoh Profile 0 transport](zenoh-profile0-transport.md) — proposed; R0's
+  two-node exchange as six slices, each judged from evidence its implementation
+  did not write: an independent wire reference proved against the upstream
+  corpus, mutation-tested judges, and a QEMU arm in the network plane checker.

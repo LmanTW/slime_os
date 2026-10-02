@@ -30,7 +30,7 @@ from sel4_plane import run_plane, verify_image_identity  # noqa: E402
 # silently weaken a gate. Boot-layout fixture equality is controlled separately.
 GATES: tuple[tuple[str, str, int], ...] = (
     ("sel4_channel_plane", "check/check-sel4-channel-plane.py", 18),
-    ("sel4_io_network_plane", "check/check-sel4-io-network-plane.py", 193),
+    ("sel4_io_network_plane", "check/check-sel4-io-network-plane.py", 218),
     ("sel4_component_graph", "check/check-sel4-component-graph.py", 109),
     ("sel4_crossing_plane", "check/check-sel4-crossing-plane.py", 10),
     ("sel4_loan_plane", "check/check-sel4-loan-plane.py", 46),
