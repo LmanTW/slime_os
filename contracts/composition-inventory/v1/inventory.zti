@@ -552,6 +552,14 @@
       state = "derived";
       systemSpec = "contracts/system-spec/v1/systems/sel4-wait-set.zti";
     };
+    {
+      baseline = "";
+      composition = "sel4-zenoh";
+      deferralReason = "";
+      owningGate = "rpi5_ros2_zenoh_check";
+      state = "specNative";
+      systemSpec = "contracts/system-spec/v1/systems/sel4-zenoh.zti";
+    };
   ];
   formatVersion = 1;
 }

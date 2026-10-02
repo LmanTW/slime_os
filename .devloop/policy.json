@@ -168,6 +168,7 @@
     "scripts/generate/generate-system-spec-bindings.py",
     "scripts/generate/generate-system-test-run-bindings.py",
     "scripts/generate/generate-system-test-runs.py",
+    "scripts/generate/generate-zenoh-profile-bindings.py",
     "scripts/lib/arm64_image.py",
     "scripts/lib/boot_contracts.py",
     "scripts/lib/boot_media_contract.py",

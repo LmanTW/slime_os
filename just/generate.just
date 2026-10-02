@@ -9,6 +9,10 @@ link_device_gen:
 network_service_gen:
     python3 scripts/generate/generate-network-service-bindings.py
 
+[group('generate')]
+zenoh_profile_gen:
+    python3 scripts/generate/generate-zenoh-profile-bindings.py
+
 
 [group('generate')]
 block_gen:

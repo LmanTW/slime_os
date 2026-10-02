@@ -40,6 +40,7 @@ pub mod spawn_arguments;
 pub mod store;
 pub mod syscall_abi;
 pub mod trace_sink;
+pub mod zenoh_profile;
 
 pub fn valid_fs_request(request: &fs::WireFsRequest) -> bool {
     let name_len = request.name_len as usize;

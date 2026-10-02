@@ -1,0 +1,50 @@
+{
+  formatVersion = 1;
+  name = "ros2-demo-subscriber";
+  componentType = "application";
+  version = "1.0.0";
+  owner = "root";
+  purpose = "The demo's Zenoh Profile 0 subscriber: listens on 127.0.0.1:7447, declares the demo key, validates four Counter samples, then undeclares and closes.";
+  implementation = {
+    provider = "workspace";
+    binary = "ros2-demo-subscriber";
+    contentHash = "";
+  };
+  provides = [];
+  requires = [ "endpoint"; ];
+  interfaces = [];
+  dependencies = [ "network-service"; ];
+  communication = { semantic = "none"; qos = []; };
+  configuration = [];
+  lifecycle = [ "Initialize"; "Start"; "Running"; "Error"; ];
+  runtime = {
+    executionEnvironment = "aarch64-sel4-qemu-virt";
+    resource = {
+      stackBytes = 16384;
+      spawnBudget = 0;
+      extraThreads = 0;
+      bufferBytePages = 0;
+      bufferCount = 0;
+      mappingCount = 0;
+      loanCount = 0;
+      privatePageQuota = 0;
+    };
+    devices = [];
+  };
+  health = "required";
+  lifetime = "bounded";
+  compatibility = {
+    platform = "aarch64-sel4-qemu-virt";
+    interface = "contracts/interface-schema/v1";
+    dependency = "exact";
+    resource = "atMost";
+    runtime = "exact";
+    qos = "none";
+  };
+  test = {
+    testCondition = "the rpi5_ros2_zenoh_check gate boots the sel4-zenoh composition";
+    expectedResult = "four Counter samples cross one Zenoh Profile 0 session byte-exact; undeclare precedes close; named denials observed";
+    passFailCriteria = "[ros2-demo-subscriber] session closing samples=4";
+    requiredTestEnvironment = "rpi5_ros2_zenoh_check";
+  };
+}

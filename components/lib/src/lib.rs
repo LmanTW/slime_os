@@ -22,9 +22,12 @@ pub mod private_memory_adaptive;
 pub mod private_memory_capacity;
 #[cfg(feature = "component-runtime")]
 pub mod private_memory_matrix;
+pub mod ros_cdr;
 pub mod servo_failsafe;
 #[cfg(feature = "component-runtime")]
 pub mod shared_buffer_probe;
 pub mod tick_clock;
 pub mod uart16550;
 pub mod virtio_mmio;
+pub mod zenoh_link;
+pub mod zenoh_profile0;

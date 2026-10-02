@@ -1,0 +1,178 @@
+-- Slime OS Zenoh Profile 0 wire vocabulary, version 1 (R0).
+--
+-- The bytes of a Zenoh message are specified by the eclipse-zenoh project
+-- (wire version 0x09), not by this repository, so this contract declares no
+-- record layout. It owns what Slime OS decides about that wire: the subset of
+-- Zenoh a static bounded peer link admits, the numeric bounds a decoder must
+-- enforce before it allocates, the identifiers of the admitted messages, and
+-- the closed vocabulary of reasons a decoder refuses input. The Rust codec
+-- (`components/lib/src/zenoh_profile0.rs`) takes these values from the
+-- generated bindings.
+--
+-- The bounds equal the frozen demo contract's (`contracts/rpi5-ros2-demo/v2`):
+-- `maxBatchBytes`, `maxKeyBytes`, `maxAttachmentBytes` and `maxPayloadBytes`
+-- are its `maxTransportMessageBytes`, `maxKeyexprBytes`, `maxAttachmentBytes`
+-- and `maxPayloadBytes`; the codec's host tests compare them.
+-- `maxCookieBytes` is this contract's own bound.
+--
+-- Identifiers below are the wire's, from zenoh-protocol 1.0.0. A message id
+-- occupies the low five bits of a header byte, a flag the bits above it.
+
+env ::= import stdlib.env;
+fs ::= import stdlib.fs;
+gen ::= import "gen_rust.zt";
+t ::= import stdlib.text;
+
+formatVersion :: Int = 1;
+
+-- The version byte INIT carries. A responder that does not support the
+-- proposed version answers CLOSE; there is no downgrade.
+protocolVersion :: Int = 9;
+
+-- Peer is the only admitted role: Router and Client are refused, and 0b11 is
+-- reserved on the wire.
+whatamiRouter :: Int = 0;
+whatamiPeer :: Int = 1;
+whatamiClient :: Int = 2;
+
+-- The resolution byte both sides must use: 32-bit frame sequence numbers and
+-- 32-bit request ids. Any other resolution is refused rather than negotiated.
+defaultResolution :: Int = 10;
+
+-- Stream framing: every batch on a TCP link carries a little-endian length
+-- prefix of this many bytes.
+streamLengthBytes :: Int = 2;
+
+-- Bounds enforced before any allocation or copy.
+maxBatchBytes :: Int = 512;
+maxKeyBytes :: Int = 129;
+maxAttachmentBytes :: Int = 33;
+maxPayloadBytes :: Int = 12;
+maxCookieBytes :: Int = 64;
+maxZidBytes :: Int = 16;
+-- The attachment's source GID: `rmw_zenoh` serializes it with a LEB128 length
+-- prefix, and the profile admits only the 16-byte form.
+gidBytes :: Int = 16;
+-- Widest LEB128 value a field may carry, in bits.
+leb128MaxBits :: Int = 32;
+-- A 16-bit variable-length field (key scope, key length, cookie length).
+leb128ShortBits :: Int = 16;
+
+-- Transport messages.
+idInit :: Int = 1;
+idOpen :: Int = 2;
+idClose :: Int = 3;
+idFrame :: Int = 5;
+-- Network messages, carried inside a FRAME.
+idPush :: Int = 29;
+idDeclare :: Int = 30;
+-- Declaration sub-messages inside a DECLARE.
+idDeclareSubscriber :: Int = 2;
+idUndeclareSubscriber :: Int = 3;
+-- The data sub-message inside a PUSH.
+idPut :: Int = 1;
+
+-- Header flags. A flag's meaning depends on the message; each row names the
+-- messages that use the bit.
+-- 0x20: INIT and OPEN acknowledge, FRAME reliable, CLOSE whole session, key
+-- named (PUSH, D_SUBSCRIBER), PUT timestamp, DECLARE interest.
+flagBit5 :: Int = 32;
+-- 0x40: INIT size params, OPEN seconds, key mapping (PUSH, D_SUBSCRIBER), PUT
+-- encoding. Reserved in FRAME, CLOSE and DECLARE.
+flagBit6 :: Int = 64;
+-- 0x80: an extension chain follows. No message in the profile carries one,
+-- except the two extensions named below.
+flagExtensions :: Int = 128;
+
+-- The two extensions the profile admits. U_SUBSCRIBER carries its key
+-- expression in a mandatory ZBuf extension; a PUT carries `rmw_zenoh`'s
+-- attachment in a ZBuf extension. Values are the extension header byte:
+-- more-bit clear, encoding ZBuf, mandatory bit as declared, then the id.
+extWireExpr :: Int = 95;
+extAttachment :: Int = 67;
+
+-- CLOSE reason codes the profile recognises; any other value is malformed.
+closeGeneric :: Int = 0;
+closeUnsupported :: Int = 1;
+closeInvalid :: Int = 2;
+closeMaxSessions :: Int = 3;
+closeMaxLinks :: Int = 4;
+closeExpired :: Int = 5;
+closeUnresponsive :: Int = 6;
+closeConnectionToSelf :: Int = 7;
+
+-- Why a decoder refuses input. The vocabulary is closed and part of the
+-- contract: a probe reports the wire `name`, a trace records the `code`, and
+-- code 0 is reserved for "accepted". Codes are the position in this list,
+-- counting from one.
+RefusalClass :: type { ident : Text; name : Text; code : Int; };
+
+refusalClasses :: List RefusalClass = {
+  { ident = "EMPTY_BATCH"; name = "empty-batch"; code = 1; };
+  { ident = "LENGTH_EXCEEDS_BATCH"; name = "length-exceeds-batch"; code = 2; };
+  { ident = "TRUNCATED"; name = "truncated"; code = 3; };
+  { ident = "TRAILING_BYTES"; name = "trailing-bytes"; code = 4; };
+  { ident = "UNSUPPORTED_VERSION"; name = "unsupported-version"; code = 5; };
+  { ident = "UNSUPPORTED_WHATAMI"; name = "unsupported-whatami"; code = 6; };
+  { ident = "UNSUPPORTED_RESOLUTION"; name = "unsupported-resolution"; code = 7; };
+  { ident = "UNSUPPORTED_EXTENSION"; name = "unsupported-extension"; code = 8; };
+  { ident = "UNSUPPORTED_MESSAGE"; name = "unsupported-message"; code = 9; };
+  { ident = "MALFORMED_MESSAGE"; name = "malformed-message"; code = 10; };
+  { ident = "OVER_BOUND"; name = "over-bound"; code = 11; };
+  { ident = "LEB128_OVERFLOW"; name = "leb128-overflow"; code = 12; };
+  { ident = "LEB128_NONCANONICAL"; name = "leb128-noncanonical"; code = 13; };
+  { ident = "WILDCARD_KEYEXPR"; name = "wildcard-keyexpr"; code = 14; };
+  { ident = "INVALID_KEYEXPR"; name = "invalid-keyexpr"; code = 15; };
+};
+
+profile ::= {
+  formatVersion =;
+  protocolVersion =;
+  whatamiRouter =;
+  whatamiPeer =;
+  whatamiClient =;
+  defaultResolution =;
+  streamLengthBytes =;
+  maxBatchBytes =;
+  maxKeyBytes =;
+  maxAttachmentBytes =;
+  maxPayloadBytes =;
+  maxCookieBytes =;
+  maxZidBytes =;
+  gidBytes =;
+  leb128MaxBits =;
+  leb128ShortBits =;
+  idInit =;
+  idOpen =;
+  idClose =;
+  idFrame =;
+  idPush =;
+  idDeclare =;
+  idDeclareSubscriber =;
+  idUndeclareSubscriber =;
+  idPut =;
+  flagBit5 =;
+  flagBit6 =;
+  flagExtensions =;
+  extWireExpr =;
+  extAttachment =;
+  closeGeneric =;
+  closeUnsupported =;
+  closeInvalid =;
+  closeMaxSessions =;
+  closeMaxLinks =;
+  closeExpired =;
+  closeUnresponsive =;
+  closeConnectionToSelf =;
+  refusalClasses =;
+};
+
+main :: { write : FsWrite; env : Env; } -> Unit ! { * fs.WholeWriteEffects; * env.GetEffects; }
+  = caps => [
+    root := env.get caps.env "SLIME_ZENOH_PROFILE_BINDINGS_ROOT" ?? ".";
+    bindings := gen.render profile;
+    rustPath := t.join "" { root; "/components/proto/src/zenoh_profile.rs"; };
+    fs.writeAll caps.write rustPath bindings.rust
+  ];
+
+main

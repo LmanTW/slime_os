@@ -32,6 +32,10 @@ NETWORK_SERVICE_CONTRACT = ROOT / "contracts" / "network-service" / "v1"
 NETWORK_SERVICE_BINDING_GENERATOR = (
     ROOT / "scripts" / "generate" / "generate-network-service-bindings.py"
 )
+ZENOH_PROFILE_CONTRACT = ROOT / "contracts" / "zenoh-profile" / "v1"
+ZENOH_PROFILE_BINDING_GENERATOR = (
+    ROOT / "scripts" / "generate" / "generate-zenoh-profile-bindings.py"
+)
 FS_CONTRACT = ROOT / "contracts" / "fs" / "v1"
 FS_BINDING_GENERATOR = ROOT / "scripts" / "generate" / "generate-fs-bindings.py"
 GENERATION_MANAGEMENT_CONTRACT = ROOT / "contracts" / "generation-management" / "v1"
@@ -198,6 +202,12 @@ subprocess.run(
 run("check", str(LINK_DEVICE_CONTRACT / "schema.zt"))
 subprocess.run(
     [sys.executable, str(LINK_DEVICE_BINDING_GENERATOR), "--check"],
+    cwd=ROOT,
+    check=True,
+)
+run("check", str(ZENOH_PROFILE_CONTRACT / "schema.zt"))
+subprocess.run(
+    [sys.executable, str(ZENOH_PROFILE_BINDING_GENERATOR), "--check"],
     cwd=ROOT,
     check=True,
 )

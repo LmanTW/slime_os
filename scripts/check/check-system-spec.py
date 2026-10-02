@@ -239,6 +239,7 @@ SPEC_NATIVE_SYSTEMS = frozenset({
     "sel4-lifetime",
     "sel4-lifetime-exit",
     "sel4-net",
+    "sel4-zenoh",
     "sel4-private-memory-stress",
     "sel4-private-memory-stress-rv64",
     "sel4-private-memory-heap-stress",

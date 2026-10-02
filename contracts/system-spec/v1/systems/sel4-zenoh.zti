@@ -1,0 +1,103 @@
+{
+  formatVersion = 1;
+  name = "sel4-zenoh";
+  generation = 168;
+  targetRequirement = "aarch64-sel4-qemu-virt";
+  bootAction = "wait-set";
+  bootstrapInstance = "init";
+  bootAttempts = 3;
+  components = [ "init"; "network-service"; "ros2-demo-publisher"; "ros2-demo-subscriber"; ];
+  placements = [
+    { component = "init"; spawnBudget = 0; };
+    { component = "network-service"; dependencies = []; };
+    { component = "ros2-demo-publisher"; dependencies = []; };
+    { component = "ros2-demo-subscriber"; dependencies = []; };
+  ];
+  instances = [
+    { name = "init"; executable = "init"; };
+    { name = "network-service"; executable = "network-service"; dependencies = []; bufferBytePages = 4; bufferCount = 4; mappingCount = 4; loanCount = 4; };
+    { name = "ros2-demo-publisher"; executable = "ros2-demo-publisher"; dependencies = []; mappingCount = 2; loanCount = 2; };
+    { name = "ros2-demo-subscriber"; executable = "ros2-demo-subscriber"; dependencies = []; mappingCount = 2; loanCount = 2; };
+  ];
+  grants = [
+    { name = "zenoh-publisher-control"; capabilityKind = "endpoint"; source = "ros2-demo-publisher"; target = "network-service"; rights = [ "send"; "recv"; ]; transferable = false; };
+    { name = "zenoh-publisher-provision"; capabilityKind = "endpoint"; source = "network-service"; target = "ros2-demo-publisher"; rights = [ "send"; "recv"; ]; transferable = true; };
+    { name = "zenoh-subscriber-control"; capabilityKind = "endpoint"; source = "ros2-demo-subscriber"; target = "network-service"; rights = [ "send"; "recv"; ]; transferable = false; };
+    { name = "zenoh-subscriber-provision"; capabilityKind = "endpoint"; source = "network-service"; target = "ros2-demo-subscriber"; rights = [ "send"; "recv"; ]; transferable = true; };
+    { name = "network-service-buffer-factory"; capabilityKind = "sharedBufferFactory"; source = "init"; target = "network-service"; rights = [ "bufferCreate"; ]; transferable = false; };
+  ];
+  slotPins = [
+    { holder = "network-service"; grant = "zenoh-publisher-control"; slot = 2; reason = "encodedLayout"; };
+    { holder = "network-service"; grant = "zenoh-subscriber-control"; slot = 3; reason = "encodedLayout"; };
+    { holder = "network-service"; grant = "network-service-buffer-factory"; slot = 1; reason = "encodedLayout"; };
+    { holder = "network-service"; grant = "zenoh-publisher-provision"; slot = 29; reason = "encodedLayout"; };
+    { holder = "network-service"; grant = "zenoh-subscriber-provision"; slot = 30; reason = "encodedLayout"; };
+  ];
+  extraBindings = [];
+  mintedBindings = [];
+  commandBindings = [];
+  defaultImageBytes = 65536;
+  imageSizes = [ { component = "network-service"; bytes = 262144; }; ];
+  sharedBufferBudgetObject = true;
+  bootLayoutObject = true;
+  interfaceSchemas = [];
+  state = [];
+  notifications = [
+    { name = "zenoh-network-request"; source = "ros2-demo-publisher"; target = "network-service"; };
+    { name = "zenoh-publisher-done"; source = "network-service"; target = "ros2-demo-publisher"; };
+    { name = "zenoh-subscriber-done"; source = "network-service"; target = "ros2-demo-subscriber"; };
+  ];
+  notificationBindings = [
+    { grant = "zenoh-network-request"; holder = "ros2-demo-publisher"; role = "signal"; slot = 0; };
+    { grant = "zenoh-network-request"; holder = "ros2-demo-subscriber"; role = "signal"; slot = 1; };
+    { grant = "zenoh-network-request"; holder = "network-service"; role = "wait"; slot = 0; };
+    { grant = "zenoh-publisher-done"; holder = "network-service"; role = "signal"; slot = 1; };
+    { grant = "zenoh-publisher-done"; holder = "ros2-demo-publisher"; role = "wait"; slot = 1; };
+    { grant = "zenoh-subscriber-done"; holder = "network-service"; role = "signal"; slot = 2; };
+    { grant = "zenoh-subscriber-done"; holder = "ros2-demo-subscriber"; role = "wait"; slot = 0; };
+  ];
+  bootProfiles = [];
+  clockAuthority = [
+    { holder = "network-service"; monotonicRead = true; simulatedAdvance = false; simulatedRead = false; timerQuota = 1; timerUse = true; timerNotification = "zenoh-network-request"; timerBadgeBit = 2; };
+    { holder = "ros2-demo-publisher"; monotonicRead = true; simulatedAdvance = false; simulatedRead = false; timerQuota = 1; timerUse = true; timerNotification = "zenoh-publisher-done"; timerBadgeBit = 3; };
+    { holder = "ros2-demo-subscriber"; monotonicRead = true; simulatedAdvance = false; simulatedRead = false; timerQuota = 1; timerUse = true; timerNotification = "zenoh-subscriber-done"; timerBadgeBit = 3; };
+  ];
+  clockAuthorityObject = true;
+  ioResourceBudget = [];
+  ioResourceBudgetObject = false;
+  networkDestinations = [
+    { holder = "ros2-demo-publisher"; transport = "tcp"; addressKind = "ipv4"; address = "127.0.0.1"; port = 7447; rights = [ "connect"; "send"; "recv"; ]; queueDepth = 4; byteBudget = 4096; timerBudget = 1; retryLimit = 2; reconnectLimit = 0; socketLimit = 1; listenerLimit = 0; dnsRecordLimit = 0; };
+  ];
+  networkDestinationsObject = true;
+  networkApplications = [
+    { holder = "ros2-demo-publisher"; controlBinding = "zenoh-publisher-control"; provisionBinding = "zenoh-publisher-provision"; supervisionBinding = ""; requestNotification = "zenoh-network-request"; completionNotification = "zenoh-publisher-done"; role = "client"; backend = "loopback"; localAddress = "0.0.0.0"; localPort = 0; admittedPeer = ""; admittedPeerAddress = ""; rights = []; backlog = 0; acceptedSocketLimit = 0; byteBudget = 0; timerBudget = 0; queueDepth = 0; retryLimit = 0; reconnectLimit = 0; keepaliveMs = 0; idleTimeoutMs = 10000; hopLimit = 64; nagle = true; };
+    { holder = "ros2-demo-subscriber"; controlBinding = "zenoh-subscriber-control"; provisionBinding = "zenoh-subscriber-provision"; supervisionBinding = ""; requestNotification = "zenoh-network-request"; completionNotification = "zenoh-subscriber-done"; role = "listener"; backend = "loopback"; localAddress = "127.0.0.1"; localPort = 7447; admittedPeer = "ros2-demo-publisher"; admittedPeerAddress = ""; rights = [ "listen"; "send"; "recv"; ]; backlog = 1; acceptedSocketLimit = 1; byteBudget = 8192; timerBudget = 2; queueDepth = 4; retryLimit = 2; reconnectLimit = 0; keepaliveMs = 0; idleTimeoutMs = 10000; hopLimit = 64; nagle = true; };
+  ];
+  networkApplicationsObject = true;
+  networkInterfaces = [];
+  networkInterfacesObject = false;
+  blockRingAuthority = [];
+  blockRingAuthorityObject = false;
+  waitSet = [
+    { waiter = "network-service"; notification = "zenoh-network-request"; badgeBit = 0; kind = "stream"; drainSlot = 2; };
+    { waiter = "network-service"; notification = "zenoh-network-request"; badgeBit = 1; kind = "stream"; drainSlot = 3; };
+    { waiter = "network-service"; notification = "zenoh-network-request"; badgeBit = 2; kind = "timer"; };
+    { waiter = "ros2-demo-publisher"; notification = "zenoh-publisher-done"; badgeBit = 1; kind = "stream"; drainSlot = 0; };
+    { waiter = "ros2-demo-publisher"; notification = "zenoh-publisher-done"; badgeBit = 3; kind = "timer"; };
+    { waiter = "ros2-demo-subscriber"; notification = "zenoh-subscriber-done"; badgeBit = 2; kind = "stream"; drainSlot = 0; };
+    { waiter = "ros2-demo-subscriber"; notification = "zenoh-subscriber-done"; badgeBit = 3; kind = "timer"; };
+  ];
+  waitSetObject = true;
+  lifecyclePolicy = {
+    initialState = "Initialize";
+    terminalState = "Error";
+    transitions = [ { from = "Initialize"; to = "Running"; }; { from = "Running"; to = "Error"; }; ];
+    restarts = [];
+    dependencies = [];
+    parameters = [ { holder = "network-service"; subject = "network-service"; read = true; write = true; }; ];
+  };
+  recording = [];
+  recordingObject = false;
+  deploymentConstraint = "AArch64 seL4 QEMU Zenoh Profile 0 over loopback TCP without a NIC; no router, scouting or physical device claim.";
+  acceptanceCriteria = "Two node components exchange the four declared Counter samples over one Zenoh Profile 0 session on 127.0.0.1:7447.";
+}

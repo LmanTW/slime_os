@@ -1,0 +1,23 @@
+[package]
+name = "slime-component-ros2-demo-subscriber"
+version = "0.1.0"
+edition = "2024"
+publish = false
+rust-version = "1.96"
+build = "build.rs"
+
+[[bin]]
+name = "ros2-demo-subscriber"
+path = "src/main.rs"
+test = false
+
+[dependencies]
+slime-components = { path = "../../lib" }
+slime-proto = { path = "../../proto" }
+slime-rt = { path = "../../runtime" }
+
+[build-dependencies]
+slime-build-support = { path = "../../build-support" }
+
+[lints]
+workspace = true
