@@ -181,6 +181,38 @@ def fail(message: str) -> None:
     raise SystemExit(message)
 
 
+# The one instance the grants table is served to. The root's reader gates by the caller's instance name, as it does for
+# the entropy table, so the builder requires that instance to exist before it emits a table.
+ZENOH_GRANTS_READER_INSTANCE = "zenoh-service"
+
+
+def build_zenoh_grants_table(manifest: dict) -> bytes:
+    """Encode the Zenoh service grants table (zenoh-service-grants-table/v1) from the manifest's `zenohGrants` rows.
+
+    Each row is `{holder, key, publish, subscribe}`, as in the grants record. The encoder refuses a row the grants
+    record refuses, a row that grants nothing and a repeated pair, and it sorts the rows. This function adds what only
+    the manifest knows: the reader instance exists, and every holder is a declared instance other than the reader.
+    """
+    import zenoh_grants_table
+
+    declarations = manifest.get("zenohGrants") or []
+    if not declarations:
+        fail("zenoh grants: the table has no rows")
+    instances = {entry["name"] for entry in manifest["instances"]}
+    if ZENOH_GRANTS_READER_INSTANCE not in instances:
+        fail(f"zenoh grants: no {ZENOH_GRANTS_READER_INSTANCE} instance reads the table")
+    for row in declarations:
+        holder = row.get("holder") if isinstance(row, dict) else None
+        if holder not in instances:
+            fail(f"zenoh grants: holder {holder!r} is not a declared instance")
+        if holder == ZENOH_GRANTS_READER_INSTANCE:
+            fail(f"zenoh grants: {holder} reads the table and may not hold a row")
+    try:
+        return zenoh_grants_table.encode(declarations)
+    except zenoh_grants_table.GrantsTableError as error:
+        fail(str(error))
+
+
 def holder_identity(name: str) -> bytes:
     """Stable per-holder identity, matching `boot_contracts::shared_buffer_budget`."""
     encoded = name.encode("utf-8")

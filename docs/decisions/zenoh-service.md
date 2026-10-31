@@ -1,7 +1,7 @@
 # A shared Zenoh service component
 
 **Status:** Proposed
-**Related work items:** `01a15d1f-1f52-7d62-806f-90ef3c119b59` (a session that holds several subscriptions of its own) and `01a15d1f-26d2-7653-924b-a3f113a718e6` (the grants contract). `01a15d1f-2e50-7f0f-9721-ce4b3b5f5aa8` is the service core, which depends on both. `01a17dad-f158-7efd-bea7-dfdf0288432b` is the core over a link. `01a17dad-fa21-739d-a55e-ef59fa3ce0ea` is the client protocol. `01a18328-71de-7291-922f-87adc0b3a8cc` is the client wire records. `01a18328-7a0d-7507-9850-cbbb0baae9ca` is the client adapter. `01a186d0-03db-7232-a90f-70f0750a5793` is the judge of its failed-attach abort. `01a18804-02b0-73f3-a2c8-1200b39844f1` is the grants table. Zenoh Profile 0 epic: `01a0f5fa-f2c4-71cf-962b-c62cbea2ef68`.
+**Related work items:** `01a15d1f-1f52-7d62-806f-90ef3c119b59` (a session that holds several subscriptions of its own) and `01a15d1f-26d2-7653-924b-a3f113a718e6` (the grants contract). `01a15d1f-2e50-7f0f-9721-ce4b3b5f5aa8` is the service core, which depends on both. `01a17dad-f158-7efd-bea7-dfdf0288432b` is the core over a link. `01a17dad-fa21-739d-a55e-ef59fa3ce0ea` is the client protocol. `01a18328-71de-7291-922f-87adc0b3a8cc` is the client wire records. `01a18328-7a0d-7507-9850-cbbb0baae9ca` is the client adapter. `01a186d0-03db-7232-a90f-70f0750a5793` is the judge of its failed-attach abort. `01a18804-02b0-73f3-a2c8-1200b39844f1` is the grants table. `01a195e7-b4e9-708e-a266-6cf708d4f35a` is the builder step for it. Zenoh Profile 0 epic: `01a0f5fa-f2c4-71cf-962b-c62cbea2ef68`.
 
 ## Context
 
@@ -60,7 +60,8 @@ The planning PR that adds this record also adds items 1 to 3. Each item has an e
 
 A later planning PR is proposed for the steps below. Each needs a `slime-root` change or a booted composition, so none can be measured on the host alone.
 
-8b. **The grants path.** It adds a read label, the manifest and system spec fields, and the builder's use of the encoder. It adds the `slime-root` reader and the runtime wrapper. Together they carry the table from the system spec to the service.
+8a. **The builder step** (`01a195e7-b4e9-708e-a266-6cf708d4f35a`). The generation builder encodes the grants a system spec declares, and the system spec runs it at admission. The slice `--slice grants-builder` pins 7 checks and 14 refusals. See [The builder step](#the-builder-step).
+8b. **The grants path.** It adds a read label and the manifest and system spec schema fields. It adds the `slime-root` reader and the runtime wrapper. Together they carry the table from the system spec to the service.
 9. **The service component.** It wraps the core over a link and serves the control and provisioning endpoints and the loans.
 10. **A booted composition.** Two clients under QEMU.
 
@@ -143,6 +144,20 @@ A review of the planning PR then found four gaps. The uniqueness check covered f
 
 A third review found that the check on the Rust test was a text predicate. A test could mention the variable in a comment, keep the import and print the 40 lines from constants. I ran such a test through the slice and it passed. The decision was that the slice proves the test reads its file. It runs the test a second time on a file in which one honest table is replaced by another. A test that read the file prints the new table's line, and a test that prints constants prints the first run's line again. The judge refuses eleven wrong second runs, and the same test now fails the slice. This costs a second run of the test. The text checks stay. What the second run does not show is which of the other 39 tables the test reads.
 
+## The builder step
+
+The generation builder gains `build_zenoh_grants_table`. It encodes the manifest's `zenohGrants` rows with the table encoder and adds what only a manifest knows. The `zenoh-service` instance exists. Every holder is a declared instance. The reader holds no row. The system spec gains the keys `zenohGrants` and `zenohGrantsObject`, with the entropy authority's shape. They default to empty and false, so no existing spec changes. A populated list requires its object, and the builder runs at admission.
+
+The builder and the spec file are grader paths, so a planning PR can land them. The schema fields are product, so no `.zti` spec can set the keys yet. The exam sets them on a real spec in memory.
+
+- **The reader's name is a choice.** `zenoh-service` follows `entropy-service` and `network-service`. Nothing else fixes it, and the name is one constant in the builder.
+- **The test count stays at 363.** `just test_sel4_root` pins it, and CI runs that recipe on every pull request. Raising it before the tests exist would fail every pull request, so the implementation of the root's side raises it.
+- **The declared object size is inert.** The spec writes `4096` for every resource object. I searched `scripts/`, `boot-contracts` and `slime-root` for a check of it against the payload and found none. The builder packs the payload's own length, so a table of any size up to the payload cap is carried.
+- **The encoder is not a release input.** `RELEASE_INPUTS` names `build-generation.py`, `build-sel4.py` and `elf_delivery.py` by path. The builder also runs `generation_resources.py`, `boot_contracts.py` and now `zenoh_grants_table.py`, and reads the table schema, and none of those is named. An edit to any of them can change a generation's bytes without changing a closure's input identity. This held for the entropy and network encoders before this item. No composition declares grants, so no image can differ yet. Naming them changes a shared list and regenerates every closure source. A later item that enables a composition owns that change, for all of them.
+- **No endpoint check yet.** The entropy builder requires each holder to have one endpoint to the service. The grants builder cannot, because the endpoint grants do not exist until the component does. A later item owns the check.
+
+I measured the builder with seven one-line mutations, each run through the slice. The slice passed the unmutated builder and failed all seven. Six failed because the builder accepted an input it should refuse or changed the bytes. The seventh removed the empty-table check and failed at the wrong boundary. The encoder also refuses an empty list, with its own message. Removing the builder's check therefore changes the message and not the verdict. An earlier version of this run printed `refused` for every mutation without reading the result. It counted any run without a pass line as a refusal. I rewrote the runner to treat only the exam's own failure as a refusal and to run an unmutated control first.
+
 ## Out of scope
 
 - Calls and operations. The fabric provides them. The Zenoh equivalent is the queryable, which Profile 0 refuses and no stock-peer capture shows.
@@ -153,7 +168,7 @@ A third review found that the check on the Rust test was a text predicate. A tes
 
 ## Still open
 
-1. **How the grants reach the service.** The system spec lists network authority. The generation derives it, and a root-served table delivers it. The table form is step 8. The rest is step 8b, and a planning PR cannot carry it, because it changes existing schemas and `slime-root`. There is no registry of resource kinds. A resource is a generation object with an 8-byte magic, and a read label is a number in `contracts/syscall-abi/v1/schema.zt`. The closest model is the entropy authority table.
+1. **How the grants reach the service.** The system spec lists network authority. The generation derives it, and a root-served table delivers it. The table form is step 8 and the builder step is 8a. The rest is step 8b, and a planning PR cannot carry it, because it changes existing schemas and `slime-root`. There is no registry of resource kinds. A resource is a generation object with an 8-byte magic, and a read label is a number in `contracts/syscall-abi/v1/schema.zt`. The closest model is the entropy authority table.
 2. **Large samples.** A ring slot has a fixed size equal to the session's payload bound. The record declares the sample size. A larger sample needs a receiver-bound loan, and the `heap` link configuration fragments it. The component owns both. This record's exams do not judge them.
 3. **Several subscriptions on one key.** The session delivers a sample once when any subscription on its key matches. With two subscriptions on one key, the event names one of them. Each declared key must therefore be subscribed once. The grants contract's count of distinct keys already guarantees it.
 4. **Unequal sessions.** A probe gave the sender three subscriptions and the peer room for two of the sender's. The peer refused the third declaration as `subscriber-limit`, and the sender still counted three. The subscribers exam does not judge this divergence. I did not measure the sender's later frames. A refused frame is rolled back on the peer, so its sequence number is not consumed there, while the sender has spent it. I expect later frames to fail as a sequence mismatch. That is an inference from reading the session. The implementation decides whether the sender learns of the refusal.
