@@ -1,11 +1,11 @@
 # System-image closures as derivations
 
-Steps 1 and 2 of this plan are implemented; step 3 is not. It moves the system-image closure corpus from committed input digests to
+Steps 1 and 2 of this plan are implemented; step 3 is planned. It moves the system-image closure corpus from committed input digests to
 committed sources, so a change to an input tree stops rewriting derived records. The decision and
 its alternatives are in
 [`decisions/system-image-closures-as-derivations.md`](../decisions/system-image-closures-as-derivations.md).
 Step 1, work item `01a18732-ad06-744a-85e5-d50c903828f9`, is implemented. Step 2, work item
-`01a18cca-71e6-74e8-9161-ab2736a67bc1`, is implemented. Step 3 has no item yet.
+`01a18cca-71e6-74e8-9161-ab2736a67bc1`, is implemented. Step 3 is work item `01a19619-7518-7e31-b7d0-e7c8a9edcce3`.
 
 ## Problem
 
@@ -41,11 +41,19 @@ The rules:
 - **Test runs and negative cases.** A test-run record names its closure. A negative build case names
   its base closure.
 - **SDK.** The published SDK carries a fully resolved closure, rendered from the release commit.
-- **Attestations.** After a merge, a workflow builds every closure at the merged commit and writes one
-  note per commit. Two runs that race on the notes ref merge with `git notes merge -s cat_sort_uniq`.
-  For one host class, an equal derivation id must give equal output digests. PR CI does not read
+- **Attestations.** A workflow runs nightly and on demand at the head of `main`. It builds each attested
+  closure into a fresh directory and writes one note on that commit under `refs/notes/image-attestations`,
+  in the `contracts/image-attestation/v1` format. For one host class, an equal derivation id must give
+  equal output digests. The writer refuses, and writes nothing, when an earlier note breaks that. The
+  first version attests six closures, the closure-derivation exam's sample. PR CI does not read
   attestations. It keeps the check that two builds of one closure agree.
-- **Host class.** The host class is the `flake.lock` narHash and the runner architecture.
+- **Concurrent writers.** Runs of the workflow queue in one concurrency group and never cancel a running
+  run. The writer fetches the notes before it compares, never replaces a note, and after a rejected push
+  fetches, compares again and retries.
+- **Host class.** The host class is the Nix store path of the default devShell derivation and `uname -m`.
+  The runner image is recorded but is not part of the class.
+- **A refused run.** A run that finds a mismatch fails and writes no note. A maintainer files the
+  defect.
 
 ## Steps
 
@@ -53,11 +61,11 @@ The rules:
 | --- | --- | --- | --- |
 | 1 | Test-run records and negative build cases name their closure (`contracts/system-test-run/v2`) | 65 + 6 | `just system_test_run_reference_check` |
 | 2 | Closure v3 holds locators only. The resolver is the closure generator, called in memory over the git-visible file set, with the dirty rule. | 103 | `just closure_derivation_check` |
-| 3 | Attestation contract, the notes writer workflow and its check | none; adds evidence across commits | to be admitted |
+| 3 | Attestation contract, the notes writer, its nightly workflow and its check | none; adds evidence across commits | `just image_attestation_check` |
 
 Step 1 precedes step 2, because the runs must stop copying identities before the closures stop
-recording them. Step 2 precedes step 3, because an attestation names a derivation id. A scheduled
-rebuilder of attested commits is deferred.
+recording them. Step 2 precedes step 3, because an attestation names a derivation id. The nightly run
+is the rebuilder: each run rebuilds closures whose derivation ids earlier notes already attest.
 
 ## Interfaces step 2 is judged through
 
@@ -85,6 +93,17 @@ of the repository:
 - Rendering one closure in memory with the existing generator takes 0.02–0.3 s with a warm Zutai
   cache, and 6.4 s for a closure over a computed system. With the cache disabled it takes 9.9 s and
   16.5 s. Every rendered closure equaled the committed file byte for byte.
+
+## Measured feasibility of step 3
+
+These measurements were taken at `6e1e22c9` on one darwin host:
+
+- In a scratch clone, `sel4-channel` builds in 67 s cold and 51 s warm. The two builds' five output
+  digests are equal.
+- `nix eval --raw .#devShells.aarch64-darwin.default.drvPath` takes 3–5 s and prints the same path in
+  two checkouts of one commit.
+- A bare remote's `pre-receive` hook can add a note and reject the push, which is how the exam plays a
+  concurrent writer.
 
 ## Invariants
 
