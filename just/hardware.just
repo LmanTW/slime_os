@@ -118,6 +118,14 @@ zenoh_service_client_check:
 zenoh_service_client_wire_check:
     python3 scripts/check/check-zenoh-profile0.py --slice client-wire
 
+# Judges the generation builder's Zenoh grants table and the system spec admission that runs it. The judge builds the
+# table from a manifest and from a spec, requires the encoder's bytes, the independent struct writer's bytes and a decode
+# back to the declared rows, and refuses each input the contract and the manifest forbid. The expectation is
+# scripts/lib/zenoh_grants_builder_exam.py. Nothing here needs a Zenoh service instance to exist.
+[group('hardware')]
+zenoh_service_grants_builder_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice grants-builder
+
 # Judges the Zenoh service grants table, the form of the grants that the generation carries and the root serves. The
 # judge writes each table again with Python's struct from the schema's layout, requires the encoder, the generated wire
 # records and the Rust decoder to agree with it, and refuses each corruption of a table. The expectation is

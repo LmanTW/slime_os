@@ -34,6 +34,7 @@ import system_spec_contract as CONTRACT
 import private_memory_policy
 from component_spec import admit_specs, interface_catalogue
 from harness import ROOT, load_script
+import zenoh_grants_builder_exam
 from system_spec import (
     DERIVED_GENERATION_FIXTURES,
     COMPUTED_SYSTEM_SOURCES,
@@ -2005,6 +2006,7 @@ def entropy_authority_controls(system) -> int:
 
 
 refusals += entropy_authority_controls(systems["sel4-entropy"])
+refusals += zenoh_grants_builder_exam.controls(systems["sel4-zenoh"])[1]
 
 parameter_instance = {"name": "network-service", "bindings": []}
 parameter_executable = {"role": "service", "spawnBudget": 0}

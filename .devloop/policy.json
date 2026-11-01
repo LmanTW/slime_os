@@ -239,6 +239,7 @@
     "scripts/lib/zenoh_client_wire_exam.py",
     "scripts/lib/zenoh_exchange.py",
     "scripts/lib/zenoh_fragment.py",
+    "scripts/lib/zenoh_grants_builder_exam.py",
     "scripts/lib/zenoh_grants_exam.py",
     "scripts/lib/zenoh_grants_table.py",
     "scripts/lib/zenoh_grants_table_exam.py",

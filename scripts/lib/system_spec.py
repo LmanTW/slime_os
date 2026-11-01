@@ -225,6 +225,8 @@ _SPEC_FIELDS = {
     "networkApplicationsObject",
     "entropyAuthority",
     "entropyAuthorityObject",
+    "zenohGrants",
+    "zenohGrantsObject",
     "blockRingAuthority",
     "blockRingAuthorityObject",
     "waitSet",
@@ -290,7 +292,8 @@ def _load(path: Path, contract: ModuleType) -> dict:
     # the same declaration as an empty one without an object.
     _DEFAULTED_FIELDS = {"networkInterfaces": [], "networkInterfacesObject": False,
                          "networkApplications": [], "networkApplicationsObject": False,
-                         "entropyAuthority": [], "entropyAuthorityObject": False}
+                         "entropyAuthority": [], "entropyAuthorityObject": False,
+                         "zenohGrants": [], "zenohGrantsObject": False}
     unexpected = set(value) - _SPEC_FIELDS
     missing = _SPEC_FIELDS - set(value) - _OPTIONAL_FIELDS - set(_DEFAULTED_FIELDS)
     if unexpected or missing:
@@ -938,6 +941,9 @@ def _validate_authority_sections(spec: dict, admitted: set[str]) -> None:
     for entry in spec["entropyAuthority"]:
         if entry["holder"] not in admitted:
             _fail(f"entropyAuthority: holder {entry['holder']!r} is not admitted")
+    for entry in spec["zenohGrants"]:
+        if entry["holder"] not in admitted:
+            _fail(f"zenohGrants: holder {entry['holder']!r} is not admitted")
     for entry in spec["waitSet"]:
         if entry["waiter"] not in admitted:
             _fail(f"waitSet: waiter {entry['waiter']!r} is not admitted")
@@ -1256,6 +1262,7 @@ def derive_manifest(system: CompiledSystem) -> dict:
         ("networkInterfacesObject", "network-interface"),
         ("networkApplicationsObject", "network-application"),
         ("entropyAuthorityObject", "entropy-authority"),
+        ("zenohGrantsObject", "zenoh-grants"),
         ("blockRingAuthorityObject", "block-ring-authority"),
         ("waitSetObject", "wait-set"),
         ("recordingObject", "recording-policy"),
@@ -1356,6 +1363,16 @@ def derive_manifest(system: CompiledSystem) -> dict:
             _fail(f"entropyAuthority: {error}")
     elif spec["entropyAuthority"]:
         _fail("entropyAuthority: populated authority requires its resource object")
+    if spec["zenohGrantsObject"]:
+        manifest["zenohGrants"] = spec["zenohGrants"]
+        # The encoder judges the rows together with the instances; running it here refuses a bad table at spec
+        # admission rather than only when an image is built.
+        try:
+            _builder.build_zenoh_grants_table(manifest)
+        except SystemExit as error:
+            _fail(f"zenohGrants: {error}")
+    elif spec["zenohGrants"]:
+        _fail("zenohGrants: populated grants require their resource object")
     if spec["blockRingAuthorityObject"]:
         manifest["blockRingAuthority"] = spec["blockRingAuthority"]
     if spec["waitSetObject"]:
