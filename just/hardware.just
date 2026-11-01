@@ -126,6 +126,15 @@ zenoh_service_client_wire_check:
 zenoh_service_grants_builder_check:
     python3 scripts/check/check-zenoh-profile0.py --slice grants-builder
 
+# Judges the path that carries the Zenoh grants table from the generation to the Zenoh service. The judge requires the
+# read label in the contract and its generated outputs, the manifest and system spec fields, the `slime-root` reader
+# that serves the table to the instance named `zenoh-service`, and the runtime wrapper. It runs the reader's two tests
+# alone under the AArch64 recipe `test_sel4_root` uses. The expectation is scripts/lib/zenoh_grants_reader_exam.py. The
+# recipe fails until the implementation lands.
+[group('hardware')]
+zenoh_service_grants_reader_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice grants-reader
+
 # Judges the Zenoh service grants table, the form of the grants that the generation carries and the root serves. The
 # judge writes each table again with Python's struct from the schema's layout, requires the encoder, the generated wire
 # records and the Rust decoder to agree with it, and refuses each corruption of a table. The expectation is

@@ -121,6 +121,7 @@ import zenoh_client_abort_exam
 import zenoh_client_io_exam
 import zenoh_client_wire_exam
 import zenoh_grants_builder_exam
+import zenoh_grants_reader_exam
 import zenoh_grants_table_exam
 import zenoh_service_exam
 import zenoh_service_link_exam
@@ -2164,6 +2165,32 @@ def grants_builder_main(controls_only: bool) -> int:
     return 0
 
 
+def grants_reader_main(controls_only: bool) -> int:
+    """The product side of the grants path. The exam's controls run on synthetic files and a synthetic transcript. The
+    full run reads the real files and runs the two `slime-root` tests alone, so it fails until the reader lands."""
+    exam = zenoh_grants_reader_exam
+    try:
+        positive, refusals = exam.controls()
+        if positive != exam.PINNED_CASES:
+            fail(f"grants-reader: {positive} honest checks, the checker pins {exam.PINNED_CASES}")
+        if refusals != exam.PINNED_CONTROLS:
+            fail(f"grants-reader: {refusals} refusals, the checker pins {exam.PINNED_CONTROLS}")
+        if controls_only:
+            print(f"zenoh profile 0 grants-reader judge: refused {refusals} corrupted inputs")
+            return 0
+        held = exam.check_facts(exam.read_file)
+        ran = exam.judge_run(exam.run_reader_tests())
+    except exam.ReaderExamError as error:
+        fail(f"grants-reader: {error}")
+    cases = held + (1 if ran == len(exam.TESTS) else 0)
+    if cases != exam.PINNED_CASES:
+        fail(f"grants-reader: {cases} cases, the checker pins {exam.PINNED_CASES}")
+    print(f"[zenoh-profile0] slice=grants-reader cases={cases} refusals={refusals} controls={refusals}")
+    devloop_observations.record(casesObserved=cases, negativeControlsRefused=refusals)
+    print("zenoh profile 0 grants-reader check: the label, the schema fields, the root reader and the wrapper are in place and the reader's tests pass")
+    return 0
+
+
 GRANTS_TABLE_TEST = "every_table_decodes_to_its_rows_or_is_refused"
 TABLE_LINE = re.compile(r"\[zenoh-exam\] (grantstable .*)$")
 
@@ -2385,7 +2412,7 @@ def composition_main(controls_only: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "subscribers", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-builder", "service", "service-link"), required=True)
+    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "subscribers", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-builder", "grants-reader", "service", "service-link"), required=True)
     parser.add_argument("--controls-only", action="store_true")
     arguments = parser.parse_args()
     if arguments.slice == "composition":
@@ -2414,6 +2441,8 @@ def main() -> int:
         return grants_table_main(arguments.controls_only)
     if arguments.slice == "grants-builder":
         return grants_builder_main(arguments.controls_only)
+    if arguments.slice == "grants-reader":
+        return grants_reader_main(arguments.controls_only)
     if arguments.slice == "service":
         return service_main(arguments.controls_only)
     if arguments.slice == "service-link":
