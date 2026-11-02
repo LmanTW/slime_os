@@ -176,6 +176,20 @@ impl<const N: usize, const P: usize> Ring<N, P> {
         }
     }
 
+    /// The item `take` would return next, without taking it.
+    fn peek(&self) -> Option<Item<P>> {
+        if self.lost > 0 {
+            return Some(Item::Lost { count: self.lost });
+        }
+        if self.held == 0 {
+            return None;
+        }
+        self.slots
+            .get(usize::from(self.head))
+            .copied()
+            .map(Item::Sample)
+    }
+
     fn take(&mut self) -> Option<Item<P>> {
         if self.lost > 0 {
             let count = self.lost;
@@ -480,6 +494,39 @@ impl<'k, const H: usize, const N: usize, const P: usize, const R: usize> Core<'k
             .get_mut(holder)
             .ok_or(ServiceError::UnknownHolder)?;
         Ok(ring.take())
+    }
+
+    /// The item `take` would return next for `holder`, left in its ring. A caller whose buffer is too small for
+    /// a sample looks first, so the sample stays and nothing is lost.
+    pub fn peek(&self, holder: usize) -> Result<Option<Item<P>>, ServiceError> {
+        let ring = self.rings.get(holder).ok_or(ServiceError::UnknownHolder)?;
+        Ok(ring.peek())
+    }
+
+    /// The index of `holder`'s own row that a sample of `subscription` belongs to, counted among that holder's
+    /// rows in grant order. A holder sees its rows by this index and never by key.
+    pub fn row_of(&self, holder: usize, subscription: u16) -> Option<usize> {
+        self.rows
+            .iter()
+            .filter(|row| usize::from(row.holder) == holder)
+            .position(|row| row.subscribe && row.subscription == subscription)
+    }
+
+    /// How many rows `holder` has.
+    pub fn row_count(&self, holder: usize) -> usize {
+        self.rows
+            .iter()
+            .filter(|row| usize::from(row.holder) == holder)
+            .count()
+    }
+
+    /// The key of `holder`'s row `index`, and whether the row grants publish.
+    pub fn row_key(&self, holder: usize, index: usize) -> Option<(&'k str, bool)> {
+        self.rows
+            .iter()
+            .filter(|row| usize::from(row.holder) == holder)
+            .nth(index)
+            .map(|row| (row.key, row.publish))
     }
 
     /// The samples `holder`'s ring holds and the loss it has counted.

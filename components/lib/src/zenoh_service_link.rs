@@ -7,7 +7,7 @@
 //! `scripts/lib/zenoh_service_link_exam.py` the bytes, the order, the counts and the classes.
 
 mod behaviour;
-mod pair;
+pub(crate) mod pair;
 
 use crate::zenoh_link::{ByteLink, Error as LinkError, LinkHandle, LinkOf, Notice};
 use crate::zenoh_profile0::encode;
