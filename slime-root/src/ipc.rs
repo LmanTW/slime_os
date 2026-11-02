@@ -1343,8 +1343,7 @@ pub fn copy_entropy_authority_rows(
     Some(written / ENTROPY_AUTHORITY_ROW_BYTES)
 }
 
-pub const ZENOH_GRANTS_ROW_BYTES: usize =
-    slime_proto::zenoh_service_grants_table_wire::ENTRY_BYTES;
+pub const ZENOH_GRANTS_ROW_BYTES: usize = slime_proto::zenoh_service_grants_table_wire::ENTRY_BYTES;
 pub const ZENOH_GRANTS_ROWS_PER_CALL: usize =
     crate::transfer_window::MAX_STAGED_ARRAY_BYTES / ZENOH_GRANTS_ROW_BYTES;
 /// The one instance the grants table is served to.
@@ -2564,16 +2563,28 @@ mod tests {
         let table = Table::decode(&bytes[..len]).unwrap();
         let mut out = [0u8; 2 * ZENOH_GRANTS_ROWS_PER_CALL * ZENOH_GRANTS_ROW_BYTES];
         let service = ZENOH_GRANTS_READER_INSTANCE;
-        assert_eq!(copy_zenoh_grants_rows(&table, service, 0, &mut out), Some(6));
-        assert_eq!(copy_zenoh_grants_rows(&table, service, 6, &mut out), Some(1));
+        assert_eq!(
+            copy_zenoh_grants_rows(&table, service, 0, &mut out),
+            Some(6)
+        );
+        assert_eq!(
+            copy_zenoh_grants_rows(&table, service, 6, &mut out),
+            Some(1)
+        );
         assert_eq!(&out[..ZENOH_GRANTS_ROW_BYTES], table.row_bytes(6).unwrap());
-        assert_eq!(copy_zenoh_grants_rows(&table, service, 7, &mut out), Some(0));
+        assert_eq!(
+            copy_zenoh_grants_rows(&table, service, 7, &mut out),
+            Some(0)
+        );
         assert_eq!(
             copy_zenoh_grants_rows(&table, service, usize::MAX, &mut out),
             Some(0)
         );
         let mut short = [0u8; 2 * ZENOH_GRANTS_ROW_BYTES + ZENOH_GRANTS_ROW_BYTES / 2];
-        assert_eq!(copy_zenoh_grants_rows(&table, service, 0, &mut short), Some(2));
+        assert_eq!(
+            copy_zenoh_grants_rows(&table, service, 0, &mut short),
+            Some(2)
+        );
         assert_eq!(copy_zenoh_grants_rows(&table, service, 0, &mut []), Some(0));
     }
 }

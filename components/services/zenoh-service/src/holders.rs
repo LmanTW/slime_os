@@ -11,9 +11,13 @@ use slime_components::zenoh_service_server::{Answer, REQUEST_BYTES, Server, deni
 use slime_proto::io_queue::{self, REQUEST_PAYLOAD_BYTES};
 use slime_proto::io_queue_ring::{Outstanding, Queue, QueueError};
 use slime_proto::zenoh_service_client as wire;
-use slime_proto::zenoh_service_client_wire::{WireServiceCompletion, WireServiceLoan, WireServiceRequest};
+use slime_proto::zenoh_service_client_wire::{
+    WireServiceCompletion, WireServiceLoan, WireServiceRequest,
+};
 use slime_rt::console_line::Line;
-use slime_rt::{ERR_SUCCESS, ERR_WOULDBLOCK, MAX_CAPS_PER_MSG, MAX_MSG, monotonic_read, recv, send, yield_now};
+use slime_rt::{
+    ERR_SUCCESS, ERR_WOULDBLOCK, MAX_CAPS_PER_MSG, MAX_MSG, monotonic_read, recv, send, yield_now,
+};
 
 const FACTORY_SLOT: u32 = 1;
 const BASE: u64 = 0x0000_001a_0000_0000;
@@ -58,7 +62,8 @@ impl Region {
     }
 
     fn delegate(&mut self, peer: u32, role: u8, length: usize) -> Result<(), ()> {
-        let loan = slime_rt::shared_buffer_loan(self.buffer.slot, peer, 0, length as u64, true).map_err(|_| ())?;
+        let loan = slime_rt::shared_buffer_loan(self.buffer.slot, peer, 0, length as u64, true)
+            .map_err(|_| ())?;
         self.lease = Some(loan.id);
         let descriptor = WireServiceLoan {
             magic: MAGIC,
@@ -75,7 +80,8 @@ impl Region {
             loan.slot,
             slime_rt::CapabilityDisposition::Move,
             slime_proto::capability_transfer::OBJECT_KIND_SHARED_BUFFER_LOAN,
-            boot_contracts::generation::RIGHT_BUFFER_MAP | boot_contracts::generation::RIGHT_BUFFER_WRITE,
+            boot_contracts::generation::RIGHT_BUFFER_MAP
+                | boot_contracts::generation::RIGHT_BUFFER_WRITE,
             &descriptor.encode(),
         ) != ERR_SUCCESS
         {
@@ -120,7 +126,9 @@ struct Session {
 
 impl Session {
     fn open(index: usize, peer: u32, epoch: u64) -> Result<Self, ()> {
-        let base = BASE.checked_add((index as u64).checked_mul(STRIDE).ok_or(())?).ok_or(())?;
+        let base = BASE
+            .checked_add((index as u64).checked_mul(STRIDE).ok_or(())?)
+            .ok_or(())?;
         let data_base = base.checked_add(RING_BYTES as u64).ok_or(())?;
         let mut ring = Region::create(wire::RING_PAGES as usize, base, RING_BYTES)?;
         let mut data = Region::create(wire::DATA_PAGES as usize, data_base, DATA_BYTES)?;
@@ -142,7 +150,8 @@ impl Session {
     }
 
     fn close(mut self) -> bool {
-        self.outstanding.settle_all(io_queue::STATUS_PEER_DEAD, |_| {});
+        self.outstanding
+            .settle_all(io_queue::STATUS_PEER_DEAD, |_| {});
         self.queue.mark_driver_dead();
         let (mut ring, mut data) = {
             let Self { ring, data, .. } = self;
@@ -211,13 +220,17 @@ pub fn serve<'k>(
         let now = clock.millis(ticks.saturating_sub(base));
         let _ = link.pump(handle, now as u64);
         let _ = core.drain_notices(link);
-        let _ = over.settle(core, link).map(|settled| matches!(settled, Settled::Idle));
+        let _ = over
+            .settle(core, link)
+            .map(|settled| matches!(settled, Settled::Idle));
         while over.declare_next(core, link, handle).unwrap_or(false) {
             let _ = link.pump(handle, now as u64);
             let _ = over.settle(core, link);
         }
         for index in 0..names.count {
-            let Some(end) = ends[index].as_ref() else { continue };
+            let Some(end) = ends[index].as_ref() else {
+                continue;
+            };
             let name = &names.bytes[index][..names.lens[index]];
             let mut bytes = [0u8; MAX_MSG];
             let mut caps = [0u64; MAX_CAPS_PER_MSG];
@@ -274,7 +287,8 @@ fn control(
 ) -> Answer {
     let answer = server.control(core, index, bytes);
     let op = i64::from(WireServiceRequest::decode(bytes).map_or(0, |request| request.op));
-    let status = WireServiceCompletion::decode(&answer.completion).map_or(-1, |completion| completion.status);
+    let status = WireServiceCompletion::decode(&answer.completion)
+        .map_or(-1, |completion| completion.status);
     if op == wire::OP_ATTACH && status == 0 {
         *epoch += 1;
         match Session::open(index, provision, *epoch) {
@@ -324,7 +338,11 @@ fn drive<'k>(
         session.queue.epoch(),
     ) || session
         .outstanding
-        .admit(submission.request_id, submission.slice.lease, submission.slice.length)
+        .admit(
+            submission.request_id,
+            submission.slice.lease,
+            submission.slice.length,
+        )
         .is_err()
         || session.outstanding.start(submission.request_id).is_err()
     {
@@ -365,9 +383,18 @@ fn drive<'k>(
     };
     if session
         .queue
-        .complete(submission.request_id, status, transferred, &answer.completion, false)
+        .complete(
+            submission.request_id,
+            status,
+            transferred,
+            &answer.completion,
+            false,
+        )
         .is_err()
-        || session.outstanding.settle(submission.request_id, status).is_err()
+        || session
+            .outstanding
+            .settle(submission.request_id, status)
+            .is_err()
     {
         fail(b"completion");
     }

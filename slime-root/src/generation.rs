@@ -762,7 +762,10 @@ pub(crate) fn entropy_authority_object<'a>(
 pub(crate) fn zenoh_grants_object<'a>(
     generation: &Generation<'a>,
 ) -> Option<
-    Result<slime_proto::zenoh_service_grants_table::Table<'a>, slime_proto::zenoh_service_grants_table::DecodeError>,
+    Result<
+        slime_proto::zenoh_service_grants_table::Table<'a>,
+        slime_proto::zenoh_service_grants_table::DecodeError,
+    >,
 > {
     for index in 0..generation.object_count() {
         let object = generation.object(index).ok()?;
@@ -771,7 +774,9 @@ pub(crate) fn zenoh_grants_object<'a>(
                 .bytes
                 .starts_with(&slime_proto::zenoh_service_grants_table_wire::TABLE_MAGIC)
         {
-            return Some(slime_proto::zenoh_service_grants_table::Table::decode(object.bytes));
+            return Some(slime_proto::zenoh_service_grants_table::Table::decode(
+                object.bytes,
+            ));
         }
     }
     None

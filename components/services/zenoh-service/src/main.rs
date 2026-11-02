@@ -14,12 +14,15 @@
 
 mod holders;
 
-use slime_components::network_io::{Connection as ServiceConnection, NetworkIo, NetworkNotifications};
+use slime_components::network_io::{
+    Connection as ServiceConnection, NetworkIo, NetworkNotifications,
+};
 use slime_components::tick_clock::TickClock;
 use slime_components::zenoh_link::LinkOf;
 use slime_components::zenoh_node::{self as node, Connection, Stream};
 use slime_components::zenoh_profile0::session::{Config, Params, Role};
-use slime_components::zenoh_service::{Core, OverLink, Row};
+use slime_components::zenoh_service::Core;
+use slime_components::zenoh_service::{OverLink, Row};
 use slime_components::zenoh_service_server::Server;
 use slime_proto::network_service as net;
 use slime_proto::zenoh_service_grants_table::Table;
@@ -53,7 +56,10 @@ pub struct Wire<'a, 'b> {
 }
 
 impl Connection for Wire<'_, '_> {
-    fn send(&mut self, bytes: &[u8]) -> Result<node::Reply, slime_components::zenoh_link::LinkError> {
+    fn send(
+        &mut self,
+        bytes: &[u8],
+    ) -> Result<node::Reply, slime_components::zenoh_link::LinkError> {
         self.io
             .send_nonblocking(self.connection, bytes)
             .map(|reply| reply_of(&reply))
@@ -179,7 +185,15 @@ fn main(_startup_arg: u32) {
         lens: name_lens,
         count: holder_count,
     };
-    holders::serve(&mut core, &mut over, &mut server, &mut link, handle, &clock, &names);
+    holders::serve(
+        &mut core,
+        &mut over,
+        &mut server,
+        &mut link,
+        handle,
+        &clock,
+        &names,
+    );
     let _ = link.close(handle, 0);
     exit(0)
 }
