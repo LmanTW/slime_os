@@ -135,6 +135,32 @@ zenoh_service_grants_builder_check:
 zenoh_service_grants_reader_check:
     python3 scripts/check/check-zenoh-profile0.py --slice grants-reader
 
+# Judges the server half of the Zenoh service client protocol. The Rust test sends the client's requests to the server
+# half and prints each answer. The judge writes every request and completion again with Python's struct from the
+# schema's layout, requires the same bytes, and requires that no completion is one the client refuses. The expectation
+# is scripts/lib/zenoh_server_exam.py. The recipe fails until the server half lands.
+[group('hardware')]
+zenoh_service_server_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice server
+
+# Judges that the Zenoh service component exists and is registered. The judge requires the crate and its manifest, the
+# release profile, the component spec, the library export of the server half, and the calls that read the grants,
+# decode them, own the link and use the server half. The expectation is scripts/lib/zenoh_service_component_exam.py.
+# The recipe fails until the component lands.
+[group('hardware')]
+zenoh_service_component_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice service-component
+
+# Judges the composition that runs the Zenoh service with two holders, and boots it. The judge requires the system
+# spec, the manifest derived from it, the composition inventory row and the arm of the network plane checker, and then
+# runs that arm under QEMU. The arm requires the holders to exchange through the service and requires the service to
+# refuse a key that a holder lacks. The expectation is scripts/lib/zenoh_service_component_exam.py and the marker
+# chains in scripts/check/check-sel4-io-network-plane.py. The recipe is in no aggregate. It fails until the
+# composition lands.
+[group('hardware')]
+zenoh_service_booted_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice service-booted
+
 # Judges the Zenoh service grants table, the form of the grants that the generation carries and the root serves. The
 # judge writes each table again with Python's struct from the schema's layout, requires the encoder, the generated wire
 # records and the Rust decoder to agree with it, and refuses each corruption of a table. The expectation is

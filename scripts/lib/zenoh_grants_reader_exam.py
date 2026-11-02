@@ -20,6 +20,7 @@ import subprocess
 import tomllib
 from collections.abc import Callable
 
+import zenoh_facts as facts
 from harness import ROOT
 
 FILTER = "zenoh_grants"
@@ -103,37 +104,17 @@ PINNED_FACTS = len(FACTS)
 
 def check_facts(read: Callable[[str], str]) -> int:
     """Every fact holds in the text `read` returns for its path. Returns how many facts held."""
-    for name, path, pattern, _example in FACTS:
-        _need(re.search(pattern, read(path), re.MULTILINE) is not None, f"{name}: {path} does not match {pattern}")
-    return len(FACTS)
-
-
-def honest_corpus() -> dict[str, str]:
-    """A synthetic file for each path, holding the example line of every fact. The judge must accept it."""
-    corpus: dict[str, str] = {}
-    for name, path, pattern, example in FACTS:
-        _need(re.search(pattern, example, re.MULTILINE) is not None, f"{name}: its example does not match its own pattern")
-        corpus[path] = corpus.get(path, "") + example + "\n"
-    return corpus
+    try:
+        return facts.check(FACTS, read)
+    except facts.FactsError as error:
+        raise ReaderExamError(str(error)) from error
 
 
 def fact_controls() -> int:
-    """Remove each fact's example from the honest corpus. The judge has to refuse by naming that fact."""
-    corpus = honest_corpus()
-    _need(check_facts(corpus.__getitem__) == PINNED_FACTS, "the honest corpus did not hold every fact")
-    refused = 0
-    for name, path, _pattern, example in FACTS:
-        altered = dict(corpus)
-        altered[path] = corpus[path].replace(example + "\n", "", 1)
-        _need(altered[path] != corpus[path], f"{name}: the control removed nothing")
-        try:
-            check_facts(altered.__getitem__)
-        except ReaderExamError as error:
-            _need(str(error).startswith(f"{name}:"), f"{name}: refused at the wrong fact: {error}")
-        else:
-            raise ReaderExamError(f"{name}: the judge accepted a corpus without it")
-        refused += 1
-    return refused
+    try:
+        return facts.controls(FACTS)
+    except facts.FactsError as error:
+        raise ReaderExamError(str(error)) from error
 
 
 def judge_run(output: str) -> int:
@@ -186,8 +167,6 @@ PINNED_CASES = PINNED_FACTS + 1
 
 def controls() -> tuple[int, int]:
     """Returns (honest checks passed, refusals) on synthetic input. Needs no source file and no toolchain."""
-    honest = honest_corpus()
-    _need(check_facts(honest.__getitem__) == PINNED_FACTS, "the honest corpus did not hold every fact")
     _need(judge_run(honest_run()) == 2, "the honest run was not read as two tests")
     return PINNED_FACTS + 1, fact_controls() + run_controls()
 
