@@ -135,6 +135,7 @@
     "scripts/check/check-system-test-run-references.py",
     "scripts/check/check-system-test-run.py",
     "scripts/check/check-work-items.py",
+    "scripts/check/check-zenoh-grants-builder.py",
     "scripts/check/check-zenoh-profile0.py",
     "scripts/check/contracts/slot_pin_reasons.py",
     "scripts/check/devloop-approval.py",
