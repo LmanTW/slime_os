@@ -60,7 +60,7 @@ The planning PR that adds this record also adds items 1 to 3. Each item has an e
 
 A later planning PR is proposed for the steps below. Each needs a `slime-root` change or a booted composition, so none can be measured on the host alone.
 
-8a. **The builder step** (`01a195e7-b4e9-708e-a266-6cf708d4f35a`). The generation builder encodes the grants a system spec declares, and the system spec runs it at admission. The slice `--slice grants-builder` pins 7 checks and 14 refusals. See [The builder step](#the-builder-step).
+8a. **The builder step** (`01a195e7-b4e9-708e-a266-6cf708d4f35a`). The generation builder encodes the grants a system spec declares, and the system spec runs it at admission. `just zenoh_service_grants_builder_check` runs `scripts/check/check-zenoh-grants-builder.py`, which pins 7 checks and 14 refusals. See [The builder step](#the-builder-step).
 8b. **The grants path.** It adds a read label and the manifest and system spec schema fields. It adds the `slime-root` reader and the runtime wrapper. Together they carry the table from the system spec to the service.
 9. **The service component.** It wraps the core over a link and serves the control and provisioning endpoints and the loans.
 10. **A booted composition.** Two clients under QEMU.

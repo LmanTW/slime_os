@@ -124,7 +124,7 @@ zenoh_service_client_wire_check:
 # scripts/lib/zenoh_grants_builder_exam.py. Nothing here needs a Zenoh service instance to exist.
 [group('hardware')]
 zenoh_service_grants_builder_check:
-    python3 scripts/check/check-zenoh-profile0.py --slice grants-builder
+    python3 scripts/check/check-zenoh-grants-builder.py
 
 # Judges the path that carries the Zenoh grants table from the generation to the Zenoh service. The judge requires the
 # read label in the contract and its generated outputs, the manifest and system spec fields, the `slime-root` reader

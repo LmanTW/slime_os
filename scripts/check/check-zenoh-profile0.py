@@ -120,7 +120,6 @@ import zenoh_client_exam
 import zenoh_client_abort_exam
 import zenoh_client_io_exam
 import zenoh_client_wire_exam
-import zenoh_grants_builder_exam
 import zenoh_grants_reader_exam
 import zenoh_server_exam
 import zenoh_service_arm
@@ -2147,27 +2146,6 @@ def client_abort_main(controls_only: bool) -> int:
     return 0
 
 
-GRANTS_BUILDER_CASES = 7
-GRANTS_BUILDER_CONTROLS = 14
-
-
-def grants_builder_main(controls_only: bool) -> int:
-    """The generation builder's grants table: seven checks that it emits the right bytes, and fourteen refusals. The exam
-    exits through `SystemExit` at the first thing that does not hold, so a run that returns has passed every check."""
-    try:
-        positive, refusals = zenoh_grants_builder_exam.controls()
-    except SystemExit as error:
-        fail(str(error))
-    if positive != GRANTS_BUILDER_CASES:
-        fail(f"grants-builder: {positive} checks passed, the checker pins {GRANTS_BUILDER_CASES}")
-    if refusals != GRANTS_BUILDER_CONTROLS:
-        fail(f"grants-builder: {refusals} refusals, the checker pins {GRANTS_BUILDER_CONTROLS}")
-    print(f"[zenoh-profile0] slice=grants-builder cases={positive} refusals={refusals} controls={refusals}")
-    devloop_observations.record(casesObserved=positive, negativeControlsRefused=refusals)
-    print("zenoh profile 0 grants-builder check: the builder emits the encoder's bytes and refuses what the contract and the manifest forbid")
-    return 0
-
-
 def grants_reader_main(controls_only: bool) -> int:
     """The product side of the grants path. The exam's controls run on synthetic files and a synthetic transcript. The
     full run reads the real files and runs the two `slime-root` tests alone, so it fails until the reader lands."""
@@ -2528,7 +2506,7 @@ def composition_main(controls_only: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "subscribers", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-builder", "grants-reader", "server", "service-component", "service-booted", "service", "service-link"), required=True)
+    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "subscribers", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "service-component", "service-booted", "service", "service-link"), required=True)
     parser.add_argument("--controls-only", action="store_true")
     arguments = parser.parse_args()
     if arguments.slice == "composition":
@@ -2555,8 +2533,6 @@ def main() -> int:
         return client_abort_main(arguments.controls_only)
     if arguments.slice == "grants-table":
         return grants_table_main(arguments.controls_only)
-    if arguments.slice == "grants-builder":
-        return grants_builder_main(arguments.controls_only)
     if arguments.slice == "grants-reader":
         return grants_reader_main(arguments.controls_only)
     if arguments.slice == "server":
