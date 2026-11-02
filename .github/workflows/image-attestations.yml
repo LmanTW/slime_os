@@ -1,0 +1,47 @@
+name: Image attestations
+
+# Nightly and on demand, attest the sampled system-image closures at the head of `main`. The writer builds
+# each closure clean, refuses when an earlier note of the same derivation id and host class records other
+# output digests, and pushes one `contracts/image-attestation/v1` note on the commit to
+# `refs/notes/image-attestations`. A refused run fails and writes no note.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+# Runs queue in one group and never cancel each other, so one writer at a time reads, compares and pushes
+# the notes ref. The writer still fetches and compares again after a rejected push.
+concurrency:
+  group: image-attestations
+  cancel-in-progress: false
+
+# Writing `refs/notes/image-attestations` is the only write this workflow makes.
+permissions:
+  contents: write
+
+jobs:
+  attest:
+    name: Attest sampled system images
+    runs-on: ubuntu-24.04-arm
+    # Six cold closure builds; roughly four times a single cold build's observed time, so a stalled build
+    # fails instead of holding the concurrency group.
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      # An attestation names the commit it was built from; only `main` is attested.
+      - name: Refuse a ref other than main
+        run: test "$GITHUB_REF" = refs/heads/main
+      # A partition nothing saves, so every run builds from a cold Cargo target rather than reusing an
+      # earlier run's outputs.
+      - uses: ./.github/actions/slime-env
+        with:
+          build-cache-key: image-attestations
+          build-save: 'false'
+      - name: Attest
+        run: >-
+          nix develop --command python3 scripts/build/attest-system-images.py
+          --notes-ref refs/notes/image-attestations --remote origin --output "$RUNNER_TEMP/attest"
+          sel4-call sel4-channel sel4-io-driver-reset-in-flight sel4-private-memory-adaptive-rv64
+          sel4-private-memory-stress-injected sel4-zenoh

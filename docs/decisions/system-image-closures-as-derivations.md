@@ -1,15 +1,15 @@
 # System-image closures commit sources, not in-tree digests
 
 **Status:** Proposed
-**Related work item:** `01a18732-ad06-744a-85e5-d50c903828f9` (step 1)
+**Related work items:** `01a18732-ad06-744a-85e5-d50c903828f9` (step 1), `01a18cca-71e6-74e8-9161-ab2736a67bc1` (step 2), `01a19619-7518-7e31-b7d0-e7c8a9edcce3` (step 3)
 
 ## Context
 
 A system-image closure records a SHA-256 identity for every input of an image build. Most inputs are
 trees of this repository, such as `components/lib` and `just/`. Test-run records and negative build
 cases copy a closure's identity. A change to any input tree therefore rewrites 174 derived files, and
-two open pull requests that touch input trees always conflict on them (issue #848). At `00af4fde`,
-86 of the last 224 commits on `main` touch the closures.
+two open pull requests that touch input trees always conflict on them (issue #848). On 2026-10-29, 15
+of the latest 40 merged pull requests changed system-image closure paths.
 
 The in-tree digests repeat what the commit already fixes. They do not add reproducibility. Today the
 same-commit reproducibility is proven by building every closure twice in PR CI and comparing every
@@ -24,8 +24,9 @@ output. Nothing records whether a later rebuild of a commit gives the same bytes
    lists.
 3. A build over a dirty input tree may run. It is marked dirty and is never evidence.
 4. Test-run records and negative build cases name their closure, not its identity.
-5. Reproducibility across commits is recorded after merge, as attestations in the git notes ref
-   `refs/notes/image-attestations`. No pull request diff carries one.
+5. Reproducibility across commits is recorded after merge by a nightly workflow, as attestations in
+   the git notes ref `refs/notes/image-attestations`. No pull request diff carries one. The host class is
+   the default devShell derivation and `uname -m`.
 
 [`plans/system-image-closure-derivations.md`](../plans/system-image-closure-derivations.md) holds the
 model, the steps and the measurements.

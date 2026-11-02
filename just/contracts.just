@@ -146,6 +146,14 @@ closure_input_host_paths_check:
 closure_derivation_check:
     python3 scripts/check/check-closure-derivations.py
 
+# Image attestations: in a scratch clone with a bare remote, scripts/build/attest-system-images.py attests
+# sel4-channel, survives a concurrent writer, reproduces its digests at a later commit, and refuses an
+# attested commit, an unknown closure, a dirty input and a mismatched note; --check judges the notes; the
+# nightly workflow runs it as declared. The expectation is scripts/lib/image_attestation_exam.py.
+[group('contracts')]
+image_attestation_check:
+    python3 scripts/check/check-image-attestations.py
+
 # Every shipped or tested image traces to exactly one closure, and every
 # closure is exercised by an owning gate. Cheap by design: a mapping only
 # checked before a release is a mapping that drifts between releases.

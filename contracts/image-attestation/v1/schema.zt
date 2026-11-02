@@ -1,0 +1,78 @@
+-- Slime OS image attestation, version 1.
+--
+-- One attestation records the images one host class built from one commit. It is the body of the git
+-- note on that commit under `refs/notes/image-attestations`, written as this record's `.zti` text. A
+-- note crosses a persistence boundary and is read back by other processes and commits, so it is a
+-- versioned contract and not text either side parses by hand.
+--
+-- The rules every writer and judge enforce, beyond the types:
+--
+-- * `commit` is the 40-character lowercase hex id of the commit the note is attached to.
+-- * `hostClass.devShell` is the Nix store path of the default devShell derivation the build ran in, as
+--   `nix eval --raw .#devShells.<system>.default.drvPath` prints it. `hostClass.architecture` is
+--   `uname -m`. Both are nonempty and at most `maxHostClassBytes` bytes.
+-- * `runner` names the build machine image. It is informational and not part of the host class. It is
+--   at most `maxRunnerBytes` bytes and may be empty.
+-- * `images` holds one to `maxImages` entries, sorted by `name` with no name repeated. `name` is a
+--   closure source name, at most `maxNameBytes` bytes.
+-- * `derivationId` and the five output digests are lowercase SHA-256 hex. The digests are those of the
+--   clean build's `generation.bin`, `root.elf`, `loader.elf`, `image.elf` and `image.identity.json`,
+--   as its `SystemImageBuildResult` records them. A dirty build is never attested.
+--
+-- The invariant across notes: two entries with the same `derivationId` and the same host class carry
+-- the same five digests, whichever commits they are attached to. Entries of different host classes are
+-- never compared.
+
+HostClass :: type {
+  devShell : Text;
+  architecture : Text;
+};
+
+AttestedImage :: type {
+  name : Text;
+  derivationId : Text;
+  generation : Text;
+  root : Text;
+  loader : Text;
+  image : Text;
+  identityManifest : Text;
+};
+
+ImageAttestation :: type {
+  formatVersion : Int;
+  commit : Text;
+  hostClass : HostClass;
+  runner : Text;
+  images : List AttestedImage;
+};
+
+FromData @HostClass :: derive
+FromData @AttestedImage :: derive
+FromData @ImageAttestation :: derive
+
+formatVersion :: Int = 1;
+notesRef :: Text = "refs/notes/image-attestations";
+commitBytes :: Int = 40;
+digestBytes :: Int = 64;
+maxNameBytes :: Int = 96;
+maxImages :: Int = 128;
+maxHostClassBytes :: Int = 256;
+maxRunnerBytes :: Int = 128;
+
+decodeImageAttestation :: Data -> Validation DecodeIssue ImageAttestation
+= data => decode data;
+
+{
+  HostClass =;
+  AttestedImage =;
+  ImageAttestation =;
+  decodeImageAttestation =;
+  formatVersion =;
+  notesRef =;
+  commitBytes =;
+  digestBytes =;
+  maxNameBytes =;
+  maxImages =;
+  maxHostClassBytes =;
+  maxRunnerBytes =;
+}

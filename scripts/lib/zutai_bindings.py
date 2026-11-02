@@ -164,6 +164,11 @@ BINDINGS: dict[str, tuple[Run, ...]] = {
             "closure-resolution", "v1", "gen_python.zt", "closure_resolution_contract", "SLIME_CLOSURE_RESOLUTION_BINDINGS_ROOT"
         ),
     ),
+    "image-attestation": (
+        _python(
+            "image-attestation", "v1", "gen_python.zt", "image_attestation_contract", "SLIME_IMAGE_ATTESTATION_BINDINGS_ROOT"
+        ),
+    ),
     "composition-inventory": (
         _python(
             "composition-inventory",
