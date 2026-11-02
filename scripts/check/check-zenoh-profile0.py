@@ -121,6 +121,10 @@ import zenoh_client_abort_exam
 import zenoh_client_io_exam
 import zenoh_client_wire_exam
 import zenoh_grants_builder_exam
+import zenoh_grants_reader_exam
+import zenoh_server_exam
+import zenoh_service_arm
+import zenoh_service_component_exam
 import zenoh_grants_table_exam
 import zenoh_service_exam
 import zenoh_service_link_exam
@@ -2164,6 +2168,129 @@ def grants_builder_main(controls_only: bool) -> int:
     return 0
 
 
+def grants_reader_main(controls_only: bool) -> int:
+    """The product side of the grants path. The exam's controls run on synthetic files and a synthetic transcript. The
+    full run reads the real files and runs the two `slime-root` tests alone, so it fails until the reader lands."""
+    exam = zenoh_grants_reader_exam
+    try:
+        positive, refusals = exam.controls()
+        if positive != exam.PINNED_CASES:
+            fail(f"grants-reader: {positive} honest checks, the checker pins {exam.PINNED_CASES}")
+        if refusals != exam.PINNED_CONTROLS:
+            fail(f"grants-reader: {refusals} refusals, the checker pins {exam.PINNED_CONTROLS}")
+        if controls_only:
+            print(f"zenoh profile 0 grants-reader judge: refused {refusals} corrupted inputs")
+            return 0
+        held = exam.check_facts(exam.read_file)
+        ran = exam.judge_run(exam.run_reader_tests())
+    except exam.ReaderExamError as error:
+        fail(f"grants-reader: {error}")
+    cases = held + (1 if ran == len(exam.TESTS) else 0)
+    if cases != exam.PINNED_CASES:
+        fail(f"grants-reader: {cases} cases, the checker pins {exam.PINNED_CASES}")
+    print(f"[zenoh-profile0] slice=grants-reader cases={cases} refusals={refusals} controls={refusals}")
+    devloop_observations.record(casesObserved=cases, negativeControlsRefused=refusals)
+    print("zenoh profile 0 grants-reader check: the label, the schema fields, the root reader and the wrapper are in place and the reader's tests pass")
+    return 0
+
+
+SERVER_PINNED_CASES = 39
+SERVER_PINNED_CONTROLS = 104
+
+
+def run_server() -> list[str]:
+    """The component library's test of the server half, run alone with `--exact`. The server half is plain Rust with
+    no runtime call, so the test drives it with the client protocol's bytes and prints what it answered."""
+    host = subprocess.run(["rustc", "-vV"], capture_output=True, text=True, check=True)
+    target = next(line.split(": ", 1)[1] for line in host.stdout.splitlines() if line.startswith("host: "))
+    command = [
+        "cargo", "test", "--target", target, "-p", "slime-components", "--no-default-features",
+        "--", "--exact", zenoh_server_exam.TEST, "--nocapture", "--test-threads=1",
+    ]
+    result = subprocess.run(command, cwd=ROOT / "components", capture_output=True, text=True, env={**_os.environ})
+    output = result.stdout + result.stderr
+    if result.returncode != 0:
+        _sys.stderr.write(output[-4000:])
+        fail(f"{' '.join(command)} exited {result.returncode}")
+    results = re.findall(r"test result: (\w+)\. (\d+) passed; (\d+) failed", output)
+    if tests_passed(output) != {zenoh_server_exam.TEST} or results != [("ok", "1", "0")]:
+        fail(f"server: the run was not of {zenoh_server_exam.TEST} alone")
+    return zenoh_server_exam.exam_lines(result.stdout)
+
+
+def server_main(controls_only: bool) -> int:
+    """The server half of the client protocol: its answers are the bytes the schema's layout gives, and no answer is one
+    the client refuses. The exam raises at the first line that differs, so a run that returns has matched every line."""
+    exam = zenoh_server_exam
+    try:
+        positive, refusals = exam.judge(exam.good_lines())
+        refused_controls = exam.all_controls()
+    except (exam.ServerExamError, zenoh_client_wire_exam.WireError) as error:
+        fail(str(error))
+    if positive + refusals != SERVER_PINNED_CASES:
+        fail(f"server: an honest transcript is {positive + refusals} cases, the checker pins {SERVER_PINNED_CASES}")
+    if refused_controls != SERVER_PINNED_CONTROLS:
+        fail(f"server: {refused_controls} controls, the checker pins {SERVER_PINNED_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 server judge: refused {refused_controls} corrupted records")
+        return 0
+    try:
+        positive, refusals = exam.judge(run_server())
+    except (exam.ServerExamError, zenoh_client_wire_exam.WireError) as error:
+        fail(str(error))
+    print(f"[zenoh-profile0] slice=server cases={positive + refusals} refusals={refusals} controls={refused_controls}")
+    devloop_observations.record(casesObserved=positive + refusals, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 server check: the server answers each request with the bytes the schema gives and widens no grant")
+    return 0
+
+
+def service_component_main(controls_only: bool) -> int:
+    """The component crate and its registration: declarations the files must hold. The controls run on synthetic files."""
+    exam = zenoh_service_component_exam
+    try:
+        refusals = exam.component_controls()
+        if controls_only:
+            print(f"zenoh profile 0 service-component judge: refused {refusals} corrupted file sets")
+            return 0
+        cases = exam.check_component()
+    except exam.ComponentExamError as error:
+        fail(f"service-component: {error}")
+    print(f"[zenoh-profile0] slice=service-component cases={cases} refusals={refusals} controls={refusals}")
+    devloop_observations.record(casesObserved=cases, negativeControlsRefused=refusals)
+    print("zenoh profile 0 service-component check: the crate, its registration and its library export are in place")
+    return 0
+
+
+SERVICE_BOOTED_CONTROLS = 63
+
+
+def service_booted_main(controls_only: bool) -> int:
+    """The composition and the booted exchange. The facts are read first. The arm then boots the image under QEMU and
+    judges its marker chains, so a run that returns has seen the holders exchange through the service."""
+    exam = zenoh_service_component_exam
+    try:
+        refusals = exam.composition_controls() + zenoh_service_arm.controls()
+        if refusals != SERVICE_BOOTED_CONTROLS:
+            fail(f"service-booted: {refusals} controls, the checker pins {SERVICE_BOOTED_CONTROLS}")
+        if controls_only:
+            print(f"zenoh profile 0 service-booted judge: refused {refusals} corrupted inputs")
+            return 0
+        cases = exam.check_composition()
+    except (exam.ComponentExamError, zenoh_service_arm.ArmError) as error:
+        fail(f"service-booted: {error}")
+    arm = subprocess.run(
+        [_sys.executable, str(ROOT / "scripts" / "check" / "check-sel4-io-network-plane.py"), "--arm", "zenoh-service"],
+        cwd=ROOT, capture_output=True, text=True, env={**_os.environ},
+    )
+    if arm.returncode != 0:
+        _sys.stderr.write((arm.stdout + arm.stderr)[-4000:])
+        fail(f"service-booted: the zenoh-service arm exited {arm.returncode}")
+    print(f"[zenoh-profile0] slice=service-booted cases={cases + 1} refusals={refusals} controls={refusals}")
+    devloop_observations.record(casesObserved=cases + 1, negativeControlsRefused=refusals)
+    print("zenoh profile 0 service-booted check: the holders exchanged through the service and an ungranted key was refused")
+    return 0
+
+
 GRANTS_TABLE_TEST = "every_table_decodes_to_its_rows_or_is_refused"
 TABLE_LINE = re.compile(r"\[zenoh-exam\] (grantstable .*)$")
 
@@ -2385,7 +2512,7 @@ def composition_main(controls_only: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "subscribers", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-builder", "service", "service-link"), required=True)
+    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "subscribers", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-builder", "grants-reader", "server", "service-component", "service-booted", "service", "service-link"), required=True)
     parser.add_argument("--controls-only", action="store_true")
     arguments = parser.parse_args()
     if arguments.slice == "composition":
@@ -2414,6 +2541,14 @@ def main() -> int:
         return grants_table_main(arguments.controls_only)
     if arguments.slice == "grants-builder":
         return grants_builder_main(arguments.controls_only)
+    if arguments.slice == "grants-reader":
+        return grants_reader_main(arguments.controls_only)
+    if arguments.slice == "server":
+        return server_main(arguments.controls_only)
+    if arguments.slice == "service-component":
+        return service_component_main(arguments.controls_only)
+    if arguments.slice == "service-booted":
+        return service_booted_main(arguments.controls_only)
     if arguments.slice == "service":
         return service_main(arguments.controls_only)
     if arguments.slice == "service-link":
