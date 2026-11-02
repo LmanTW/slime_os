@@ -384,6 +384,8 @@ def check_no_undeclared_build_knobs(
         "SLIME_COMPONENT_LINKER_DIR": "locates linker scripts for out-of-tree builds",
         "SLIME_GENERATION_CANDIDATE": "names a candidate generation path, not image bytes",
         "SLIME_COMPONENT_CC": "names the host C compiler for the C-runtime helper",
+        "SLIME_ATTESTATION_RUNNER": "names the build machine an attestation note records, after the build",
+        "SLIME_UNUSED": "names the unused input variable of a Zutai evaluation of an attestation note",
     }
     # Read only by the legacy build path CP15 deletes. Each is an ambient switch
     # whose closure equivalent either exists already or is named in CP14's

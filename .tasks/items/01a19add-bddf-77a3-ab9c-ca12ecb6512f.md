@@ -2,9 +2,9 @@
 schema: work-item/v2
 id: 01a19add-bddf-77a3-ab9c-ca12ecb6512f
 kind: task
-state: open
+state: active
 created: 2026-11-02T14:06:25+08:00
-updated: 2026-11-02T14:06:32+08:00
+updated: 2026-11-02T22:27:24+08:00
 tags:
   - ros2
 supersedes:
@@ -16,8 +16,31 @@ devloop:
   helper: devloop-helpers/v1:93745c5aa610e8859ed5f5d937e47d55d36ac612cc60b3a22141fa6763fe1c23
   requirementsDigest: b51960c172938f47c2ae6ebb265227ce3ac0a61c18b74cc96b0ed1d3463d7a22
   admission: slime-data-volume-20261102
-  epoch: unstarted
-  evidence: []
+  epoch: 2bed3a7d-9a41-4fd4-baae-b8c4e332f8b4
+  evidence:
+  - acceptance: data-volume-observed
+    gate: just-target
+    mode: automated
+    identity:
+      requirements: b51960c172938f47c2ae6ebb265227ce3ac0a61c18b74cc96b0ed1d3463d7a22
+      helper: devloop-helpers/v1:93745c5aa610e8859ed5f5d937e47d55d36ac612cc60b3a22141fa6763fe1c23
+      code: 8026418a4be33f759ffdd894f72c8919e44ae35892ddd790394e2ab6dfd82899
+      policy: cecc38df2f16d038ef565f9647fbf3294c7b33ac2e1aa47c811d18f518cc8095
+      inputs: 1efdc5d4291dcfafd750f5a5f74ac8558bcd745e1e1bd9547aa55804a32777f8
+      target: aarch64-darwin
+      image: data-volume-main-8ac53add0dca
+      epoch: 2bed3a7d-9a41-4fd4-baae-b8c4e332f8b4
+    observedAt: 1793630044
+    expiresAt: 1793716444
+    passed: true
+    observer: argv:["python3", "scripts/check/devloop-gate.py", "just-target"]
+    observations:
+    - id: passed
+      value:
+        kind: bool
+        intValue: 0
+        boolValue: true
+        textValue: ''
 ---
 
 # A hash-pinned frame store read from a read-only QEMU disk
