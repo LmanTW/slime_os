@@ -22,7 +22,8 @@ Keep this table in the same commit as any move of an owning module.
 | Generation decoding and identity | `boot-contracts/src/generation.rs` | admission in `slime-root/src/generation.rs` |
 | Composition: which components run, grants, slots, budgets, health | `contracts/system-spec/v1/sources/<name>.zt` for `COMPUTED_SYSTEM_SOURCES`, otherwise `contracts/system-spec/v1/systems/<name>.zti` | authoring ownership: `contracts/system-spec/README.md`; derivation map `DERIVED_GENERATION_FIXTURES` in `scripts/lib/system_spec.py`; regenerate with `python3 scripts/generate/generate-generation-from-spec.py`; `just system_spec_check` refuses drift. `contracts/generation-manifest/v1/{compositions,fixtures}/*.zti` are derived outputs |
 | Generation construction and manifest encoding | `scripts/build/build-generation.py` | `contracts/generation-manifest/v1/schema.zt`, `components/build-support/src/lib.rs` |
-| System-image closure: the build key every `sel4_*` gate resolves before booting | `scripts/generate/generate-system-image-closures.py` | `contracts/system-image-closure/v2/{closures,negative}/*.zti` are derived outputs recording a tree digest of `slime-root`, `boot-contracts`, `components/{lib,proto,runtime,build-support}`, each closed-over component crate, `just`, `Cargo.{toml,lock}`, `contracts/{component-spec,interface-schema}`, and `deps/rust-sel4`; each rendered system-spec `.zti` is separately bound as a file, not its authoring-source tree. After editing any of those, rerun the generator and commit the closures with the change, or every plane gate refuses with `closure does not resolve: … identity mismatch`. Resolver: `scripts/lib/system_image_closure.py`; drift gate: `just system_image_builder_check` |
+| System-image closure: the build key every `sel4_*` gate resolves before booting | `scripts/generate/generate-system-image-closures.py` | `contracts/system-image-closure/v3/closures/*.zti` are derived sources that name each input by path and record no digest; `contracts/system-image-closure/v2/negative/*.zti` are derived negative cases. Rerun the generator only when a closure's input set changes. Each gate resolves its source in the checkout into `build/closure-resolved/<name>.zti`, whose identity is the derivation id, and records `dirty` in its build result. Resolver: `scripts/lib/system_image_closure.py`; drift gate: `just system_image_builder_check`; exam: `just closure_derivation_check` |
+| Image attestations: what clean builds produced at a commit, as git notes | `contracts/image-attestation/v1/schema.zt` | writer `scripts/build/attest-system-images.py`, nightly workflow `.github/workflows/image-attestations.yml`, notes ref `refs/notes/image-attestations`; exam: `just image_attestation_check` |
 | Component image format/loading | `contracts/component/v2/schema.zt` | generated `components/proto/src/component.rs`, decoder `boot-contracts/src/component_image.rs`, loader `slime-root/src/child_vspace.rs`; v1 is retained format history |
 | Userspace component behavior | `components/<lifecycle>/<component>/src/main.rs` | shared helpers in `components/lib/src/*.rs`; the crate's own `components/<lifecycle>/<component>/Cargo.toml` |
 | Userspace syscall ABI | `components/runtime/src/syscall.rs` | seL4 transport in `components/runtime/src/syscall/sel4_transport.rs`, root implementation in `slime-root/src/ipc.rs` |
@@ -51,8 +52,9 @@ Keep this table in the same commit as any move of an owning module.
   policy (who spawns what, with which grants) is userspace and the system spec.
 - Generated files — anything beginning `@generated`, `boot-contracts/src/generated/`,
   every derived manifest in `DERIVED_GENERATION_FIXTURES`, the computed system
-  specs in `COMPUTED_SYSTEM_SOURCES`, and every closure under
-  `contracts/system-image-closure/v2/` — are outputs. Edit the schema or
+  specs in `COMPUTED_SYSTEM_SOURCES`, every closure source under
+  `contracts/system-image-closure/v3/closures/`, and every negative case under
+  `contracts/system-image-closure/v2/negative/` — are outputs. Edit the schema or
   authoring source and regenerate; `AGENTS.md` states the rule and the
   regeneration commands.
 - `scripts/check/` is verification code, never the implementation of the

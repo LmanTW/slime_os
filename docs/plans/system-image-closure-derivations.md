@@ -1,11 +1,11 @@
 # System-image closures as derivations
 
-Steps 1 and 2 of this plan are implemented; step 3 is planned. It moves the system-image closure corpus from committed input digests to
+Steps 1, 2 and 3 of this plan are implemented. It moves the system-image closure corpus from committed input digests to
 committed sources, so a change to an input tree stops rewriting derived records. The decision and
 its alternatives are in
 [`decisions/system-image-closures-as-derivations.md`](../decisions/system-image-closures-as-derivations.md).
 Step 1, work item `01a18732-ad06-744a-85e5-d50c903828f9`, is implemented. Step 2, work item
-`01a18cca-71e6-74e8-9161-ab2736a67bc1`, is implemented. Step 3 is work item `01a19619-7518-7e31-b7d0-e7c8a9edcce3`.
+`01a18cca-71e6-74e8-9161-ab2736a67bc1`, is implemented. Step 3, work item `01a19619-7518-7e31-b7d0-e7c8a9edcce3`, is implemented.
 
 ## Problem
 

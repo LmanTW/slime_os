@@ -32,9 +32,10 @@ never attested.
 
 ## Writer and judge
 
-Work item `01a19619-7518-7e31-b7d0-e7c8a9edcce3` implements the writer,
-`scripts/build/attest-system-images.py`, and the workflow that runs it nightly. `just image_attestation_check`
-judges both. The design is in
+`scripts/build/attest-system-images.py` writes the notes, and `.github/workflows/image-attestations.yml`
+runs it nightly and on demand on `main`. `attest-system-images.py --check --notes-ref REF` judges the notes
+on a ref. `just image_attestation_check` judges the writer and the workflow. Work item
+`01a19619-7518-7e31-b7d0-e7c8a9edcce3` implemented them. The design is in
 [`docs/plans/system-image-closure-derivations.md`](../../../docs/plans/system-image-closure-derivations.md).
 
 ## Compatibility

@@ -132,6 +132,25 @@ and emits a version 2 `SystemImageBuildResult`, in `build-result.json` and
 `build-result.zti`, binding the generation, root, loader, packaged image,
 identity manifest and dirty flag to the derivation id.
 
+### Image attestations
+
+An image attestation records what clean builds of named closures produced at one commit.
+`scripts/build/attest-system-images.py` writes it as the git note on that commit under
+`refs/notes/image-attestations`, in the `contracts/image-attestation/v1` format. The record holds the
+commit, the host class, the runner image, and per closure its derivation id and the SHA-256 of
+`generation.bin`, `root.elf`, `loader.elf`, `image.elf` and `image.identity.json`.
+
+The host class is the default devShell's Nix derivation path and `uname -m`. Within one host class, an
+equal derivation id must give equal digests at every commit. The writer builds each closure first, then
+compares the result with every earlier note. On a mismatch it refuses and writes no note. It refuses a
+dirty input before it builds anything, and it never replaces a note.
+
+`.github/workflows/image-attestations.yml` runs the writer nightly and on demand on `main`, one run at a
+time, for six closures. After a rejected push the writer fetches the notes, compares again, and retries.
+`attest-system-images.py --check --notes-ref REF` decodes every note and refuses a malformed note or a
+conflicting pair. Nothing in PR CI reads attestations. An attestation proves bytes across commits within
+one host class, not a boot.
+
 The component SDK publishes its closure resolved: the export resolves the
 source in the staged corpus and writes the version 2 closure under
 `contracts/system-image-closure/v2/closures/`, which an SDK consumer builds
