@@ -1839,6 +1839,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "slime-component-zenoh-service"
+version = "0.1.0"
+dependencies = [
+ "boot-contracts",
+ "slime-build-support",
+ "slime-components",
+ "slime-proto",
+ "slime-rt",
+]
+
+[[package]]
 name = "slime-components"
 version = "0.1.0"
 dependencies = [

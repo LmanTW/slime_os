@@ -100,6 +100,12 @@ fn refusal(op: u8, status: i32, row: u16) -> Answer {
     completion(op, status, wire::ITEM_NONE as u8, row, 0, 0)
 }
 
+/// The completion the server answers a request of operation `op` with when the host cannot serve it, such as an
+/// attach that found no buffers. It carries only a denied status, as every refusal does.
+pub fn denied(op: u8) -> Answer {
+    refusal(op, STATUS_DENIED, 0)
+}
+
 /// The server over `H` holders. It keeps each holder's phase and nothing of the core's.
 pub struct Server<const H: usize> {
     phases: [Phase; H],
