@@ -1392,6 +1392,28 @@ pub fn entropy_authority_read(cursor: usize, out: &mut [u8]) -> i64 {
     }
 }
 
+/// Read authenticated Zenoh grants rows into the transfer window.
+pub fn zenoh_grants_read(cursor: usize, out: &mut [u8]) -> i64 {
+    let transfer = match reserve(out.len(), 0) {
+        Ok(transfer) => transfer,
+        Err(error) => return error,
+    };
+    let (result, returned) = match outcome(&call(
+        capability_table_labels::ZENOH_GRANTS_READ,
+        &[cursor as Word, 0, transfer as Word],
+    )) {
+        Ok(pair) => pair,
+        Err(error) => return error,
+    };
+    if result < 0 {
+        return result;
+    }
+    match collect(returned, out, None) {
+        Ok(_) => result,
+        Err(error) => error,
+    }
+}
+
 /// Read authenticated application rows into the transfer window.
 pub fn network_application_read(cursor: usize, out: &mut [u8]) -> i64 {
     let transfer = match reserve(out.len(), 0) {

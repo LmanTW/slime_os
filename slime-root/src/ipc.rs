@@ -2465,6 +2465,23 @@ mod tests {
         );
     }
 
+    trait ConcatInto {
+        fn concat_into<const N: usize>(&self) -> [u8; N];
+    }
+
+    impl ConcatInto for [&[u8]; 2] {
+        fn concat_into<const N: usize>(&self) -> [u8; N] {
+            let mut out = [0u8; N];
+            let mut at = 0;
+            for part in self {
+                out[at..at + part.len()].copy_from_slice(part);
+                at += part.len();
+            }
+            assert_eq!(at, N, "the parts fill the array");
+            out
+        }
+    }
+
     /// A table of `count` rows, holder `holder-<n>`, each holding the key `0/zenoh/<n>` with both rights,
     /// written into `bytes`; returns its length. The rows are in the table's sort order.
     fn zenoh_grants_table(count: usize, bytes: &mut [u8]) -> usize {
@@ -2479,12 +2496,13 @@ mod tests {
         };
         bytes[..wire::HEADER_BYTES].copy_from_slice(&header.encode());
         for index in 0..count {
-            let name = format!("holder-{index:02}");
-            let key = format!("0/zenoh/{index:02}");
+            let digits = [b'0' + (index / 10) as u8, b'0' + (index % 10) as u8];
+            let name = [b"holder-".as_slice(), &digits].concat_into::<9>();
+            let key = [b"0/zenoh/".as_slice(), &digits].concat_into::<10>();
             let mut holder_name = [0u8; 32];
-            holder_name[..name.len()].copy_from_slice(name.as_bytes());
+            holder_name[..name.len()].copy_from_slice(&name);
             let mut key_bytes = [0u8; 129];
-            key_bytes[..key.len()].copy_from_slice(key.as_bytes());
+            key_bytes[..key.len()].copy_from_slice(&key);
             let entry = wire::WireGrantsEntry {
                 holder_name,
                 holder_name_len: name.len() as u8,
