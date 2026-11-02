@@ -19,11 +19,65 @@ mod exam;
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::zenoh_service::{Core, Row};
+
     /// The server exam: the server answers each request of the client protocol and the test prints one
     /// `[zenoh-exam] server ...` line for each answer. The checker looks for this test by its path.
     #[test]
     fn the_server_exam() {
         super::exam::run();
+    }
+
+    fn request(op: i64) -> [u8; REQUEST_BYTES] {
+        WireServiceRequest {
+            magic: MAGIC,
+            version: VERSION,
+            op: op as u8,
+            flags: 0,
+            row: 0,
+            reserved: [0; 2],
+            sequence: 0,
+            reserved2: [0; 12],
+        }
+        .encode()
+    }
+
+    fn one_holder() -> (Server<1>, Core<'static, 1, 1, 12, 1>) {
+        let rows = [Row { holder: 0, key: "0/a/b", publish: true, subscribe: true }];
+        let core = Core::new(&rows, [0; 16], &crate::zenoh_service::exam::params()).expect("grants");
+        (Server::new(), core)
+    }
+
+    fn status(answer: &Answer) -> i32 {
+        WireServiceCompletion::decode(&answer.completion).expect("a completion").status
+    }
+
+    #[test]
+    fn a_request_longer_than_the_wire_request_is_not_a_request() {
+        let (mut server, core) = one_holder();
+        let mut longer = [0u8; REQUEST_BYTES + 8];
+        longer[..REQUEST_BYTES].copy_from_slice(&request(wire::OP_ATTACH));
+        assert_eq!(status(&server.control(&core, 0, &longer)), STATUS_MALFORMED);
+        assert!(!server.attached(0), "a refused request changes nothing");
+        assert_eq!(status(&server.control(&core, 0, &request(wire::OP_ATTACH))), 0);
+        assert!(server.attached(0));
+        assert_eq!(status(&server.control(&core, 0, &longer[..REQUEST_BYTES - 1])), STATUS_MALFORMED);
+    }
+
+    #[test]
+    fn a_holder_the_host_could_not_provision_may_attach_again() {
+        let (mut server, core) = one_holder();
+        assert_eq!(status(&server.control(&core, 0, &request(wire::OP_ATTACH))), 0);
+        assert_eq!(status(&server.control(&core, 0, &request(wire::OP_ATTACH))), STATUS_DENIED);
+        server.unattach(0);
+        assert!(!server.attached(0));
+        assert_eq!(status(&server.control(&core, 0, &request(wire::OP_ATTACH))), 0);
+        // A holder that never attached, or already ended, is not moved.
+        server.unattach(5);
+        assert_eq!(status(&server.control(&core, 0, &request(wire::OP_DETACH))), 0);
+        server.unattach(0);
+        assert_eq!(status(&server.control(&core, 0, &request(wire::OP_ATTACH))), STATUS_DENIED);
     }
 }
 
@@ -121,6 +175,16 @@ impl<const H: usize> Server<H> {
     /// Whether `holder` has a session.
     pub fn attached(&self, holder: usize) -> bool {
         self.phases.get(holder) == Some(&Phase::Attached)
+    }
+
+    /// Puts `holder` back to having no session. The host calls it when it could not give an attached holder its
+    /// buffers, so the holder may attach again and is not left counted as attached.
+    pub fn unattach(&mut self, holder: usize) {
+        if let Some(phase) = self.phases.get_mut(holder)
+            && *phase == Phase::Attached
+        {
+            *phase = Phase::Idle;
+        }
     }
 
     /// Answers the control request `bytes`, which arrived on `holder`'s endpoint. Attach, detach and abort travel
@@ -343,7 +407,8 @@ fn take<'k, const H: usize, const N: usize, const P: usize, const R: usize>(
 /// Reads a request, or answers the one the bytes are: a request outside the protocol is answered with the operation
 /// it names, and changes nothing.
 fn decode(bytes: &[u8]) -> Result<WireServiceRequest, Answer> {
-    let Some(request) = WireServiceRequest::decode(bytes) else {
+    // The wire request is exactly `REQUEST_BYTES`. A longer slice is not a request, whatever its prefix says.
+    let Some(request) = WireServiceRequest::decode(bytes).filter(|_| bytes.len() == REQUEST_BYTES) else {
         return Err(refusal(0, STATUS_MALFORMED, 0));
     };
     let op = request.op;

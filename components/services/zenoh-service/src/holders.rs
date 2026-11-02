@@ -251,10 +251,14 @@ pub fn serve<'k>(
                         name,
                     );
                     reply(&answer, end.control);
-                    if i64::from(op) == wire::OP_DETACH || i64::from(op) == wire::OP_ABORT {
-                        if let Some(session) = sessions[index].take()
-                            && !session.close()
-                        {
+                    let accepted = WireServiceCompletion::decode(&answer.completion)
+                        .is_some_and(|completion| completion.status == 0);
+                    let teardown = i64::from(op) == wire::OP_DETACH || i64::from(op) == wire::OP_ABORT;
+                    if teardown
+                        && accepted
+                        && let Some(session) = sessions[index].take()
+                    {
+                        if !session.close() {
                             fail(b"session release");
                         }
                         ends[index] = None;
@@ -304,7 +308,10 @@ fn control(
                     .bytes(b"\n")
                     .emit();
             }
-            Err(()) => return denied(op as u8),
+            Err(()) => {
+                server.unattach(index);
+                return denied(op as u8);
+            }
         }
     }
     answer
@@ -374,10 +381,13 @@ fn drive<'k>(
         now,
         now as u64,
     );
-    // A refusal is a status in the completion the client reads. The queue's own status is for the queue.
+    // A refusal is a status in the completion the client reads. The queue's own status is for the queue. A publication
+    // moved its whole payload only if the service accepted it, and a refusal moved none.
     let status = io_queue::STATUS_OK;
+    let accepted = WireServiceCompletion::decode(&answer.completion)
+        .is_some_and(|completion| completion.status == 0);
     let transferred = if submission.slice.direction == io_queue::DIRECTION_DEVICE_READ {
-        length as u64
+        if accepted { length as u64 } else { 0 }
     } else {
         answer.page_len as u64
     };
