@@ -1,0 +1,101 @@
+-- Slime OS data volume, format version 1.
+--
+-- A data volume carries one hash-pinned data payload on a disk a QEMU run attaches read-only. The disk is
+-- a GPT disk (UEFI 2.10, chapter 5) with exactly one partition entry. The partition holds a volume header
+-- sector followed by the payload. Version 1 admits one payload kind: a `contracts/frame-store/v1` store.
+--
+-- Disk layout, in 512-byte sectors, for a payload of `payloadBytes` bytes and
+-- `payloadSectors` = ceil(payloadBytes / 512):
+--
+--   LBA 0                          a protective MBR: one partition of type 0xEE from LBA 1 to the last LBA,
+--                                  or 0xFFFFFFFF sectors when the disk is larger, and signature 0x55AA
+--   LBA 1                          the primary GPT header
+--   LBA 2 .. 33                    the primary partition entry array: `gptEntryCount` entries of
+--                                  `gptEntryBytes` bytes; entry 0 is the volume, the rest are zero
+--   LBA 34 .. `firstLba` - 1       zero
+--   `firstLba`                     the volume header (`volumeHeaderLayout`), zero to the end of the sector
+--   `firstLba` + 1 ..              the payload, then zero bytes to the end of its last sector
+--   the next 32 sectors            the backup partition entry array, identical to the primary one
+--   the last LBA                   the backup GPT header
+--
+-- The disk is `firstLba` + 1 + `payloadSectors` + 33 sectors long. The partition entry spans
+-- `firstLba` .. `firstLba` + `payloadSectors`, which is also the GPT's last usable LBA; the first usable
+-- LBA is 34. The entry's type GUID is `partitionTypeGuid`, its attributes are zero, and its name is
+-- `partitionName` in UTF-16LE, zero-padded. Both GPT headers have revision 0x00010000, header size 92 and
+-- valid CRC32s, and each names the other's LBA.
+--
+-- The disk GUID is the first 16 bytes of SHA-256(`diskGuidDomain` || payload SHA-256), and the partition's
+-- unique GUID is the first 16 bytes of SHA-256(`partitionGuidDomain` || payload SHA-256), both stored in
+-- the GPT mixed-endian encoding. A payload therefore has exactly one disk image.
+--
+-- Validation order. A reader applies these checks in this order and refuses with the class of the first
+-- check that fails:
+--
+--   1. `gpt`         the protective MBR, either GPT header, or either entry array is invalid, a CRC32 does
+--                    not match, the two headers disagree, or the disk is shorter than the headers claim.
+--   2. `partition`   entry 0 does not have `partitionTypeGuid`, another entry is not all zero, or the
+--                    partition does not start at `firstLba` and end at the last usable LBA.
+--   3. `header`      the volume header's magic is not `volumeMagic`, its version is not `formatVersion`,
+--                    its kind is not `kindFrameStore`, or a reserved byte is not zero.
+--   4. `length`      `payloadBytes` is zero, above `maxPayloadBytes`, or not the length whose sector count
+--                    the partition holds after the header sector.
+--   5. `padding`     a byte after the payload in its last sector is not zero.
+--   6. `hash`        the SHA-256 of the payload is not `payloadSha256`.
+--   7. `frame-store` the payload is refused by the `contracts/frame-store/v1` reader.
+--
+-- The disk content is a run input, not an image input: no system-image closure names it, and the run that
+-- attaches it pins its SHA-256.
+
+formatVersion :: Int = 1;
+volumeMagic :: Int = 1447316563; -- `SLDV`
+kindFrameStore :: Int = 1;
+
+sectorBytes :: Int = 512;
+firstLba :: Int = 2048;
+gptEntryCount :: Int = 128;
+gptEntryBytes :: Int = 128;
+maxPayloadBytes :: Int = 134217728;
+
+partitionTypeGuid :: Text = "8f4c2a91-3b7e-4d6a-9c15-5e2f7a0b4d38";
+partitionName :: Text = "slime-data-volume";
+diskGuidDomain :: Text = "slime-data-volume-v1:disk:";
+partitionGuidDomain :: Text = "slime-data-volume-v1:partition:";
+
+refusalClasses :: List Text = {
+  "gpt";
+  "partition";
+  "header";
+  "length";
+  "padding";
+  "hash";
+  "frame-store";
+};
+
+WireField :: type { name : Text; width : Int; signed : Bool; byteArray : Bool; };
+
+-- The volume header, at the start of sector `firstLba`, little-endian. 48 bytes, then zero to 512.
+volumeHeaderLayout :: List WireField = {
+  { name = "magic"; width = 4; signed = false; byteArray = false; };
+  { name = "version"; width = 2; signed = false; byteArray = false; };
+  { name = "kind"; width = 2; signed = false; byteArray = false; };
+  { name = "payloadBytes"; width = 8; signed = false; byteArray = false; };
+  { name = "payloadSha256"; width = 32; signed = false; byteArray = true; };
+};
+
+{
+  formatVersion =;
+  volumeMagic =;
+  kindFrameStore =;
+  sectorBytes =;
+  firstLba =;
+  gptEntryCount =;
+  gptEntryBytes =;
+  maxPayloadBytes =;
+  partitionTypeGuid =;
+  partitionName =;
+  diskGuidDomain =;
+  partitionGuidDomain =;
+  refusalClasses =;
+  WireField =;
+  volumeHeaderLayout =;
+}
