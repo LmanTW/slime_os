@@ -640,25 +640,24 @@ ZENOH_SERVICE_CHAINS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("zenoh-service admission", (rf"SLIME_ROOT generation admitted number={zenoh_service_arm.GENERATION} executables=\d+ instances=\d+ grants=\d+ ",)),
     ("zenoh-service grants", (
         r"\[zenoh-service\] grants rows=\d+ holders=\d+",
-        r"\[zenoh-service\] holder attached holder=[\w-]+ rows=[1-9]\d*",
-        r"\[zenoh-service\] holder attached holder=[\w-]+ rows=[1-9]\d*",
+        r"\[zenoh-service\] holder attached holder=[a-z-]+ rows=[1-9]\d*",
+        r"\[zenoh-service\] holder attached holder=[a-z-]+ rows=[1-9]\d*",
     )),
     ("zenoh-service exchange", (
-        r"\[zenoh-service\] published holder=[\w-]+ row=\d+ sequence=0 reached=1 peer=none",
-        r"\[zenoh-service\] delivered holder=[\w-]+ row=\d+ sequence=0",
-        r"\[zenoh-service\] published holder=[\w-]+ row=\d+ sequence=3 reached=1 peer=none",
-        r"\[zenoh-service\] delivered holder=[\w-]+ row=\d+ sequence=3",
+        r"\[zenoh-service\] published holder=[a-z-]+ row=\d+ sequence=0 reached=1 peer=none",
+        r"\[zenoh-service\] delivered holder=[a-z-]+ row=\d+ sequence=0",
+        r"\[zenoh-service\] published holder=[a-z-]+ row=\d+ sequence=3 reached=1 peer=none",
+        r"\[zenoh-service\] delivered holder=[a-z-]+ row=\d+ sequence=3",
     )),
-    ("zenoh-service refusal", (r"\[zenoh-service\] denial class=not-granted holder=[\w-]+ refused=1",)),
+    ("zenoh-service refusal", (r"\[zenoh-service\] denial class=not-granted holder=[a-z-]+ refused=1",)),
     ("zenoh-service success", (
-        r"\[zenoh-service\] holder detached holder=[\w-]+",
-        r"\[zenoh-service\] holder detached holder=[\w-]+",
+        r"\[zenoh-service\] holder detached holder=[a-z-]+",
         rf"SLIME_GRAPH HEALTHY generation={zenoh_service_arm.GENERATION} required=\d+ live=0 completed=\d+ failed=0",
     )),
 )
 
 # Every arm participates in the shared missing/reordered/failure controls.
-CHAINS = AUTHORITY_CHAINS + TCP_CHAINS + LOCAL_CHAINS + LIFETIME_CHAINS + SERVICE_FAULT_CHAINS + DRIVER_RESET_CHAINS + HTTP_CHAINS + IMPAIRMENT_CHAINS + LISTENER_CHAINS + OPTIONS_CHAINS + BUFFERS_CHAINS + NET_CHAINS + ZENOH_CHAINS
+CHAINS = AUTHORITY_CHAINS + TCP_CHAINS + LOCAL_CHAINS + LIFETIME_CHAINS + SERVICE_FAULT_CHAINS + DRIVER_RESET_CHAINS + HTTP_CHAINS + IMPAIRMENT_CHAINS + LISTENER_CHAINS + OPTIONS_CHAINS + BUFFERS_CHAINS + NET_CHAINS + ZENOH_CHAINS + ZENOH_SERVICE_CHAINS
 FAILURE_MARKERS: tuple[str, ...] = (
     r"SLIME_ROOT FATAL",
     r"SLIME_GRAPH FAIL",

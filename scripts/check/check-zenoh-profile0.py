@@ -2261,7 +2261,7 @@ def service_component_main(controls_only: bool) -> int:
     return 0
 
 
-SERVICE_BOOTED_CONTROLS = 61
+SERVICE_BOOTED_CONTROLS = 62
 
 
 def service_booted_main(controls_only: bool) -> int:

@@ -72,7 +72,7 @@ def judge(lines: list[str]) -> tuple[int, int]:
     attached: dict[str, int] = {}
     detached: set[str] = set()
     published: dict[tuple[str, int], tuple[int, int, int]] = {}
-    delivered: dict[tuple[str, int], int] = {}
+    delivered: dict[tuple[str, int], set[str]] = {}
     last_sequence: dict[str, int] = {}
     denials = 0
     for line in lines[1:]:
@@ -95,8 +95,10 @@ def judge(lines: list[str]) -> tuple[int, int]:
             sources = [key for key in published if key[1] == sequence]
             _need(len(sources) == 1, f"zenoh-service: {holder} was delivered sequence {sequence}, which {len(sources)} holders published before")
             _need(published[sources[0]][0] == row, f"zenoh-service: {holder} was delivered sequence {sequence} on row {row}, not the published row")
-            delivered[sources[0]] = delivered.get(sources[0], 0) + 1
-            _need(delivered[sources[0]] <= published[sources[0]][1], f"zenoh-service: sequence {sequence} was delivered to more holders than it reached")
+            reached_by = delivered.setdefault(sources[0], set())
+            _need(holder not in reached_by, f"zenoh-service: {holder} was delivered sequence {sequence} twice")
+            reached_by.add(holder)
+            _need(len(reached_by) <= published[sources[0]][1], f"zenoh-service: sequence {sequence} was delivered to more holders than it reached")
         elif m := DENIAL.fullmatch(line):
             _need(m.group(1) == "not-granted" and m.group(3) == "1", f"zenoh-service: a denial that is not a single not-granted refusal: {line!r}")
             _need(m.group(2) in attached, f"zenoh-service: a denial for {m.group(2)}, which never attached")
@@ -110,7 +112,7 @@ def judge(lines: list[str]) -> tuple[int, int]:
     _need(detached == set(attached), "zenoh-service: a holder did not detach")
     _need(len(published) == SAMPLES, f"zenoh-service: {len(published)} samples published, expected {SAMPLES}")
     for key, (_row, reached, _) in published.items():
-        _need(delivered.get(key, 0) == reached, f"zenoh-service: sequence {key[1]} reached {reached} holders and was delivered to {delivered.get(key, 0)}")
+        _need(len(delivered.get(key, set())) == reached, f"zenoh-service: sequence {key[1]} reached {reached} holders and was delivered to {len(delivered.get(key, set()))}")
     _need(denials == 1, f"zenoh-service: {denials} denials, expected exactly one")
     return len(published), denials
 
@@ -132,6 +134,7 @@ def mutations() -> list[tuple[str, list[str]]]:
         ("a delivery with no publication", [*good[:3], good[4], good[3], *good[5:]]),
         ("a delivery on another row", [line.replace("delivered holder=beta row=0", "delivered holder=beta row=1") if i == 4 else line for i, line in enumerate(good)]),
         ("a delivery twice", [*good[:5], good[4], *good[5:]]),
+        ("one holder delivered twice for a reach of two", [good[0], good[1], good[2], good[3].replace("reached=1", "reached=2"), good[4], good[4], *good[5:]]),
         ("a reach of zero with a delivery", [line.replace("reached=1", "reached=0") if i == 3 else line for i, line in enumerate(good)]),
         ("a reach of two with one delivery", [line.replace("reached=1", "reached=2") if i == 3 else line for i, line in enumerate(good)]),
         ("a delivery to a holder that never attached", [line.replace("holder=beta row=0", "holder=gamma row=0") if i == 4 else line for i, line in enumerate(good)]),
