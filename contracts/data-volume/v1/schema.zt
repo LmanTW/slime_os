@@ -46,6 +46,11 @@
 -- The disk content is a run input, not an image input: no system-image closure names it, and the run that
 -- attaches it pins its SHA-256.
 
+env ::= import stdlib.env;
+fs ::= import stdlib.fs;
+gen ::= import "gen.zt";
+t ::= import stdlib.text;
+
 formatVersion :: Int = 1;
 volumeMagic :: Int = 1447316563; -- `SLDV`
 kindFrameStore :: Int = 1;
@@ -73,6 +78,17 @@ refusalClasses :: List Text = {
 
 WireField :: type { name : Text; width : Int; signed : Bool; byteArray : Bool; };
 
+-- The volume header's fields, in `volumeHeaderLayout`'s order. The renderer reflects this record and refuses
+-- to render bindings unless its field names are the layout's.
+VolumeHeader :: type {
+  magic : Int;
+  version : Int;
+  kind : Int;
+  payloadBytes : Int;
+  payloadSha256 : Int;
+};
+
+
 -- The volume header, at the start of sector `firstLba`, little-endian. 48 bytes, then zero to 512.
 volumeHeaderLayout :: List WireField = {
   { name = "magic"; width = 4; signed = false; byteArray = false; };
@@ -82,7 +98,10 @@ volumeHeaderLayout :: List WireField = {
   { name = "payloadSha256"; width = 32; signed = false; byteArray = true; };
 };
 
-{
+
+volumeHeaderSchema ::= schema VolumeHeader;
+
+format ::= {
   formatVersion =;
   volumeMagic =;
   kindFrameStore =;
@@ -96,6 +115,18 @@ volumeHeaderLayout :: List WireField = {
   diskGuidDomain =;
   partitionGuidDomain =;
   refusalClasses =;
-  WireField =;
+  volumeHeaderFields = volumeHeaderSchema.fields ?? {;};
   volumeHeaderLayout =;
-}
+};
+
+-- The write entry: the renderer's Rust and Python bindings, or `INVALID_DATA_VOLUME_SCHEMA` in both when the
+-- header record and its layout disagree.
+main :: { write : FsWrite; env : Env; } -> Unit ! { * fs.WholeWriteEffects; * env.GetEffects; }
+= caps => [
+  root := env.get caps.env "SLIME_DATA_VOLUME_BINDINGS_ROOT" ?? ".";
+  bindings := gen.render format;
+  fs.writeAll caps.write (t.join "" { root; "/components/proto/src/data_volume.rs"; }) bindings.rust;
+  fs.writeAll caps.write (t.join "" { root; "/scripts/lib/data_volume_contract.py"; }) bindings.python
+];
+
+main

@@ -235,6 +235,223 @@ impl<'a> FrameStore<'a> {
     }
 }
 
+/// A store read where it lies rather than mapped whole, such as a frame store on a block device.
+pub trait StoreSource {
+    /// Fills `out` with the store's bytes from `offset`. [`validate_streaming`] reads only below the
+    /// length it was given.
+    fn read(&mut self, offset: usize, out: &mut [u8]) -> Result<(), SourceError>;
+}
+
+/// The source could not supply the bytes asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SourceError;
+
+/// Why [`validate_streaming`] stopped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StreamError {
+    /// The store failed a check: the class [`FrameStore::parse`] gives the same bytes.
+    Refused(Refusal),
+    /// The source failed before the store could be judged.
+    Source,
+}
+
+impl From<SourceError> for StreamError {
+    fn from(_: SourceError) -> Self {
+        Self::Source
+    }
+}
+
+/// What a streamed store holds, for a reader that keeps no frame in memory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StoreSummary {
+    pub frame_count: usize,
+    pub frame_period_ns: u64,
+    pub first_log_time_ns: u64,
+    pub last_log_time_ns: u64,
+    /// SHA-256 of every payload, concatenated in index order.
+    pub payload_digest: [u8; 32],
+}
+
+/// Bytes read per source call while scanning texts, zero runs and payloads.
+const STREAM_CHUNK: usize = 512;
+
+fn refused(refusal: Refusal) -> StreamError {
+    StreamError::Refused(refusal)
+}
+
+/// UTF-8 without a NUL, read in chunks. A code point split across chunks is carried into the next.
+fn stream_text<S: StoreSource>(
+    source: &mut S,
+    start: usize,
+    len: usize,
+) -> Result<(), StreamError> {
+    let mut buffer = [0u8; STREAM_CHUNK + 3];
+    let mut carry = 0;
+    let mut done = 0;
+    while done < len {
+        let take = (len - done).min(STREAM_CHUNK);
+        source.read(start + done, &mut buffer[carry..carry + take])?;
+        if buffer[carry..carry + take].contains(&0) {
+            return Err(refused(Refusal::Header));
+        }
+        let filled = carry + take;
+        carry = match core::str::from_utf8(&buffer[..filled]) {
+            Ok(_) => 0,
+            Err(error) if error.error_len().is_none() => {
+                let valid = error.valid_up_to();
+                buffer.copy_within(valid..filled, 0);
+                filled - valid
+            }
+            Err(_) => return Err(refused(Refusal::Header)),
+        };
+        done += take;
+    }
+    if carry != 0 {
+        return Err(refused(Refusal::Header));
+    }
+    Ok(())
+}
+
+/// Whether every byte in `[from, to)` is zero.
+fn stream_zero<S: StoreSource>(
+    source: &mut S,
+    from: usize,
+    to: usize,
+) -> Result<bool, StreamError> {
+    let mut buffer = [0u8; STREAM_CHUNK];
+    let mut at = from;
+    while at < to {
+        let take = (to - at).min(STREAM_CHUNK);
+        source.read(at, &mut buffer[..take])?;
+        if !zero(&buffer[..take]) {
+            return Ok(false);
+        }
+        at += take;
+    }
+    Ok(true)
+}
+
+/// Validates a store of `size` bytes read through `source`, in the same order and with the same
+/// classes as [`FrameStore::parse`], holding no more than one header, one index entry and one
+/// chunk at a time. Payloads are hashed in index order as their entries pass.
+pub fn validate_streaming<S: StoreSource>(
+    source: &mut S,
+    size: usize,
+) -> Result<StoreSummary, StreamError> {
+    use boot_contracts::sha256::Sha256;
+
+    if size > MAX_STORE_BYTES {
+        return Err(refused(Refusal::StoreBound));
+    }
+    if size < HEADER_BYTES {
+        return Err(refused(Refusal::Truncated));
+    }
+    let mut raw = [0u8; HEADER_BYTES];
+    source.read(0, &mut raw)?;
+    let header = WireFrameStoreHeader::decode(&raw).ok_or(refused(Refusal::Truncated))?;
+    if header.magic != FRAME_STORE_MAGIC {
+        return Err(refused(Refusal::Magic));
+    }
+    if header.version != FORMAT_VERSION {
+        return Err(refused(Refusal::Version));
+    }
+    if header.hashVersion != HASH_VERSION_RIHS01
+        || !zero(&header.reserved0)
+        || !zero(&header.reserved1)
+        || header.framePeriodNs == 0
+    {
+        return Err(refused(Refusal::Header));
+    }
+    let topic_len = usize::from(header.topicBytes);
+    let type_len = usize::from(header.typeNameBytes);
+    let schema_len = header.schemaBytes as usize;
+    if !(1..=MAX_TOPIC_BYTES).contains(&topic_len)
+        || !(1..=MAX_TYPE_NAME_BYTES).contains(&type_len)
+        || !(1..=MAX_SCHEMA_BYTES).contains(&schema_len)
+    {
+        return Err(refused(Refusal::Header));
+    }
+    let frame_count = header.frameCount as usize;
+    if !(1..=MAX_FRAMES).contains(&frame_count) {
+        return Err(refused(Refusal::FrameCount));
+    }
+    let topic_end = HEADER_BYTES + topic_len;
+    let type_end = topic_end + type_len;
+    let text_end = type_end + schema_len;
+    let index_start = align(text_end);
+    let data_start = index_start + frame_count * INDEX_ENTRY_BYTES;
+    if size < data_start {
+        return Err(refused(Refusal::Truncated));
+    }
+    stream_text(source, HEADER_BYTES, topic_len)?;
+    stream_text(source, topic_end, type_len)?;
+    stream_text(source, type_end, schema_len)?;
+    if !stream_zero(source, text_end, index_start)? {
+        return Err(refused(Refusal::Header));
+    }
+
+    let mut digest = Sha256::new();
+    let mut chunk = [0u8; STREAM_CHUNK];
+    let mut cursor = data_start;
+    let mut previous_end = data_start;
+    let mut first_time = 0;
+    let mut previous_time: Option<u64> = None;
+    for index in 0..frame_count {
+        let mut raw = [0u8; INDEX_ENTRY_BYTES];
+        source.read(index_start + index * INDEX_ENTRY_BYTES, &mut raw)?;
+        let entry = WireFrameIndexEntry::decode(&raw).ok_or(refused(Refusal::Truncated))?;
+        if !zero(&entry.reserved) {
+            return Err(refused(Refusal::Header));
+        }
+        let length = entry.payloadBytes as usize;
+        if length > MAX_PAYLOAD_BYTES {
+            return Err(refused(Refusal::PayloadBound));
+        }
+        if previous_time.is_some_and(|previous| entry.logTimeNs < previous) {
+            return Err(refused(Refusal::Order));
+        }
+        let offset = match usize::try_from(entry.payloadOffset) {
+            Ok(offset) if offset <= size && length <= size - offset => offset,
+            _ => return Err(refused(Refusal::Range)),
+        };
+        if offset < cursor {
+            return Err(refused(Refusal::Overlap));
+        }
+        if offset > cursor || !stream_zero(source, previous_end, offset)? {
+            return Err(refused(Refusal::Padding));
+        }
+        let mut at = offset;
+        while at < offset + length {
+            let take = (offset + length - at).min(STREAM_CHUNK);
+            source.read(at, &mut chunk[..take])?;
+            digest.update(&chunk[..take]);
+            at += take;
+        }
+        if index == 0 {
+            first_time = entry.logTimeNs;
+        }
+        previous_time = Some(entry.logTimeNs);
+        previous_end = offset + length;
+        cursor = align(previous_end);
+    }
+    if !stream_zero(source, previous_end, cursor.min(size))? {
+        return Err(refused(Refusal::Padding));
+    }
+    if size < cursor {
+        return Err(refused(Refusal::Range));
+    }
+    if size > cursor {
+        return Err(refused(Refusal::Trailing));
+    }
+    Ok(StoreSummary {
+        frame_count,
+        frame_period_ns: header.framePeriodNs,
+        first_log_time_ns: first_time,
+        last_log_time_ns: previous_time.unwrap_or(first_time),
+        payload_digest: digest.finalize(),
+    })
+}
+
 // The class table and the enum must agree; this fails to compile if the table changes length.
 const _: [(); 12] = [(); wire::REFUSAL_CLASSES.len()];
 
@@ -317,6 +534,136 @@ mod tests {
         let mut bytes = FIXTURE.to_vec();
         bytes[entry..entry + 8].copy_from_slice(&(u64::MAX - 7).to_le_bytes());
         assert_eq!(FrameStore::parse(&bytes).err(), Some(Refusal::Range));
+    }
+}
+
+#[cfg(test)]
+mod streaming {
+    extern crate std;
+
+    use super::{FrameStore, Refusal, SourceError, StoreSource, StreamError, validate_streaming};
+    use std::vec::Vec;
+
+    const FIXTURE: &[u8] = include_bytes!("frame_store/fixture.bin");
+
+    struct Memory<'a>(&'a [u8]);
+
+    impl StoreSource for Memory<'_> {
+        fn read(&mut self, offset: usize, out: &mut [u8]) -> Result<(), SourceError> {
+            let bytes = self.0.get(offset..offset + out.len()).ok_or(SourceError)?;
+            out.copy_from_slice(bytes);
+            Ok(())
+        }
+    }
+
+    fn streamed(bytes: &[u8]) -> Result<(), Refusal> {
+        match validate_streaming(&mut Memory(bytes), bytes.len()) {
+            Ok(_) => Ok(()),
+            Err(StreamError::Refused(refusal)) => Err(refusal),
+            Err(StreamError::Source) => panic!("the source failed inside the store's length"),
+        }
+    }
+
+    fn parsed(bytes: &[u8]) -> Result<(), Refusal> {
+        FrameStore::parse(bytes).map(|_| ())
+    }
+
+    /// A store with a schema longer than one chunk whose multi-byte characters straddle chunk ends.
+    fn wide() -> Vec<u8> {
+        let mut bytes = FIXTURE.to_vec();
+        let header = 64;
+        let topic = u16::from_le_bytes([bytes[12], bytes[13]]) as usize;
+        let type_len = u16::from_le_bytes([bytes[14], bytes[15]]) as usize;
+        let schema_len = u32::from_le_bytes(bytes[16..20].try_into().unwrap()) as usize;
+        let schema_start = header + topic + type_len;
+        let tail = bytes[schema_start + schema_len..].to_vec();
+        let old_index = (schema_start + schema_len).div_ceil(8) * 8;
+        let mut schema = std::string::String::from("string data\n");
+        while schema.len() < 1500 {
+            schema.push_str("# é𝄞 comment\n");
+        }
+        let delta = schema.len() as isize - schema_len as isize;
+        bytes.truncate(schema_start);
+        bytes.extend_from_slice(schema.as_bytes());
+        let new_index = bytes.len().div_ceil(8) * 8;
+        bytes.resize(new_index, 0);
+        bytes.extend_from_slice(&tail[old_index - (schema_start + schema_len)..]);
+        bytes[16..20].copy_from_slice(&(schema.len() as u32).to_le_bytes());
+        let shift = new_index as isize - old_index as isize;
+        let count = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
+        for index in 0..count {
+            let at = new_index + index * 24;
+            let offset = u64::from_le_bytes(bytes[at..at + 8].try_into().unwrap());
+            bytes[at..at + 8].copy_from_slice(&((offset as isize + shift) as u64).to_le_bytes());
+        }
+        let _ = delta;
+        assert!(parsed(&bytes).is_ok(), "the widened store is valid");
+        bytes
+    }
+
+    #[test]
+    fn accepted_stores_summarize_their_frames() {
+        for bytes in [FIXTURE.to_vec(), wide()] {
+            let summary = validate_streaming(&mut Memory(&bytes), bytes.len()).expect("valid");
+            let store = FrameStore::parse(&bytes).expect("valid");
+            let mut payloads = Vec::new();
+            for frame in store.frames() {
+                payloads.extend_from_slice(frame.payload);
+            }
+            assert_eq!(summary.frame_count, store.len());
+            assert_eq!(summary.frame_period_ns, store.frame_period_ns());
+            assert_eq!(
+                summary.first_log_time_ns,
+                store.frame(0).unwrap().log_time_ns
+            );
+            assert_eq!(
+                summary.last_log_time_ns,
+                store.frame(store.len() - 1).unwrap().log_time_ns
+            );
+            assert_eq!(
+                summary.payload_digest,
+                boot_contracts::sha256::digest(&payloads)
+            );
+        }
+    }
+
+    /// Every single-byte edit, every truncation and an extension: the streaming reader gives exactly
+    /// the verdict the whole-store reader gives.
+    #[test]
+    fn every_edit_gets_the_whole_store_verdict() {
+        for base in [FIXTURE.to_vec(), wide()] {
+            for index in 0..base.len() {
+                for flip in [0x01u8, 0x80, 0xff] {
+                    let mut bytes = base.clone();
+                    bytes[index] ^= flip;
+                    assert_eq!(streamed(&bytes), parsed(&bytes), "byte {index} ^ {flip:#x}");
+                }
+            }
+            for length in 0..base.len() {
+                assert_eq!(
+                    streamed(&base[..length]),
+                    parsed(&base[..length]),
+                    "length {length}"
+                );
+            }
+            let mut longer = base.clone();
+            longer.extend_from_slice(&[0; 8]);
+            assert_eq!(streamed(&longer), parsed(&longer));
+        }
+    }
+
+    #[test]
+    fn a_failing_source_is_not_a_refusal() {
+        struct Broken;
+        impl StoreSource for Broken {
+            fn read(&mut self, _: usize, _: &mut [u8]) -> Result<(), SourceError> {
+                Err(SourceError)
+            }
+        }
+        assert_eq!(
+            validate_streaming(&mut Broken, FIXTURE.len()),
+            Err(StreamError::Source)
+        );
     }
 }
 

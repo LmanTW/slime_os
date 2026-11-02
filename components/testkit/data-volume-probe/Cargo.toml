@@ -1,0 +1,23 @@
+[package]
+name = "slime-component-data-volume-probe"
+version = "0.1.0"
+edition = "2024"
+publish = false
+rust-version = "1.96"
+build = "build.rs"
+
+[[bin]]
+name = "data-volume-probe"
+path = "src/main.rs"
+test = false
+
+[dependencies]
+slime-components = { path = "../../lib", features = ["component-runtime"] }
+slime-proto = { path = "../../proto" }
+slime-rt = { path = "../../runtime" }
+
+[build-dependencies]
+slime-build-support = { path = "../../build-support" }
+
+[lints]
+workspace = true

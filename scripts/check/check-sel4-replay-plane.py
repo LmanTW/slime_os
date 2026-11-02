@@ -94,7 +94,8 @@ CHAINS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "a holder of an unrecorded source carries no determinism claim",
         (
             r"SLIME_RECORD entry task=\d+ instance=replay-unrecorded role=1 capacity=8 deterministic=0",
-            r"\[virtio-blk-driver\] authority rings=1 rights=read,write source=generation",
+            # The unrecorded holder's ring is read-only, and the driver reports the rights it enforces.
+            r"\[virtio-blk-driver\] authority rings=1 rights=read source=generation",
             r"\[virtio-blk-driver\] ready capacity=\d+ epoch=\d+",
             r"\[replay:unrecorded\] role=record capacity=8 claim=0",
             r"\[replay:unrecorded\] unrecorded source held",

@@ -42,5 +42,5 @@ The partition type GUID is `8F4C2A91-3B7E-4D6A-9C15-5E2F7A0B4D38` (written here 
 `scripts/build/build-data-volume.py --kind frame-store --payload FILE --output DISK` writes a disk. A
 components/lib reader validates one through a block ring, in the order above, without holding the
 payload whole. The testkit component `data-volume-probe` in the `sel4-data-volume` composition reports
-what it read. `just data_volume_check` judges both. Work item `01a19add-bddf-77a3-ab9c-ca12ecb6512f` implements them; until then the
-check fails.
+what it read. `just data_volume_check` judges both. Work item `01a19add-bddf-77a3-ab9c-ca12ecb6512f`
+implemented them; `contracts/data-volume/v1/gen.zt` renders the constants both sides read.

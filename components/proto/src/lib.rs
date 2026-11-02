@@ -5,6 +5,7 @@ pub mod block;
 pub mod block_v2;
 pub mod capability_transfer;
 pub mod component;
+pub mod data_volume;
 pub mod entropy_service;
 pub mod entropy_source;
 pub mod fabric_call;

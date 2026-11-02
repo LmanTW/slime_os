@@ -471,6 +471,11 @@ opt-level = "s"
 codegen-units = 1
 debug = false
 
+[profile.release.package.slime-component-data-volume-probe]
+opt-level = "s"
+codegen-units = 1
+debug = false
+
 [profile.release.package.slime-component-sel4-store-probe]
 opt-level = "s"
 codegen-units = 1

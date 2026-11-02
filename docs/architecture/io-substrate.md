@@ -77,9 +77,10 @@ bounded `LinkDevice` with duplex queueing and replenished receive buffers. The
 boot selector retains a narrow pre-admission block reader compiled only into
 selector images; it is not a root product driver.
 
-All eight block compositions (`sel4-storage`, `sel4-store`, `sel4-rollback`,
-`sel4-replay`, `sel4-generation`, `sel4-filesystem`, `sel4-recovery`, and
-`sel4-transfer`) use `components/lib/src/block_io.rs` and userspace-driver rings.
+All nine block compositions (`sel4-storage`, `sel4-store`, `sel4-rollback`,
+`sel4-replay`, `sel4-generation`, `sel4-filesystem`, `sel4-recovery`,
+`sel4-transfer`, and `sel4-data-volume`) use `components/lib/src/block_io.rs` and
+userspace-driver rings.
 Their gates require driver authority, bring-up/release and root DMA reclamation,
 not a root block service. The selector reader is `boot_selector_block.rs` under
 `#[cfg(slime_boot_selector)]`; the root product has no block command/descriptor
@@ -95,6 +96,28 @@ IO1's budget supplies a per-instance device ordinal throughout device identity.
 `sel4-recovery` declares a writable recovery disk and byte-identity-checked
 read-only guard disk; `sel4-transfer` declares a source and receiver. Each has two
 driver instances; read-only refusal belongs to driver ring authority.
+`virtio-blk-driver` reports the rights its own ring holds and each request it
+refuses for them, so a gate observes the refusal from the component that
+enforces it rather than from the refused client.
+
+### Data volumes
+
+A data volume carries one hash-pinned payload on a disk a run attaches read-only
+(`contracts/data-volume/v1`). The payload is a run input, not an image input: no
+system-image closure names the disk, so a new recording changes no derivation id.
+`scripts/build/build-data-volume.py` writes the one GPT disk image of a frame
+store; its GUIDs derive from the payload's SHA-256.
+
+`components/lib/src/data_volume.rs` validates the disk through a block ring in the
+contract's order: GPT, partition, volume header, length, padding and payload hash.
+It then validates the payload with `frame_store::validate_streaming`, which applies
+`FrameStore::parse`'s checks in the same order to a store read where it lies. The
+reader holds one sector and one 4 KiB chunk, never the payload. `data-volume-probe`
+in `sel4-data-volume` runs it over a ring with read rights only and links no
+allocator.
+
+A finite plane's root stops serving after 131072 requests. One 4 KiB read costs
+about six, so one boot of such a plane reads at most about 80 MiB.
 
 A dynamically spawned client receives exactly its generation-declared crossing
 grant vector, supplied by init to `drive_probe_plane_with_token`.

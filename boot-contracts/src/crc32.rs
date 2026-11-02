@@ -23,11 +23,38 @@ const fn build_table() -> [u32; 256] {
 const TABLE: [u32; 256] = build_table();
 
 pub fn crc32(data: &[u8]) -> u32 {
-    let mut crc = !0u32;
-    for byte in data {
-        crc = TABLE[((crc ^ *byte as u32) & 0xFF) as usize] ^ (crc >> 8);
+    let mut crc = Crc32::new();
+    crc.update(data);
+    crc.finish()
+}
+
+/// CRC-32/IEEE over data that arrives in pieces, such as a GPT entry array read one sector at a
+/// time. `finish` of the pieces equals [`crc32`] of their concatenation.
+#[derive(Debug, Clone, Copy)]
+pub struct Crc32 {
+    state: u32,
+}
+
+impl Crc32 {
+    pub const fn new() -> Self {
+        Self { state: !0 }
     }
-    !crc
+
+    pub fn update(&mut self, data: &[u8]) {
+        for byte in data {
+            self.state = TABLE[((self.state ^ *byte as u32) & 0xFF) as usize] ^ (self.state >> 8);
+        }
+    }
+
+    pub const fn finish(self) -> u32 {
+        !self.state
+    }
+}
+
+impl Default for Crc32 {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[cfg(test)]
@@ -51,6 +78,18 @@ mod tests {
             crc32(b"The quick brown fox jumps over the lazy dog"),
             0x414f_a339
         );
+    }
+
+    /// Pieces of any split give the checksum of the whole.
+    #[test]
+    fn pieces_equal_the_whole() {
+        let data: alloc::vec::Vec<u8> = (0..=255u8).cycle().take(1000).collect();
+        for split in [0, 1, 7, 512, 999, 1000] {
+            let mut crc = Crc32::new();
+            crc.update(&data[..split]);
+            crc.update(&data[split..]);
+            assert_eq!(crc.finish(), crc32(&data), "split at {split}");
+        }
     }
 
     /// Every byte value, so no table entry can be wrong without being caught.

@@ -121,6 +121,15 @@ BINDINGS: dict[str, tuple[Run, ...]] = {
         _rust("fabric-visibility", "v1", "fabric_visibility", "FABRIC_VISIBILITY", same(f"{LIB}/fabric_visibility_contract.py")),
     ),
     "frame-store": (_rust("frame-store", "v1", "frame_store", "FRAME_STORE", same(f"{LIB}/frame_store_contract.py")),),
+    "data-volume": (
+        run(
+            "contracts/data-volume/v1/schema.zt",
+            "SLIME_DATA_VOLUME_BINDINGS_ROOT",
+            same(f"{PROTO}/data_volume.rs"),
+            same(f"{LIB}/data_volume_contract.py"),
+            invalid="INVALID_DATA_VOLUME_SCHEMA",
+        ),
+    ),
     "fs": (_rust("fs", "v1", "fs", "FS", flat(f"{LIB}/fs_contracts.py")),),
     "generation-management": (
         run(

@@ -57,6 +57,14 @@
       systemSpec = "contracts/system-spec/v1/systems/sel4-crossing.zti";
     };
     {
+      baseline = "";
+      composition = "sel4-data-volume";
+      deferralReason = "";
+      owningGate = "data_volume_check";
+      state = "specNative";
+      systemSpec = "contracts/system-spec/v1/systems/sel4-data-volume.zti";
+    };
+    {
       baseline = "contracts/system-spec/v1/baselines/sel4-demo.zti";
       composition = "sel4-demo";
       deferralReason = "";

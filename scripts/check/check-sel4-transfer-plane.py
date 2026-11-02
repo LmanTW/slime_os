@@ -322,13 +322,15 @@ def check_transcript(transcript: str) -> None:
             fail(f"the root recorded no distinct IO quota for {instance}")
     # Driver output is scheduler-independent, so assert presence/count here
     # rather than forcing either instance ahead of the probe in the marker chain.
+    # Each driver reports the rights its own ring holds: device 0's ring is read-write and
+    # device 1's is read-only, so one of each must appear.
     authority = re.findall(
-        r"\[virtio-blk-driver\] authority rings=1 rights=read,write source=generation",
+        r"\[virtio-blk-driver\] authority rings=1 rights=(read,write|read) source=generation",
         transcript,
     )
-    if len(authority) != 2:
+    if sorted(authority) != ["read", "read,write"]:
         report_transcript(transcript)
-        fail(f"{len(authority)} driver instances read their authority table, expected 2")
+        fail(f"the driver instances read authority {authority}, expected one read,write and one read")
     ready = re.findall(r"\[virtio-blk-driver\] ready capacity=\d+ epoch=\d+", transcript)
     if len(ready) != 2:
         report_transcript(transcript)

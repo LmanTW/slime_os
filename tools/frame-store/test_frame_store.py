@@ -149,5 +149,42 @@ class Convert(unittest.TestCase):
         self.assertEqual(caught.exception.kind, "bound")
 
 
+class Validate(unittest.TestCase):
+    FIXTURE = (fs.ROOT / "components" / "lib" / "src" / "frame_store" / "fixture.bin").read_bytes()
+
+    def refused(self, data: bytes) -> str | None:
+        try:
+            fs.validate(data)
+        except fs.InvalidStore as error:
+            return error.kind
+        return None
+
+    def test_accepts_the_fixture_and_an_encoded_store(self) -> None:
+        self.assertIsNone(self.refused(self.FIXTURE))
+        store = fs.Store("/a", "std_msgs/msg/String", "string data\n", 5, ((1, b""), (2, b"x" * 9), (2, b"y")))
+        self.assertIsNone(self.refused(fs.encode(store)))
+
+    def test_refuses_by_class(self) -> None:
+        def edited(index: int, value: int) -> bytes:
+            data = bytearray(self.FIXTURE)
+            data[index] = value
+            return bytes(data)
+        cases = {
+            "truncated": self.FIXTURE[:63],
+            "magic": edited(0, self.FIXTURE[0] ^ 1),
+            "version": edited(4, 2),
+            "header": edited(7, 1),
+            "frame-count": self.FIXTURE[:8] + bytes(4) + self.FIXTURE[12:],
+            "trailing": self.FIXTURE + bytes(8),
+            "padding": edited(len(self.FIXTURE) - 1, 1),
+        }
+        for kind, data in cases.items():
+            self.assertEqual(self.refused(data), kind, kind)
+
+    def test_every_truncation_is_refused(self) -> None:
+        for length in range(len(self.FIXTURE)):
+            self.assertIsNotNone(self.refused(self.FIXTURE[:length]), length)
+
+
 if __name__ == "__main__":
     unittest.main()

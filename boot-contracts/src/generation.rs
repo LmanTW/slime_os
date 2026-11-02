@@ -236,6 +236,9 @@ pub enum BootAction {
     /// bounded one that completes, and resident ones whose exit the root
     /// records as a failure rather than as completion.
     Lifetime = 40,
+    /// A hash-pinned data volume read through a read-only block ring: the honest volume and every
+    /// broken one the data-volume exam boots.
+    DataVolume = 41,
 }
 
 impl BootAction {
@@ -297,6 +300,7 @@ impl BootAction {
         Self::Slisp,
         Self::PrivateMemoryCycles,
         Self::Lifetime,
+        Self::DataVolume,
     ];
 
     /// The composition a wire id names, or `None` for an id this build does not
@@ -349,6 +353,7 @@ impl BootAction {
                 Self::Slisp => Self::Slisp.id(),
                 Self::PrivateMemoryCycles => Self::PrivateMemoryCycles.id(),
                 Self::Lifetime => Self::Lifetime.id(),
+                Self::DataVolume => Self::DataVolume.id(),
             };
             declared == id
         })
@@ -387,6 +392,7 @@ impl BootAction {
             "private-memory" => Self::PrivateMemory,
             "private-memory-cycles" => Self::PrivateMemoryCycles,
             "lifetime" => Self::Lifetime,
+            "data-volume" => Self::DataVolume,
             "clock-authority" => Self::ClockAuthority,
             "wait-set" => Self::WaitSet,
             "scheduling-class" => Self::SchedulingClass,
@@ -3055,7 +3061,7 @@ mod tests {
     ///
     /// Shared with `boot_action_ids_round_trip`, which uses it as the
     /// independent second source proving `BootAction::ALL` is complete.
-    const FROZEN_BOOT_ACTIONS: [(BootAction, u32); 39] = [
+    const FROZEN_BOOT_ACTIONS: [(BootAction, u32); 40] = [
         (BootAction::Product, 1),
         (BootAction::Boot, 2),
         (BootAction::Call, 3),
@@ -3095,6 +3101,7 @@ mod tests {
         (BootAction::Slisp, 38),
         (BootAction::PrivateMemoryCycles, 39),
         (BootAction::Lifetime, 40),
+        (BootAction::DataVolume, 41),
     ];
 
     #[test]
@@ -3168,6 +3175,7 @@ mod tests {
             ("demo", BootAction::Demo),
             ("c-runtime", BootAction::CRuntime),
             ("slisp", BootAction::Slisp),
+            ("data-volume", BootAction::DataVolume),
         ] {
             assert_eq!(BootAction::parse(spelling), Some(expected));
         }

@@ -354,6 +354,86 @@ def encode(store: Store) -> bytes:
     return bytes(out)
 
 
+class InvalidStore(Exception):
+    """A byte string that is not a frame store; `kind` is one of the contract's refusal classes."""
+
+    def __init__(self, kind: str, detail: str):
+        assert kind in contract.REFUSAL_CLASSES, kind
+        super().__init__(f"{kind}: {detail}")
+        self.kind = kind
+
+
+def _text(raw: bytes, what: str) -> None:
+    try:
+        raw.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise InvalidStore("header", f"the {what} is not UTF-8") from error
+    if b"\x00" in raw:
+        raise InvalidStore("header", f"the {what} holds a NUL")
+
+
+def validate(data: bytes) -> None:
+    """Checks `data` as a frame store in the contract's order, as the Rust reader does, and raises
+    `InvalidStore` with the class of the first check that fails."""
+    size = len(data)
+    if size > contract.MAX_STORE_BYTES:
+        raise InvalidStore("store-bound", f"{size} bytes")
+    if size < contract.HEADER_BYTES:
+        raise InvalidStore("truncated", "shorter than the header")
+    (magic, version, hash_version, reserved0, count, topic_len, type_len, schema_len, reserved1, period,
+     _type_hash) = contract.FRAME_STORE_HEADER.unpack_from(data)
+    if magic != contract.FRAME_STORE_MAGIC:
+        raise InvalidStore("magic", f"magic {magic:#x}")
+    if version != contract.FORMAT_VERSION:
+        raise InvalidStore("version", f"version {version}")
+    if hash_version != contract.HASH_VERSION_RIHS01 or any(reserved0) or any(reserved1) or period == 0:
+        raise InvalidStore("header", "the hash version, a reserved field or the period")
+    for length, bound in ((topic_len, contract.MAX_TOPIC_BYTES), (type_len, contract.MAX_TYPE_NAME_BYTES),
+                          (schema_len, contract.MAX_SCHEMA_BYTES)):
+        if not 1 <= length <= bound:
+            raise InvalidStore("header", f"a text length {length} outside 1..{bound}")
+    if not 1 <= count <= contract.MAX_FRAMES:
+        raise InvalidStore("frame-count", f"{count} frames")
+    topic_end = contract.HEADER_BYTES + topic_len
+    type_end = topic_end + type_len
+    text_end = type_end + schema_len
+    index_start = align(text_end)
+    data_start = index_start + contract.INDEX_ENTRY_BYTES * count
+    if size < data_start:
+        raise InvalidStore("truncated", "the store ends inside its index")
+    _text(data[contract.HEADER_BYTES:topic_end], "topic")
+    _text(data[topic_end:type_end], "type name")
+    _text(data[type_end:text_end], "schema")
+    if any(data[text_end:index_start]):
+        raise InvalidStore("header", "a byte before the index is not zero")
+    cursor = previous_end = data_start
+    previous_time = None
+    for index in range(count):
+        offset, length, reserved, log_time = contract.FRAME_INDEX_ENTRY.unpack_from(
+            data, index_start + contract.INDEX_ENTRY_BYTES * index)
+        if any(reserved):
+            raise InvalidStore("header", f"entry {index} has a reserved byte set")
+        if length > contract.MAX_PAYLOAD_BYTES:
+            raise InvalidStore("payload-bound", f"entry {index} holds {length} bytes")
+        if previous_time is not None and log_time < previous_time:
+            raise InvalidStore("order", f"entry {index} is earlier than entry {index - 1}")
+        if offset > size or length > size - offset:
+            raise InvalidStore("range", f"entry {index} ends past the store")
+        if offset < cursor:
+            raise InvalidStore("overlap", f"entry {index} starts before {cursor}")
+        if offset > cursor or any(data[previous_end:offset]):
+            raise InvalidStore("padding", f"entry {index} is not at the aligned end of the previous payload")
+        previous_time = log_time
+        previous_end = offset + length
+        cursor = align(previous_end)
+    if any(data[previous_end:min(cursor, size)]):
+        raise InvalidStore("padding", "a byte after the last payload is not zero")
+    if size < cursor:
+        raise InvalidStore("range", "the store ends inside its last payload's padding")
+    if size > cursor:
+        raise InvalidStore("trailing", f"{size - cursor} bytes after the last payload")
+
+
 def store_from_bag(bag: Bag, topic: str) -> Store:
     """The store for one channel: its messages in log-time order, file order among equal times.
 

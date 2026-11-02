@@ -59,6 +59,8 @@ mod boot_action {
     /// MEM-64M's private-memory reuse clause.
     pub const PRIVATE_MEMORY_CYCLES: u32 = 39;
     pub const LIFETIME: u32 = 40;
+    /// A hash-pinned data volume read through a read-only block ring.
+    pub const DATA_VOLUME: u32 = 41;
     // The table above is a hand copy of the contract's numbering, and the two
     // are an ABI: the root passes one of these words to this thread and this
     // file matches on it. Renumbering a variant in the contract without
@@ -102,6 +104,7 @@ mod boot_action {
     const _: () = assert!(ROBOT_RUNTIME == BootAction::RobotRuntime.id());
     const _: () = assert!(PRIVATE_MEMORY_CYCLES == BootAction::PrivateMemoryCycles.id());
     const _: () = assert!(LIFETIME == BootAction::Lifetime.id());
+    const _: () = assert!(DATA_VOLUME == BootAction::DataVolume.id());
 }
 
 /// Compose the graph the generation selected.
@@ -261,6 +264,11 @@ pub(super) fn compose_declared_graph(startup_arg: u32) {
         action::STORE => {
             drive_store_plane();
             slime_rt::debug_write(b"[init] store plane complete\n");
+            slime_rt::exit(0)
+        }
+        action::DATA_VOLUME => {
+            drive_data_volume_plane();
+            slime_rt::debug_write(b"[init] data volume plane complete\n");
             slime_rt::exit(0)
         }
         action::POWERBOX => {

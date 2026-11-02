@@ -116,10 +116,14 @@ fn main(_startup_arg: u32) {
     // ring from a read-write one must not accept a request, so this refuses the
     // boot rather than serving without the gate.
     let authority = Authority::read();
+    // The rights this driver's own ring holds, as the table states them: a read-only data volume and
+    // a read-write store differ here, and a gate reads this line rather than trusting its client.
     Line::<128>::new()
         .bytes(b"[virtio-blk-driver] authority rings=")
         .decimal(authority.table().ring_count() as u64)
-        .bytes(b" rights=read,write source=generation\n")
+        .bytes(b" rights=")
+        .bytes(ring_rights(&authority, device.device, RING_INDEX))
+        .bytes(b" source=generation\n")
         .emit();
     send_ready(capacity);
     Line::<128>::new()
@@ -357,6 +361,23 @@ fn drain(
         // authority instead, because a ring is shared memory and a submission
         // carries no rights identity to derive one from.
         if !authority.allows(device_index, ring_index, &request) {
+            // Reported by the component that enforces the ring's authority, so a gate does not take
+            // the refused client's word for it.
+            Line::<128>::new()
+                .bytes(b"[virtio-blk-driver] refused ")
+                .bytes(match request.op {
+                    block_v2::OP_READ => b"read" as &[u8],
+                    block_v2::OP_WRITE => b"write",
+                    block_v2::OP_FLUSH => b"flush",
+                    block_v2::OP_GEOMETRY => b"geometry",
+                    _ => b"other",
+                })
+                .bytes(b" ring=")
+                .decimal(u64::from(ring_index))
+                .bytes(b" rights=")
+                .bytes(ring_rights(authority, device_index, ring_index))
+                .bytes(b"\n")
+                .emit();
             refuse_bad_rights(queue, submission.request_id, request.op, completion_ready);
             continue;
         }
@@ -669,6 +690,20 @@ impl Authority {
             }
             _ => table.authorizes(device, ring, right),
         }
+    }
+}
+
+/// The rights the authority table grants one ring, spelled as the driver reports them.
+fn ring_rights(authority: &Authority, device: u32, ring: u32) -> &'static [u8] {
+    let table = authority.table();
+    match (
+        table.authorizes(device, ring, block_authority::Right::Read),
+        table.authorizes(device, ring, block_authority::Right::Write),
+    ) {
+        (true, true) => b"read,write",
+        (true, false) => b"read",
+        (false, true) => b"write",
+        (false, false) => b"none",
     }
 }
 

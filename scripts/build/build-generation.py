@@ -398,6 +398,7 @@ SEL4_MANIFESTS = {
     # where that rule lives.
     "sel4-storage": GENERATION_COMPOSITIONS / "sel4-storage.zti",
     "sel4-store": GENERATION_COMPOSITIONS / "sel4-store.zti",
+    "sel4-data-volume": GENERATION_COMPOSITIONS / "sel4-data-volume.zti",
     "sel4-rollback": GENERATION_COMPOSITIONS / "sel4-rollback.zti",
     "sel4-recovery": GENERATION_COMPOSITIONS / "sel4-recovery.zti",
     "sel4-generation": GENERATION_COMPOSITIONS / "sel4-generation.zti",

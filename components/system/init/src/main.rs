@@ -727,6 +727,19 @@ fn drive_store_plane() {
     );
 }
 
+/// Drive the data-volume plane: spawn the probe, which reads the disk the run attached through its
+/// read-only block ring, and require a clean exit. A refused volume is a clean exit too; the gate
+/// judges what the probe printed. The probe's only crossing grant is its shared-buffer factory.
+fn drive_data_volume_plane() {
+    drive_probe_plane_with_token(
+        resolve_executable(b"executable:data-volume-probe"),
+        b"[init] data volume probe spawned\n",
+        b"data-volume",
+        None,
+        &crossing_factory(b"data-volume-init-buffer-factory"),
+    );
+}
+
 /// Drive the P5.4.2c storage plane: spawn the probe holding its block
 /// capability and require a clean exit.
 ///
