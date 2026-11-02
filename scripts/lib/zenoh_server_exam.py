@@ -159,22 +159,25 @@ def good_lines(text: str | None = None) -> list[str]:
     refused("publish-too-large", 0, OP["publish"], request(OP["publish"], 0, 8, text), TOO_LARGE)
     answer("take", 1, OP["take"], request(OP["take"], text=text), completion(OP["take"], text=text), "none")
 
-    # A full ring drops its oldest sample and says so once, before the samples that remain.
+    # A full ring drops its oldest sample and says so once, before the samples that remain. The stamp of each
+    # sample is the clock at its publication, so the exam records it when it advances the clock.
+    stamps: dict[int, int] = {}
     for seq in (10, 11, 12):
         clock += 1
+        stamps[seq] = clock
         answer("publish", 0, OP["publish"], request(OP["publish"], 0, seq, text), completion(OP["publish"], row=0, length=1, text=text), "row", 0, "sequence", seq, "length", 1, "reached", 1, "peer", "none")
     answer("take", 1, OP["take"], request(OP["take"], text=text), completion(OP["take"], item=ITEM_LOSS, length=1, text=text), "loss", 1)
     for seq in (11, 12):
-        stamp = CLOCK_START + 3 + (seq - 9)
-        page = header(seq, stamp, text) + bytes([seq])
-        answer("take", 1, OP["take"], request(OP["take"], text=text), completion(OP["take"], item=ITEM_SAMPLE, row=0, length=1, text=text), "sample", "row", 0, "sequence", seq, "timestamp", stamp, "page", page.hex())
+        page = header(seq, stamps[seq], text) + bytes([seq])
+        answer("take", 1, OP["take"], request(OP["take"], text=text), completion(OP["take"], item=ITEM_SAMPLE, row=0, length=1, text=text), "sample", "row", 0, "sequence", seq, "timestamp", stamps[seq], "page", page.hex())
 
     # A take whose buffer is smaller than the next sample is refused, and the sample stays in the ring.
     clock += 1
+    stamps[13] = clock
     answer("publish", 0, OP["publish"], request(OP["publish"], 0, 13, text), completion(OP["publish"], row=0, length=1, text=text), "row", 0, "sequence", 13, "length", 4, "reached", 1, "peer", "none")
     refused("take-small-buffer", 1, OP["take"], request(OP["take"], text=text), TOO_LARGE)
-    page = header(13, CLOCK_START + 3 + 4, text) + bytes([1, 1, 1, 1])
-    answer("take", 1, OP["take"], request(OP["take"], text=text), completion(OP["take"], item=ITEM_SAMPLE, row=0, length=4, text=text), "sample", "row", 0, "sequence", 13, "timestamp", CLOCK_START + 3 + 4, "page", page.hex())
+    page = header(13, stamps[13], text) + bytes([1, 1, 1, 1])
+    answer("take", 1, OP["take"], request(OP["take"], text=text), completion(OP["take"], item=ITEM_SAMPLE, row=0, length=4, text=text), "sample", "row", 0, "sequence", 13, "timestamp", stamps[13], "page", page.hex())
 
     # A request outside the protocol is answered with the operation it names, and changes nothing.
     for name, sent, status in (

@@ -255,6 +255,7 @@
     "scripts/lib/zenoh_links_exam.py",
     "scripts/lib/zenoh_listener_peer.py",
     "scripts/lib/zenoh_server_exam.py",
+    "scripts/lib/zenoh_service_arm.py",
     "scripts/lib/zenoh_service_component_exam.py",
     "scripts/lib/zenoh_service_exam.py",
     "scripts/lib/zenoh_service_link_exam.py",

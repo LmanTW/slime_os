@@ -123,6 +123,7 @@ import zenoh_client_wire_exam
 import zenoh_grants_builder_exam
 import zenoh_grants_reader_exam
 import zenoh_server_exam
+import zenoh_service_arm
 import zenoh_service_component_exam
 import zenoh_grants_table_exam
 import zenoh_service_exam
@@ -2260,17 +2261,22 @@ def service_component_main(controls_only: bool) -> int:
     return 0
 
 
+SERVICE_BOOTED_CONTROLS = 61
+
+
 def service_booted_main(controls_only: bool) -> int:
     """The composition and the booted exchange. The facts are read first. The arm then boots the image under QEMU and
     judges its marker chains, so a run that returns has seen the holders exchange through the service."""
     exam = zenoh_service_component_exam
     try:
-        refusals = exam.composition_controls()
+        refusals = exam.composition_controls() + zenoh_service_arm.controls()
+        if refusals != SERVICE_BOOTED_CONTROLS:
+            fail(f"service-booted: {refusals} controls, the checker pins {SERVICE_BOOTED_CONTROLS}")
         if controls_only:
-            print(f"zenoh profile 0 service-booted judge: refused {refusals} corrupted file sets")
+            print(f"zenoh profile 0 service-booted judge: refused {refusals} corrupted inputs")
             return 0
         cases = exam.check_composition()
-    except exam.ComponentExamError as error:
+    except (exam.ComponentExamError, zenoh_service_arm.ArmError) as error:
         fail(f"service-booted: {error}")
     arm = subprocess.run(
         [_sys.executable, str(ROOT / "scripts" / "check" / "check-sel4-io-network-plane.py"), "--arm", "zenoh-service"],
