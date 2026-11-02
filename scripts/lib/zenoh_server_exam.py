@@ -73,25 +73,37 @@ def header(sequence: int, timestamp: int, text: str | None = None) -> bytes:
 
 def unpack_completion(data: bytes, text: str | None = None) -> dict[str, int]:
     """A completion's fields, read with `struct` from the schema's layout."""
+    return _unpack(data, "completionLayout", "a completion", text)
+
+
+def unpack_request(data: bytes, text: str | None = None) -> dict[str, int]:
+    """A request's fields, read with `struct` from the schema's layout."""
+    return _unpack(data, "requestLayout", "a request", text)
+
+
+def _unpack(data: bytes, layout_name: str, what: str, text: str | None) -> dict[str, int]:
     text = client.SCHEMA.read_text(encoding="utf-8") if text is None else text
-    layout = client.layout(text, "completionLayout")
+    layout = client.layout(text, layout_name)
     code = {1: "b", 2: "h", 4: "i", 8: "q"}
     fmt = "<" + "".join(f"{width}s" if array else (code[width] if signed else code[width].upper()) for _, width, signed, array in layout)
-    _need(struct.calcsize(fmt) == len(data), f"a completion is {len(data)} bytes, the layout says {struct.calcsize(fmt)}")
+    _need(struct.calcsize(fmt) == len(data), f"{what} is {len(data)} bytes, the layout says {struct.calcsize(fmt)}")
     values = struct.unpack(fmt, data)
     return {name: value for (name, _, _, array), value in zip(layout, values, strict=True) if not array} | {
         "reserved": 0 if all(value == bytes(len(value)) for (_, _, _, array), value in zip(layout, values, strict=True) if array) else 1
     }
 
 
-def client_accepts(data: bytes, op: int, rows: int | None = None) -> bool:
+def client_accepts(data: bytes, op: int, rows: int | None = None, request_row: int | None = None) -> bool:
     """Whether a client of the protocol takes this completion as an answer to `op`. This restates the protocol's
     rules and does not read the adapter: the magic and version, the operation echoed, reserved bytes zero, only the
-    known flag, a status in the set, and a failure that carries nothing but its status."""
+    known flag, a status in the set, a publish that echoes the row it asked for whatever its status, and a failure
+    that carries nothing but its status."""
     fields = unpack_completion(data)
     if fields["magic"] != client.PINNED["serviceMagic"] or fields["version"] != 1 or fields["op"] != op or fields["reserved"] != 0:
         return False
     if fields["flags"] & ~FLAG_PEER_SENT or not LINK_CLOSED <= fields["status"] <= OK:
+        return False
+    if op == OP["publish"] and request_row is not None and fields["row"] != request_row:
         return False
     if fields["status"] != OK:
         return fields["item"] == ITEM_NONE and fields["length"] == 0 and fields["flags"] == 0
@@ -114,11 +126,13 @@ def good_lines(text: str | None = None) -> list[str]:
         out.append("server " + " ".join(str(word) for word in words))
 
     def answer(kind: str, who: str, op: int, sent: bytes, reply: bytes, *words: object, rows: int | None = None) -> None:
-        _need(client_accepts(reply, op, rows), f"the exam lists a completion the client would refuse: {kind} {who}")
+        asked = unpack_request(sent, text)["row"] if op == OP["publish"] else None
+        _need(client_accepts(reply, op, rows, asked), f"the exam lists a completion the client would refuse: {kind} {who}")
         line(kind, who, *words, "request", sent.hex(), "completion", reply.hex())
 
     def refused(kind: str, who: str, op: int, sent: bytes, status: int) -> None:
-        answer(kind, who, op, sent, completion(op, status, text=text), "refused", _status(status))
+        row = unpack_request(sent, text)["row"] if op == OP["publish"] else 0
+        answer(kind, who, op, sent, completion(op, status, row=row, text=text), "refused", _status(status))
 
     # Attach. A holder with rows gets the count of its rows. A holder with none, and a holder that is attached
     # already, is denied.
@@ -295,6 +309,13 @@ def acceptance_controls() -> int:
     refused = 0
     for label, data, op in cases:
         _need(not client_accepts(data, op), f"control: the client rules accepted {label}")
+        refused += 1
+    _need(client_accepts(completion(OP["publish"], DENIED, row=1), OP["publish"], request_row=1), "control: a publish refusal that echoes its row was refused")
+    for label, data in (
+        ("a publish completion with another row than the request", completion(OP["publish"], row=0, length=1)),
+        ("a publish refusal with another row than the request", completion(OP["publish"], DENIED, row=0)),
+    ):
+        _need(not client_accepts(data, OP["publish"], request_row=1), f"control: the client rules accepted {label}")
         refused += 1
     return refused
 

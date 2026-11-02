@@ -102,6 +102,7 @@ def judge(lines: list[str]) -> tuple[int, int]:
         elif m := DENIAL.fullmatch(line):
             _need(m.group(1) == "not-granted" and m.group(3) == "1", f"zenoh-service: a denial that is not a single not-granted refusal: {line!r}")
             _need(m.group(2) in attached, f"zenoh-service: a denial for {m.group(2)}, which never attached")
+            _need(m.group(2) not in detached, f"zenoh-service: a denial for {m.group(2)}, whose session had ended")
             denials += 1
         elif m := DETACHED.fullmatch(line):
             holder = m.group(1)
@@ -143,6 +144,7 @@ def mutations() -> list[tuple[str, list[str]]]:
         ("two denials", [*good[:-2], good[-3], *good[-2:]]),
         ("a denial of another class", [line.replace("not-granted", "unknown") for line in good]),
         ("a denial that refused nothing", [line.replace("refused=1", "refused=0") for line in good]),
+        ("a denial after the denied holder detached", [*good[:-3], good[-1], good[-3], good[-2]]),
         ("a denial for a holder that never attached", [line.replace("holder=beta refused", "holder=gamma refused") for line in good]),
         ("a holder that never detached", good[:-1]),
         ("a holder detached twice", [*good, good[-1]]),

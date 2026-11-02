@@ -2195,7 +2195,7 @@ def grants_reader_main(controls_only: bool) -> int:
 
 
 SERVER_PINNED_CASES = 39
-SERVER_PINNED_CONTROLS = 102
+SERVER_PINNED_CONTROLS = 104
 
 
 def run_server() -> list[str]:
@@ -2261,7 +2261,7 @@ def service_component_main(controls_only: bool) -> int:
     return 0
 
 
-SERVICE_BOOTED_CONTROLS = 62
+SERVICE_BOOTED_CONTROLS = 63
 
 
 def service_booted_main(controls_only: bool) -> int:
