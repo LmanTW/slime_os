@@ -757,6 +757,25 @@ pub(crate) fn entropy_authority_object<'a>(
     }
     None
 }
+/// Locate the authenticated Zenoh grants table. Decoded only to bound and page authenticated bytes;
+/// which holder may publish or subscribe to which key belongs to the Zenoh service.
+pub(crate) fn zenoh_grants_object<'a>(
+    generation: &Generation<'a>,
+) -> Option<
+    Result<slime_proto::zenoh_service_grants_table::Table<'a>, slime_proto::zenoh_service_grants_table::DecodeError>,
+> {
+    for index in 0..generation.object_count() {
+        let object = generation.object(index).ok()?;
+        if object.kind == KIND_RESOURCE
+            && object
+                .bytes
+                .starts_with(&slime_proto::zenoh_service_grants_table_wire::TABLE_MAGIC)
+        {
+            return Some(slime_proto::zenoh_service_grants_table::Table::decode(object.bytes));
+        }
+    }
+    None
+}
 /// Locate authenticated application rows without interpreting userspace policy.
 pub(crate) fn network_application_object<'a>(
     generation: &Generation<'a>,

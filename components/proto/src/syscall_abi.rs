@@ -50,6 +50,7 @@ pub mod capability_table_labels {
     pub const NETWORK_INTERFACE_READ: u64 = 71;
     pub const NETWORK_APPLICATION_READ: u64 = 72;
     pub const ENTROPY_AUTHORITY_READ: u64 = 74;
+    pub const ZENOH_GRANTS_READ: u64 = 75;
 }
 
 pub mod directory_labels {

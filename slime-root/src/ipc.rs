@@ -110,6 +110,7 @@ pub const fn service_for_root_label(label: sel4::Word) -> Option<u32> {
         | capability_table_labels::NETWORK_INTERFACE_READ
         | capability_table_labels::NETWORK_APPLICATION_READ
         | capability_table_labels::ENTROPY_AUTHORITY_READ
+        | capability_table_labels::ZENOH_GRANTS_READ
         | capability_table_labels::BLOCK_RING_AUTHORITY_READ
         | capability_table_labels::GRAPH_ROUTE_INDEX
         | capability_table_labels::GRAPH_QUERY
@@ -1342,6 +1343,51 @@ pub fn copy_entropy_authority_rows(
     Some(written / ENTROPY_AUTHORITY_ROW_BYTES)
 }
 
+pub const ZENOH_GRANTS_ROW_BYTES: usize =
+    slime_proto::zenoh_service_grants_table_wire::ENTRY_BYTES;
+pub const ZENOH_GRANTS_ROWS_PER_CALL: usize =
+    crate::transfer_window::MAX_STAGED_ARRAY_BYTES / ZENOH_GRANTS_ROW_BYTES;
+/// The one instance the grants table is served to.
+pub const ZENOH_GRANTS_READER_INSTANCE: &str = "zenoh-service";
+
+/// Copy authenticated Zenoh grants rows only to the instance named `zenoh-service`, on
+/// `read_entropy_authority`'s exact shape. The root decides no grant and opens no session.
+pub fn read_zenoh_grants(
+    generation: &boot_contracts::generation::Generation<'_>,
+    instance: usize,
+    cursor: usize,
+    out: &mut [u8],
+) -> Option<usize> {
+    let Some(Ok(table)) = crate::generation::zenoh_grants_object(generation) else {
+        return None;
+    };
+    let caller = generation.instance(instance).ok()?;
+    copy_zenoh_grants_rows(&table, caller.name, cursor, out)
+}
+
+/// The caller gate and paging of `read_zenoh_grants`, separated from the generation lookup so both
+/// can be exercised against a decoded table.
+pub fn copy_zenoh_grants_rows(
+    table: &slime_proto::zenoh_service_grants_table::Table<'_>,
+    caller: &str,
+    cursor: usize,
+    out: &mut [u8],
+) -> Option<usize> {
+    if caller != ZENOH_GRANTS_READER_INSTANCE {
+        return None;
+    }
+    let mut written = 0;
+    for index in cursor..table.row_count() {
+        let end = written + ZENOH_GRANTS_ROW_BYTES;
+        if end > out.len() || written / ZENOH_GRANTS_ROW_BYTES >= ZENOH_GRANTS_ROWS_PER_CALL {
+            break;
+        }
+        out[written..end].copy_from_slice(table.row_bytes(index)?);
+        written = end;
+    }
+    Some(written / ZENOH_GRANTS_ROW_BYTES)
+}
+
 pub const NETWORK_APPLICATION_ROW_BYTES: usize = boot_contracts::network_application::ENTRY_BYTES;
 pub const NETWORK_APPLICATION_ROWS_PER_CALL: usize =
     crate::transfer_window::MAX_STAGED_ARRAY_BYTES / NETWORK_APPLICATION_ROW_BYTES;
@@ -1846,6 +1892,10 @@ mod tests {
             ),
             (
                 capability_table_labels::ENTROPY_AUTHORITY_READ,
+                SERVICE_CAPABILITY_TRANSFER,
+            ),
+            (
+                capability_table_labels::ZENOH_GRANTS_READ,
                 SERVICE_CAPABILITY_TRANSFER,
             ),
             (
@@ -2413,5 +2463,99 @@ mod tests {
             copy_entropy_authority_rows(&table, service, 0, &mut []),
             Some(0)
         );
+    }
+
+    /// A table of `count` rows, holder `holder-<n>`, each holding the key `0/zenoh/<n>` with both rights,
+    /// written into `bytes`; returns its length. The rows are in the table's sort order.
+    fn zenoh_grants_table(count: usize, bytes: &mut [u8]) -> usize {
+        use slime_proto::zenoh_service_grants_table_wire as wire;
+        let header = wire::WireGrantsHeader {
+            magic: wire::TABLE_MAGIC,
+            format_version: wire::FORMAT_VERSION,
+            header_size: wire::HEADER_BYTES as u32,
+            required_flags: 0,
+            row_count: count as u32,
+            total_len: (wire::HEADER_BYTES + count * wire::ENTRY_BYTES) as u32,
+        };
+        bytes[..wire::HEADER_BYTES].copy_from_slice(&header.encode());
+        for index in 0..count {
+            let name = format!("holder-{index:02}");
+            let key = format!("0/zenoh/{index:02}");
+            let mut holder_name = [0u8; 32];
+            holder_name[..name.len()].copy_from_slice(name.as_bytes());
+            let mut key_bytes = [0u8; 129];
+            key_bytes[..key.len()].copy_from_slice(key.as_bytes());
+            let entry = wire::WireGrantsEntry {
+                holder_name,
+                holder_name_len: name.len() as u8,
+                rights: wire::KNOWN_RIGHTS as u8,
+                key_len: key.len() as u16,
+                key: key_bytes,
+                reserved: [0; 3],
+            };
+            let at = wire::HEADER_BYTES + index * wire::ENTRY_BYTES;
+            bytes[at..at + wire::ENTRY_BYTES].copy_from_slice(&entry.encode());
+        }
+        wire::HEADER_BYTES + count * wire::ENTRY_BYTES
+    }
+
+    #[test]
+    fn zenoh_grants_rows_are_served_only_to_the_zenoh_service() {
+        use slime_proto::zenoh_service_grants_table::Table;
+        let mut bytes = [0u8; 4 * 1024];
+        let len = zenoh_grants_table(3, &mut bytes);
+        let table = Table::decode(&bytes[..len]).unwrap();
+        let mut out = [0u8; ZENOH_GRANTS_ROWS_PER_CALL * ZENOH_GRANTS_ROW_BYTES];
+        for caller in [
+            "ros2-demo-publisher",
+            "zenoh-service2",
+            "zenoh",
+            "entropy-service",
+            "",
+        ] {
+            assert_eq!(
+                copy_zenoh_grants_rows(&table, caller, 0, &mut out),
+                None,
+                "{caller}"
+            );
+        }
+        assert!(
+            out.iter().all(|byte| *byte == 0),
+            "a refused caller receives no byte"
+        );
+        assert_eq!(
+            copy_zenoh_grants_rows(&table, ZENOH_GRANTS_READER_INSTANCE, 0, &mut out),
+            Some(3)
+        );
+        for index in 0..3 {
+            let at = index * ZENOH_GRANTS_ROW_BYTES;
+            assert_eq!(
+                &out[at..at + ZENOH_GRANTS_ROW_BYTES],
+                table.row_bytes(index).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn zenoh_grants_pages_by_row_cursor_within_the_staged_bound() {
+        use slime_proto::zenoh_service_grants_table::Table;
+        assert_eq!(ZENOH_GRANTS_ROW_BYTES, 168);
+        assert_eq!(ZENOH_GRANTS_ROWS_PER_CALL, 6);
+        let mut bytes = [0u8; 4 * 1024];
+        let len = zenoh_grants_table(7, &mut bytes);
+        let table = Table::decode(&bytes[..len]).unwrap();
+        let mut out = [0u8; 2 * ZENOH_GRANTS_ROWS_PER_CALL * ZENOH_GRANTS_ROW_BYTES];
+        let service = ZENOH_GRANTS_READER_INSTANCE;
+        assert_eq!(copy_zenoh_grants_rows(&table, service, 0, &mut out), Some(6));
+        assert_eq!(copy_zenoh_grants_rows(&table, service, 6, &mut out), Some(1));
+        assert_eq!(&out[..ZENOH_GRANTS_ROW_BYTES], table.row_bytes(6).unwrap());
+        assert_eq!(copy_zenoh_grants_rows(&table, service, 7, &mut out), Some(0));
+        assert_eq!(
+            copy_zenoh_grants_rows(&table, service, usize::MAX, &mut out),
+            Some(0)
+        );
+        let mut short = [0u8; 2 * ZENOH_GRANTS_ROW_BYTES + ZENOH_GRANTS_ROW_BYTES / 2];
+        assert_eq!(copy_zenoh_grants_rows(&table, service, 0, &mut short), Some(2));
+        assert_eq!(copy_zenoh_grants_rows(&table, service, 0, &mut []), Some(0));
     }
 }

@@ -958,6 +958,31 @@ pub(super) fn serve_instance_graph(
                 };
                 ipc::reply(response);
             }
+            capability_table_labels::ZENOH_GRANTS_READ => {
+                let cursor = words.first().copied().unwrap_or(0) as usize;
+                let response = match words.get(2).copied() {
+                    Some(transfer) => {
+                        let mut rows = [0u8; ipc::ZENOH_GRANTS_ROWS_PER_CALL
+                            * ipc::ZENOH_GRANTS_ROW_BYTES];
+                        match ipc::read_zenoh_grants(generation, instance, cursor, &mut rows) {
+                            Some(count) => {
+                                let bytes = &rows[..count * ipc::ZENOH_GRANTS_ROW_BYTES];
+                                match transfer_window::write_staged_region(
+                                    windows.bound(id, descriptor_thread(transfer)),
+                                    bytes,
+                                    scratch,
+                                ) {
+                                    Ok(descriptor) => Response::success(count as i64, descriptor),
+                                    Err(error) => Response::error(error),
+                                }
+                            }
+                            None => Response::error(IpcError::InvalidOperation),
+                        }
+                    }
+                    None => Response::error(IpcError::InvalidLength),
+                };
+                ipc::reply(response);
+            }
             capability_table_labels::NETWORK_APPLICATION_READ => {
                 let cursor = words.first().copied().unwrap_or(0) as usize;
                 let response = match words.get(2).copied() {

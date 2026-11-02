@@ -294,6 +294,15 @@ EntropyAuthorityEntry :: type {
   seed? : Text;
 };
 
+-- Zenoh service grant row: one holder, one exact Zenoh key, and the rights to
+-- publish and to subscribe on it. Encoded as `contracts/zenoh-service-grants-table/v1`.
+ZenohGrantEntry :: type {
+  holder : Text;
+  key : Text;
+  publish : Bool;
+  subscribe : Bool;
+};
+
 -- Application bindings and exact local listener policy, distinct from remote destinations.
 NetworkApplicationEntry :: type {
   holder : Text;
@@ -682,6 +691,9 @@ GenerationManifest :: type {
   -- Optional entropy authority table. Absent and empty both grant no holder
   -- any entropy; readable only by the instance named `entropy-service`.
   entropyAuthority? : List EntropyAuthorityEntry;
+  -- Optional Zenoh service grants table. Absent and empty both grant no holder
+  -- any Zenoh right; readable only by the instance named `zenoh-service`.
+  zenohGrants? : List ZenohGrantEntry;
   -- Optional B83 exact per-ring block authority table. Absent and empty both
   -- grant no ring any block right, so a userspace block driver refuses every
   -- submission rather than defaulting open. Readable only by the declared
@@ -746,6 +758,7 @@ FromData @NetworkDestinationEntry :: derive
 FromData @NetworkInterfaceEntry :: derive
 FromData @NetworkApplicationEntry :: derive
 FromData @EntropyAuthorityEntry :: derive
+FromData @ZenohGrantEntry :: derive
 FromData @BlockRingAuthorityEntry :: derive
 FromData @FabricProfileInterposition :: derive
 FromData @FabricProfile :: derive
@@ -783,6 +796,7 @@ decodeManifest :: Data -> Validation DecodeIssue GenerationManifest
   NetworkInterfaceEntry =;
   NetworkApplicationEntry =;
   EntropyAuthorityEntry =;
+  ZenohGrantEntry =;
   BlockRingAuthorityEntry =;
   ClockAuthorityEntry =;
   SchedulingClassBand =;
