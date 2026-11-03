@@ -214,7 +214,7 @@ fn connect(io: &mut NetworkIo<'_>, clock: &TickClock) -> ServiceConnection {
             fail(b"connect refused");
         }
         let now = monotonic_read().unwrap_or_else(|_| fail(b"clock read"));
-        if clock.millis(now.saturating_sub(start)) >= DEADLINE_MS {
+        if clock.millis(now) - clock.millis(start) >= DEADLINE_MS {
             fail(b"deadline");
         }
         yield_now();

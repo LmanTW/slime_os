@@ -213,11 +213,11 @@ pub fn serve<'k>(
     for (index, end) in ends.iter_mut().enumerate().take(names.count) {
         *end = Some(endpoints(&names.bytes[index][..names.lens[index]]));
     }
-    let base = monotonic_read().unwrap_or_else(|_| fail(b"clock read"));
     let mut epoch = 1u64;
     while attached == 0 || detached < attached {
+        // `millis` takes the counter as the root returns it and subtracts its own base.
         let ticks = monotonic_read().unwrap_or_else(|_| fail(b"clock read"));
-        let now = clock.millis(ticks.saturating_sub(base));
+        let now = clock.millis(ticks);
         let _ = link.pump(handle, now as u64);
         let _ = core.drain_notices(link);
         let _ = over
@@ -337,7 +337,22 @@ fn drive<'k>(
     let submission = match session.queue.take_request(&mut bytes, DATA_BYTES as u64) {
         Ok(submission) => submission,
         Err(error) if error.error == QueueError::Empty => return,
-        Err(_) => fail(b"malformed submission"),
+        // The request was consumed, so it is answered as malformed and only this holder is affected.
+        Err(error) => {
+            if !slime_proto::admit_network_request_id(
+                &mut session.last_request,
+                error.request_id,
+                error.epoch,
+                session.queue.epoch(),
+            ) || session
+                .queue
+                .complete(error.request_id, io_queue::STATUS_MALFORMED, 0, &[], false)
+                .is_err()
+            {
+                session.queue.mark_driver_dead();
+            }
+            return;
+        }
     };
     if !slime_proto::admit_network_request_id(
         &mut session.last_request,

@@ -80,6 +80,196 @@ mod tests {
     }
 
     #[test]
+    fn a_take_or_a_control_request_with_a_sequence_or_a_row_is_outside_the_protocol() {
+        let (mut server, core) = one_holder();
+        let with = |op: i64, row: u16, sequence: i64| {
+            WireServiceRequest {
+                magic: MAGIC,
+                version: VERSION,
+                op: op as u8,
+                flags: 0,
+                row,
+                reserved: [0; 2],
+                sequence,
+                reserved2: [0; 12],
+            }
+            .encode()
+        };
+        assert_eq!(
+            status(&server.control(&core, 0, &with(wire::OP_ATTACH, 0, 7))),
+            STATUS_MALFORMED
+        );
+        assert_eq!(
+            status(&server.control(&core, 0, &with(wire::OP_ATTACH, 1, 0))),
+            STATUS_MALFORMED
+        );
+        assert!(!server.attached(0), "a refused attach changes nothing");
+        assert_eq!(
+            status(&server.control(&core, 0, &with(wire::OP_ATTACH, 0, 0))),
+            0
+        );
+        for op in [wire::OP_DETACH, wire::OP_ABORT] {
+            assert_eq!(
+                status(&server.control(&core, 0, &with(op, 0, 3))),
+                STATUS_MALFORMED
+            );
+            assert!(server.attached(0), "a refused teardown leaves the session");
+        }
+        assert_eq!(
+            decode(&with(wire::OP_TAKE, 0, 5)).err().map(|a| status(&a)),
+            Some(STATUS_MALFORMED)
+        );
+        assert_eq!(
+            decode(&with(wire::OP_TAKE, 2, 0)).err().map(|a| status(&a)),
+            Some(STATUS_MALFORMED)
+        );
+        assert!(decode(&with(wire::OP_TAKE, 0, 0)).is_ok());
+        assert!(
+            decode(&with(wire::OP_PUBLISH, 3, 9)).is_ok(),
+            "a publish names a row and a sequence"
+        );
+    }
+
+    /// A publication refused because the stream stalled past the link's retry limit is not delivered locally later.
+    #[test]
+    fn a_publication_refused_on_a_stalled_stream_is_never_delivered_to_the_rings() {
+        use crate::zenoh_link::LinkOf;
+        use crate::zenoh_profile0::session::{Params, Role};
+        use crate::zenoh_service::OverLink;
+        use crate::zenoh_service_link::pair::{Far, Io, Pipe, Stalling, cfg};
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let ab = Rc::new(RefCell::new(Pipe::default()));
+        let ba = Rc::new(RefCell::new(Pipe::default()));
+        let stall = Rc::new(RefCell::new(false));
+        let params = crate::zenoh_service::exam::params();
+        let peer_params = Params {
+            local: 2,
+            per_side: 3,
+            ..params
+        };
+        let mut svc: LinkOf<Stalling, 514, 1, 5, 129, 12, 8, 4> = LinkOf::with_params(
+            Stalling {
+                inner: Io {
+                    rx: ab.clone(),
+                    tx: ba.clone(),
+                },
+                stall: stall.clone(),
+            },
+            Role::Listener,
+            &cfg(&[0xb2; 8], &[0xc0; 32], 7000),
+            params,
+            1,
+        )
+        .expect("service");
+        let mut far = Far::with_params(
+            Io { rx: ba, tx: ab },
+            Role::Connector,
+            &cfg(&[0xa1; 8], b"", 9000),
+            peer_params,
+            1,
+        )
+        .expect("peer");
+        let (hs, hf) = (svc.handle(), far.handle());
+        far.open(hf, 0).expect("open");
+        for t in 1..=12u64 {
+            far.pump(hf, t).expect("pump far");
+            svc.pump(hs, t).expect("pump svc");
+            if far.is_open() && svc.is_open() {
+                break;
+            }
+        }
+        assert!(far.is_open() && svc.is_open());
+
+        let rows = [
+            Row {
+                holder: 0,
+                key: "0/a/b",
+                publish: true,
+                subscribe: false,
+            },
+            Row {
+                holder: 1,
+                key: "0/a/b",
+                publish: false,
+                subscribe: true,
+            },
+        ];
+        let mut core: Core<'static, 2, 2, 12, 2> =
+            Core::new(&rows, [0; 16], &params).expect("grants");
+        let mut over = OverLink::<12>::new();
+        // The core declares its one subscription, and the peer declares the key so the publication is sent.
+        let mut t = 20u64;
+        assert!(over.declare_next(&mut core, &mut svc, hs).expect("queues"));
+        for _ in 0..3 {
+            t += 1;
+            far.pump(hf, t).expect("pump far");
+            svc.pump(hs, t).expect("pump svc");
+        }
+        over.settle(&mut core, &svc)
+            .expect("settle the declaration");
+        far.declare_subscriber(hf, 1, "0/a/b")
+            .expect("the peer declares");
+        for _ in 0..3 {
+            t += 1;
+            far.pump(hf, t).expect("pump far");
+            svc.pump(hs, t).expect("pump svc");
+        }
+        while svc.next_notice().is_some() {}
+
+        let mut server = Server::<2>::new();
+        assert_eq!(
+            status(&server.control(&core, 0, &request(wire::OP_ATTACH))),
+            0
+        );
+        assert_eq!(
+            status(&server.control(&core, 1, &request(wire::OP_ATTACH))),
+            0
+        );
+        let publish = WireServiceRequest {
+            magic: MAGIC,
+            version: VERSION,
+            op: wire::OP_PUBLISH as u8,
+            flags: 0,
+            row: 0,
+            reserved: [0; 2],
+            sequence: 7,
+            reserved2: [0; 12],
+        }
+        .encode();
+
+        *stall.borrow_mut() = true;
+        t += 1;
+        let mut page = [0u8; 64];
+        let answer = server.request(
+            &mut core,
+            &mut over,
+            &mut svc,
+            hs,
+            0,
+            &publish,
+            &[1, 2, 3],
+            &mut page,
+            100,
+            t,
+        );
+        assert_eq!(status(&answer), STATUS_LINK_CLOSED);
+        assert!(svc.is_closed());
+        *stall.borrow_mut() = false;
+        for _ in 0..4 {
+            t += 1;
+            let _ = svc.pump(hs, t);
+            let _ = over.settle(&mut core, &svc);
+        }
+        assert_eq!(
+            core.held(1).unwrap(),
+            (0, 0),
+            "a refused publication is not delivered"
+        );
+    }
+
+    #[test]
     fn a_holder_the_host_could_not_provision_may_attach_again() {
         let (mut server, core) = one_holder();
         assert_eq!(
@@ -452,6 +642,11 @@ fn decode(bytes: &[u8]) -> Result<WireServiceRequest, Answer> {
     }
     if !(wire::OP_ATTACH..=wire::OP_ABORT).contains(&i64::from(op)) {
         return Err(refusal(op, STATUS_UNSUPPORTED, request.row));
+    }
+    // The schema fixes the sequence at zero for every operation but a publish, and the row at zero for all but a
+    // publish. A request that sets either is outside the protocol and changes nothing.
+    if i64::from(op) != wire::OP_PUBLISH && (request.sequence != 0 || request.row != 0) {
+        return Err(refusal(op, STATUS_MALFORMED, request.row));
     }
     Ok(request)
 }
