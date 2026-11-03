@@ -46,6 +46,7 @@
     "scripts/check/check-component-sdk-upgrade.py",
     "scripts/check/check-component-spec.py",
     "scripts/check/check-composition-inventory.py",
+    "scripts/check/check-console-pin-additions.py",
     "scripts/check/check-contracts.py",
     "scripts/check/check-data-fabric-profile.py",
     "scripts/check/check-docs.py",
