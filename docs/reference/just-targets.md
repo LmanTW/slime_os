@@ -217,6 +217,7 @@ For how the planes work and how to add one, read
 | `just console_record_check` | Actual-source root/console contention and whole local producer operations, then twenty consecutive local QEMU boots with exclusive raw captures; [qualification boundary](../plans/console-record-qualification.md). |
 | `just console_lines_check` | Every component console write is one whole line: a lexical audit of tracked Rust and C component sources, after the planes whose markers were observed split; fails until the implementation lands. |
 | `just console_record_controls` | Console exam sensitivity controls only; not product qualification or task evidence. |
+| `just console_pin_additions_check` | Judges the allowed Zenoh grants read in the frozen console transport. The pins hold with the wrapper and without it, and refuse a changed byte, a second copy, a reworded doc comment, another function, a change beside the block and a block in the other file. It boots nothing. The expectation is `scripts/lib/console_record_controls.py`. |
 | `just io_network_check` | All six network arms: authority, external TCP, local TCP, client lifetime, service fault, driver reset. |
 | `just io_network_driver_reset_check` | External link reset with pending payload work, epoch advance, and restart. |
 | `just io_network_lifetime_check` | Client death, socket/session reclamation, and supervised restart. |

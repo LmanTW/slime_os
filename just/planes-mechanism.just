@@ -101,6 +101,12 @@ console_lines_check: sel4_pin_check console_record_check io_network_check io_tcp
 console_record_controls:
     python3 scripts/check/check-sel4-gate-controls.py --console-record-controls
 
+# The allowed Zenoh grants read in the frozen console transport: the pins hold with the wrapper and without it, and
+# refuse every other change. The controls are scripts/lib/console_record_controls.py `_addition_controls`. Boots nothing.
+[group('planes / mechanism')]
+console_pin_additions_check:
+    python3 scripts/check/check-sel4-gate-controls.py --console-record-controls
+
 [group('planes / mechanism')]
 io_network_lifetime_check: sel4_pin_check io_tcp_host_check
     python3 scripts/check/check-sel4-io-network-plane.py --arm lifetime

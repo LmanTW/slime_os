@@ -551,6 +551,10 @@ def audit_routes(root: Path) -> None:
         _reject("qualified kernel priority count must remain 256, making seL4_MaxPrio 255")
 
 
+# Refusals `_addition_controls` makes: six for each of the two blocks, and one block planted in the other file each way.
+_ADDITION_REFUSALS = 14
+
+
 def _addition_controls(product_root: Path) -> int:
     """The allowed addition is exact. The pin holds with it, with it absent, and fails for every other change.
 
@@ -609,6 +613,8 @@ def _addition_controls(product_root: Path) -> int:
         for relative, other in zip(names, names[1:] + names[:1]):
             if relative != other:
                 refused += refuses(f"{other}'s block in {relative}", {relative: stripped(relative) + _ADDITION_BLOCKS[other]}, relative)
+    if refused != _ADDITION_REFUSALS:
+        _reject(f"addition controls made {refused} refusals, the exam pins {_ADDITION_REFUSALS}")
     return refused
 
 
