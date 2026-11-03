@@ -610,7 +610,7 @@ def _addition_controls(product_root: Path) -> int:
             refused += refuses(f"a change beside the block in {relative}", {relative: current + b"// x\n"}, relative)
             refused += refuses(f"the block removed and the file extended in {relative}", {relative: bare + b"// extra\n"}, relative)
         names = list(_ADDITIONS)
-        for relative, other in zip(names, names[1:] + names[:1]):
+        for relative, other in zip(names, names[1:] + names[:1], strict=True):
             if relative != other:
                 refused += refuses(f"{other}'s block in {relative}", {relative: stripped(relative) + _ADDITION_BLOCKS[other]}, relative)
     if refused != _ADDITION_REFUSALS:
