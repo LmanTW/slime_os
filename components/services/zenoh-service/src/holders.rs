@@ -7,7 +7,9 @@
 use crate::{Holders, Link, binding, fail};
 use slime_components::tick_clock::TickClock;
 use slime_components::zenoh_service::{OverLink, Settled};
-use slime_components::zenoh_service_server::{Answer, REQUEST_BYTES, Server, denied};
+use slime_components::zenoh_service_server::{
+    Answer, REQUEST_BYTES, Server, denied, exchange_line,
+};
 use slime_proto::io_queue::{self, REQUEST_PAYLOAD_BYTES};
 use slime_proto::io_queue_ring::{Outstanding, Queue, QueueError};
 use slime_proto::zenoh_service_client as wire;
@@ -271,7 +273,17 @@ pub fn serve<'k>(
                 _ => reply(&denied(0), end.control),
             }
             if let Some(session) = sessions[index].as_mut() {
-                drive(core, over, server, link, handle, index, session, now);
+                drive(
+                    core,
+                    over,
+                    server,
+                    link,
+                    handle,
+                    index,
+                    session,
+                    now,
+                    &names.bytes[index][..names.lens[index]],
+                );
             }
         }
         yield_now();
@@ -329,6 +341,7 @@ fn drive<'k>(
     index: usize,
     session: &mut Session,
     now: i64,
+    holder: &[u8],
 ) {
     if session.queue.completions_pending() >= QUEUE_SLOTS as u64 {
         return;
@@ -397,6 +410,16 @@ fn drive<'k>(
         now,
         now as u64,
     );
+    if let Some(line) = exchange_line(
+        holder,
+        &bytes[..submission.payload_len],
+        &answer,
+        &page[..take_room],
+    ) {
+        slime_rt::console_line::Line::<192>::new()
+            .bytes(line.finish())
+            .emit();
+    }
     // A refusal is a status in the completion the client reads. The queue's own status is for the queue. A publication
     // moved its whole payload only if the service accepted it, and a refusal moved none.
     let status = io_queue::STATUS_OK;
