@@ -240,10 +240,11 @@ identityDomain :: Text = "slime-component-spec-v1:";
 -- 128 leaves headroom over the current corpus (CP12 raised it from 64 when
 -- deriving system specs from the composition corpus added the executables
 -- those compositions declare, and the adaptive private-memory and device
--- tracks together passed 96) without becoming unbounded.
+-- tracks together passed 96) without becoming unbounded. 256 is the same
+-- headroom again once the corpus passed 128.
 -- The per-generation instance ceiling stays where it is and is enforced separately,
 -- by the generation manifest, which is the contract that genuinely owns it.
-maxSpecs :: Int = 128;
+maxSpecs :: Int = 256;
 maxSourceBytes :: Int = 65536;
 maxNormalizedBytes :: Int = 65536;
 maxNameBytes :: Int = 64;

@@ -126,6 +126,7 @@ from generation_resources import (
     build_block_ring_authority,
     build_clock_authority,
     build_entropy_authority,
+    build_graph_arrival_ceiling,
     build_zenoh_grants_table,
     build_instance_lifetime,
     instance_lifetime_identity,  # noqa: F401 -- read by check-system-spec.py through this module
@@ -399,6 +400,7 @@ SEL4_MANIFESTS = {
     "sel4-storage": GENERATION_COMPOSITIONS / "sel4-storage.zti",
     "sel4-store": GENERATION_COMPOSITIONS / "sel4-store.zti",
     "sel4-data-volume": GENERATION_COMPOSITIONS / "sel4-data-volume.zti",
+    "sel4-lidar-external": GENERATION_COMPOSITIONS / "sel4-lidar-external.zti",
     "sel4-rollback": GENERATION_COMPOSITIONS / "sel4-rollback.zti",
     "sel4-recovery": GENERATION_COMPOSITIONS / "sel4-recovery.zti",
     "sel4-generation": GENERATION_COMPOSITIONS / "sel4-generation.zti",
@@ -456,7 +458,10 @@ STORE_COMPONENTS = frozenset(
 # only a generation declaring a larger network-application buffer needs. It is not
 # in `PRIVATE_HEAP_REQUIRED`: a generation whose rows declare the minimum size runs
 # on the static pools and takes no quota.
-PRIVATE_HEAP_COMPONENTS = frozenset({"fabric-service", "network-service", "private-heap-probe"})
+#
+# `lidar-publisher` holds one recorded frame and its link's reassembly and
+# transmit buffers on the heap; frames are about half a megabyte each.
+PRIVATE_HEAP_COMPONENTS = frozenset({"fabric-service", "lidar-publisher", "network-service", "private-heap-probe"})
 # Of those, the ones that cannot provision at all without a quota (C10.4).
 #
 # A subset rather than the same set: linking the allocator and *requiring* a
@@ -466,10 +471,12 @@ PRIVATE_HEAP_COMPONENTS = frozenset({"fabric-service", "network-service", "priva
 # whole point. `fabric-service` has no such mode: its role and frame tables are
 # the first thing it allocates and it fails provisioning without them, so a
 # generation carrying it and omitting its quota is one that cannot boot.
+# `lidar-publisher` is the same: it allocates its frame buffer before it
+# publishes anything.
 #
 # Checked against `privateMemoryBudget` where the budget is encoded, so the
 # refusal is a build failure rather than a named component failure at boot.
-PRIVATE_HEAP_REQUIRED = frozenset({"fabric-service"})
+PRIVATE_HEAP_REQUIRED = frozenset({"fabric-service", "lidar-publisher"})
 PAGE_SIZE = 4096
 KIND = {"kernel": 1, "bootstrap": 2, "component": 3, "resource": 4}
 ROLE = {"init": 1, "service": 2, "driver": 3, "application": 4}
@@ -3158,6 +3165,12 @@ def build_sel4_generation(
         for instance in manifest["instances"]
         if instance.get("lifetime", "bounded") == "resident"
     ]
+    if "graph-arrival-ceiling" in object_ids:
+        payloads["graph-arrival-ceiling"] = build_graph_arrival_ceiling(manifest)
+    elif manifest.get("graphArrivalCeiling") is not None:
+        # A ceiling nothing carries is one the root cannot read: the plane would
+        # stop at the default while the manifest claimed a larger run.
+        fail("graphArrivalCeiling declared without a graph-arrival-ceiling resource object")
     if "instance-lifetime" in object_ids:
         payloads["instance-lifetime"] = build_instance_lifetime(manifest)
     elif residents:
