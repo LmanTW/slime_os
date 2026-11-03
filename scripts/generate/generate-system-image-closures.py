@@ -71,6 +71,8 @@ RELEASE_INPUTS: tuple[tuple[str, str, str], ...] = (
     ("interface-schema-contract", "contracts/interface-schema/v1", "tree"),
     ("root-child", "slime-root/child", "tree"),
     ("workspace-manifest", "Cargo.toml", "file"),
+    ("zenoh-grants-table-contract", "contracts/zenoh-service-grants-table/v1", "tree"),
+    ("zenoh-grants-table-encoder", "scripts/lib/zenoh_grants_table.py", "file"),
 )
 
 ROOT_IMPLEMENTATION = ("slime-root", "tree")

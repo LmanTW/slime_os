@@ -326,6 +326,20 @@
         kind = "file";
       };
     };
+    {
+      name = "zenoh-grants-table-contract";
+      artifact = {
+        path = "contracts/zenoh-service-grants-table/v1";
+        kind = "tree";
+      };
+    };
+    {
+      name = "zenoh-grants-table-encoder";
+      artifact = {
+        path = "scripts/lib/zenoh_grants_table.py";
+        kind = "file";
+      };
+    };
   ];
   buildParameters = [];
   expectedOutputs = [

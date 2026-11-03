@@ -45,6 +45,8 @@ const TABLE_BYTES: usize = grants::HEADER_BYTES + ROWS * grants::ENTRY_BYTES;
 const RING_BASE: u64 = 0x0000_001c_0000_0000;
 const DATA_BASE: u64 = RING_BASE + 4096;
 const DEADLINE_MS: i64 = 20_000;
+/// How many pumps the service gives the link to flush its CLOSE before it exits.
+const CLOSE_PUMPS: usize = 64;
 
 type Holders<'k> = Core<'k, HOLDERS, SLOTS, PAYLOAD, ROWS>;
 pub type Link<'a, 'b> = LinkOf<Stream<Wire<'a, 'b>>, 514, 1, 5, 129, PAYLOAD, 8, 4>;
@@ -148,7 +150,7 @@ fn main(_startup_arg: u32) {
     let mut server = Server::<HOLDERS>::new();
 
     let notifications = NetworkNotifications {
-        request_signal: binding(b"notification:zenoh-service-request+signal"),
+        request_signal: binding(b"notification:zenoh-network-request+signal"),
         completion_wait: binding(b"notification:zenoh-service-done+wait"),
         timeout_ticks: rate.checked_mul(5).unwrap_or_else(|| fail(b"timer range")),
     };
@@ -194,7 +196,25 @@ fn main(_startup_arg: u32) {
         &clock,
         &names,
     );
-    let _ = link.close(handle, 0);
+    // The CLOSE the link queues is flushed by later pumps, and the peer ends its session on receiving it.
+    if link.close(handle, 0).is_ok() {
+        for _ in 0..CLOSE_PUMPS {
+            let now = clock.millis(monotonic_read().unwrap_or_else(|_| fail(b"clock read")));
+            let _ = link.pump(handle, now as u64);
+            if !link.send_pending() {
+                break;
+            }
+            yield_now();
+        }
+    }
+    if !io
+        .close(connection)
+        .unwrap_or_else(|_| fail(b"close request"))
+        .is_success()
+    {
+        fail(b"close");
+    }
+    io.finish().unwrap_or_else(|_| fail(b"finish"));
     exit(0)
 }
 

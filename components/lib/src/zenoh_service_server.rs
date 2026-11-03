@@ -270,6 +270,84 @@ mod tests {
     }
 
     #[test]
+    fn the_exchange_lines_name_what_a_request_did() {
+        let req = |op: i64, row: u16, sequence: i64| {
+            WireServiceRequest {
+                magic: MAGIC,
+                version: VERSION,
+                op: op as u8,
+                flags: 0,
+                row,
+                reserved: [0; 2],
+                sequence,
+                reserved2: [0; 12],
+            }
+            .encode()
+        };
+        let text = |line: Option<crate::zenoh_node::Line<160>>| {
+            line.map(|l| String::from_utf8(l.finish().to_vec()).unwrap())
+        };
+        let published = completion(wire::OP_PUBLISH as u8, 0, wire::ITEM_NONE as u8, 1, 2, 0);
+        assert_eq!(
+            text(exchange_line(
+                b"alpha",
+                &req(wire::OP_PUBLISH, 1, 3),
+                &published,
+                &[]
+            ))
+            .as_deref(),
+            Some("[zenoh-service] published holder=alpha row=1 sequence=3 reached=2 peer=none\n")
+        );
+        let sent = completion(
+            wire::OP_PUBLISH as u8,
+            0,
+            wire::ITEM_NONE as u8,
+            0,
+            1,
+            wire::FLAG_PEER_SENT as u32,
+        );
+        assert!(
+            text(exchange_line(
+                b"alpha",
+                &req(wire::OP_PUBLISH, 0, 0),
+                &sent,
+                &[]
+            ))
+            .unwrap()
+            .ends_with("peer=sent\n")
+        );
+        let denied_publish = refusal(wire::OP_PUBLISH as u8, STATUS_DENIED, 5);
+        assert_eq!(
+            text(exchange_line(
+                b"beta",
+                &req(wire::OP_PUBLISH, 5, 0),
+                &denied_publish,
+                &[]
+            ))
+            .as_deref(),
+            Some("[zenoh-service] denial class=not-granted holder=beta refused=1\n")
+        );
+        let too_large = refusal(wire::OP_PUBLISH as u8, STATUS_TOO_LARGE, 0);
+        assert!(exchange_line(b"alpha", &req(wire::OP_PUBLISH, 0, 0), &too_large, &[]).is_none());
+        let sample = completion(wire::OP_TAKE as u8, 0, wire::ITEM_SAMPLE as u8, 0, 4, 0);
+        let mut page = [0u8; HEADER_BYTES + 4];
+        page[..8].copy_from_slice(&2i64.to_le_bytes());
+        assert_eq!(
+            text(exchange_line(
+                b"beta",
+                &req(wire::OP_TAKE, 0, 0),
+                &sample,
+                &page
+            ))
+            .as_deref(),
+            Some("[zenoh-service] delivered holder=beta row=0 sequence=2\n")
+        );
+        let empty = completion(wire::OP_TAKE as u8, 0, wire::ITEM_NONE as u8, 0, 0, 0);
+        assert!(exchange_line(b"beta", &req(wire::OP_TAKE, 0, 0), &empty, &[]).is_none());
+        assert!(exchange_line(b"beta", &req(wire::OP_ATTACH, 0, 0), &published, &[]).is_none());
+    }
+
+    #[test]
     fn a_holder_the_host_could_not_provision_may_attach_again() {
         let (mut server, core) = one_holder();
         assert_eq!(
@@ -377,6 +455,64 @@ fn refusal(op: u8, status: i32, row: u16) -> Answer {
 /// attach that found no buffers. It carries only a denied status, as every refusal does.
 pub fn denied(op: u8) -> Answer {
     refusal(op, STATUS_DENIED, 0)
+}
+
+/// The console line for what one request did, or none for a request that prints nothing. The lines are the ones the
+/// booted exchange is judged on: a publication names its row, its sequence and how many holders it reached, a taken
+/// sample names its row and sequence, and a publication refused for a row the holder lacks is a `not-granted` denial.
+pub fn exchange_line(
+    holder: &[u8],
+    request: &[u8],
+    answer: &Answer,
+    page: &[u8],
+) -> Option<crate::zenoh_node::Line<160>> {
+    use crate::zenoh_node::Line;
+    let request = WireServiceRequest::decode(request)?;
+    let done = WireServiceCompletion::decode(&answer.completion)?;
+    let mut line = Line::<160>::new();
+    if i64::from(request.op) == wire::OP_PUBLISH {
+        if done.status == STATUS_DENIED {
+            line.put(b"[zenoh-service] denial class=not-granted holder=")
+                .put(holder)
+                .put(b" refused=1\n");
+            return Some(line);
+        }
+        if done.status != 0 {
+            return None;
+        }
+        let peer: &[u8] = if u64::from(done.flags) & wire::FLAG_PEER_SENT as u64 != 0 {
+            b"sent"
+        } else {
+            b"none"
+        };
+        line.put(b"[zenoh-service] published holder=")
+            .put(holder)
+            .put(b" row=")
+            .put_number(u64::from(done.row))
+            .put(b" sequence=")
+            .put_signed(request.sequence)
+            .put(b" reached=")
+            .put_number(u64::from(done.length))
+            .put(b" peer=")
+            .put(peer)
+            .put(b"\n");
+        return Some(line);
+    }
+    if i64::from(request.op) == wire::OP_TAKE
+        && done.status == 0
+        && i64::from(done.item) == wire::ITEM_SAMPLE
+    {
+        let header = WireSampleHeader::decode(page)?;
+        line.put(b"[zenoh-service] delivered holder=")
+            .put(holder)
+            .put(b" row=")
+            .put_number(u64::from(done.row))
+            .put(b" sequence=")
+            .put_signed(header.sequence)
+            .put(b"\n");
+        return Some(line);
+    }
+    None
 }
 
 /// The server over `H` holders. It keeps each holder's phase and nothing of the core's.

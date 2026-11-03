@@ -1,0 +1,686 @@
+{
+  bootAction = "wait-set";
+  bootstrapInstance = "init";
+  executables = [
+    {
+      commandProfile = [];
+      name = "init";
+      object = "sha256:init";
+      role = "init";
+      spawnBudget = 0;
+    };
+    {
+      commandProfile = [];
+      name = "network-service";
+      object = "sha256:network-service";
+      role = "service";
+      spawnBudget = 0;
+      stackBytes = 131072;
+    };
+    {
+      commandProfile = [];
+      name = "zenoh-holder-publisher";
+      object = "sha256:zenoh-holder-publisher";
+      role = "application";
+      spawnBudget = 0;
+    };
+    {
+      commandProfile = [];
+      name = "zenoh-holder-subscriber";
+      object = "sha256:zenoh-holder-subscriber";
+      role = "application";
+      spawnBudget = 0;
+    };
+    {
+      commandProfile = [];
+      name = "zenoh-peer";
+      object = "sha256:zenoh-peer";
+      role = "application";
+      spawnBudget = 0;
+    };
+    {
+      commandProfile = [];
+      name = "zenoh-service";
+      object = "sha256:zenoh-service";
+      role = "service";
+      spawnBudget = 0;
+      stackBytes = 32768;
+    };
+  ];
+  formatVersion = 1;
+  generation = 171;
+  grants = [
+    {
+      name = "alpha-zenoh-control";
+      capabilityKind = "endpoint";
+      rights = [
+        "send";
+        "recv";
+      ];
+      source = "alpha";
+      target = "zenoh-service";
+      transferable = false;
+    };
+    {
+      name = "alpha-zenoh-provision";
+      capabilityKind = "endpoint";
+      rights = [
+        "send";
+        "recv";
+      ];
+      source = "zenoh-service";
+      target = "alpha";
+      transferable = true;
+    };
+    {
+      name = "beta-zenoh-control";
+      capabilityKind = "endpoint";
+      rights = [
+        "send";
+        "recv";
+      ];
+      source = "beta";
+      target = "zenoh-service";
+      transferable = false;
+    };
+    {
+      name = "beta-zenoh-provision";
+      capabilityKind = "endpoint";
+      rights = [
+        "send";
+        "recv";
+      ];
+      source = "zenoh-service";
+      target = "beta";
+      transferable = true;
+    };
+    {
+      name = "network-service-buffer-factory";
+      capabilityKind = "sharedBufferFactory";
+      rights = [
+        "bufferCreate";
+      ];
+      source = "init";
+      target = "network-service";
+      transferable = false;
+    };
+    {
+      name = "zenoh-peer-control";
+      capabilityKind = "endpoint";
+      rights = [
+        "send";
+        "recv";
+      ];
+      source = "zenoh-peer";
+      target = "network-service";
+      transferable = false;
+    };
+    {
+      name = "zenoh-peer-provision";
+      capabilityKind = "endpoint";
+      rights = [
+        "send";
+        "recv";
+      ];
+      source = "network-service";
+      target = "zenoh-peer";
+      transferable = true;
+    };
+    {
+      name = "zenoh-service-buffer-factory";
+      capabilityKind = "sharedBufferFactory";
+      rights = [
+        "bufferCreate";
+      ];
+      source = "init";
+      target = "zenoh-service";
+      transferable = false;
+    };
+    {
+      name = "zenoh-service-control";
+      capabilityKind = "endpoint";
+      rights = [
+        "send";
+        "recv";
+      ];
+      source = "zenoh-service";
+      target = "network-service";
+      transferable = false;
+    };
+    {
+      name = "zenoh-service-provision";
+      capabilityKind = "endpoint";
+      rights = [
+        "send";
+        "recv";
+      ];
+      source = "network-service";
+      target = "zenoh-service";
+      transferable = true;
+    };
+  ];
+  health = {
+    bootAttempts = 3;
+    requiredInstances = [
+      "alpha";
+      "beta";
+      "init";
+      "network-service";
+      "zenoh-peer";
+      "zenoh-service";
+    ];
+  };
+  instances = [
+    {
+      autostart = true;
+      bindings = [
+        {
+          grant = "alpha-zenoh-control";
+        };
+        {
+          grant = "alpha-zenoh-provision";
+        };
+      ];
+      dependencies = [];
+      executable = "zenoh-holder-publisher";
+      health = "required";
+      lifetime = "bounded";
+      name = "alpha";
+      owner = "root";
+    };
+    {
+      autostart = true;
+      bindings = [
+        {
+          grant = "beta-zenoh-control";
+        };
+        {
+          grant = "beta-zenoh-provision";
+        };
+      ];
+      dependencies = [];
+      executable = "zenoh-holder-subscriber";
+      health = "required";
+      lifetime = "bounded";
+      name = "beta";
+      owner = "root";
+    };
+    {
+      autostart = true;
+      bindings = [];
+      dependencies = [];
+      executable = "init";
+      health = "required";
+      lifetime = "bounded";
+      name = "init";
+      owner = "root";
+    };
+    {
+      autostart = true;
+      bindings = [
+        {
+          grant = "network-service-buffer-factory";
+          slot = 1;
+          slotReason = "encodedLayout";
+        };
+        {
+          grant = "zenoh-peer-control";
+          slot = 3;
+          slotReason = "encodedLayout";
+        };
+        {
+          grant = "zenoh-peer-provision";
+          slot = 30;
+          slotReason = "encodedLayout";
+        };
+        {
+          grant = "zenoh-service-control";
+          slot = 2;
+          slotReason = "encodedLayout";
+        };
+        {
+          grant = "zenoh-service-provision";
+          slot = 29;
+          slotReason = "encodedLayout";
+        };
+      ];
+      dependencies = [];
+      executable = "network-service";
+      health = "required";
+      lifetime = "bounded";
+      name = "network-service";
+      owner = "root";
+    };
+    {
+      autostart = true;
+      bindings = [
+        {
+          grant = "zenoh-peer-control";
+        };
+        {
+          grant = "zenoh-peer-provision";
+        };
+      ];
+      dependencies = [];
+      executable = "zenoh-peer";
+      health = "required";
+      lifetime = "bounded";
+      name = "zenoh-peer";
+      owner = "root";
+    };
+    {
+      autostart = true;
+      bindings = [
+        {
+          grant = "alpha-zenoh-control";
+        };
+        {
+          grant = "alpha-zenoh-provision";
+          slot = 29;
+          slotReason = "allocatorOrder";
+        };
+        {
+          grant = "beta-zenoh-control";
+        };
+        {
+          grant = "beta-zenoh-provision";
+          slot = 30;
+          slotReason = "allocatorOrder";
+        };
+        {
+          grant = "zenoh-service-buffer-factory";
+          slot = 1;
+          slotReason = "allocatorOrder";
+        };
+        {
+          grant = "zenoh-service-control";
+          slot = 2;
+          slotReason = "allocatorOrder";
+        };
+        {
+          grant = "zenoh-service-provision";
+        };
+      ];
+      dependencies = [];
+      executable = "zenoh-service";
+      health = "required";
+      lifetime = "bounded";
+      name = "zenoh-service";
+      owner = "root";
+    };
+  ];
+  mintedBindings = [];
+  interfaceSchemas = [];
+  objects = [
+    {
+      id = "boot-layout";
+      kind = "resource";
+      size = 4096;
+    };
+    {
+      id = "clock-authority";
+      kind = "resource";
+      size = 4096;
+    };
+    {
+      id = "lifecycle-policy";
+      kind = "resource";
+      size = 4096;
+    };
+    {
+      id = "network-application";
+      kind = "resource";
+      size = 4096;
+    };
+    {
+      id = "network-destinations";
+      kind = "resource";
+      size = 4096;
+    };
+    {
+      id = "sha256:init";
+      kind = "bootstrap";
+      size = 65536;
+    };
+    {
+      id = "sha256:network-service";
+      kind = "component";
+      size = 262144;
+    };
+    {
+      id = "sha256:zenoh-holder-publisher";
+      kind = "component";
+      size = 65536;
+    };
+    {
+      id = "sha256:zenoh-holder-subscriber";
+      kind = "component";
+      size = 65536;
+    };
+    {
+      id = "sha256:zenoh-peer";
+      kind = "component";
+      size = 65536;
+    };
+    {
+      id = "sha256:zenoh-service";
+      kind = "component";
+      size = 65536;
+    };
+    {
+      id = "shared-buffer-budget";
+      kind = "resource";
+      size = 4096;
+    };
+    {
+      id = "wait-set";
+      kind = "resource";
+      size = 4096;
+    };
+    {
+      id = "zenoh-grants";
+      kind = "resource";
+      size = 4096;
+    };
+  ];
+  privateMemoryBudget = [];
+  sharedBufferBudget = [
+    {
+      bufferCount = 0;
+      bytePages = 0;
+      holder = "alpha";
+      loanCount = 2;
+      mappingCount = 2;
+    };
+    {
+      bufferCount = 0;
+      bytePages = 0;
+      holder = "beta";
+      loanCount = 2;
+      mappingCount = 2;
+    };
+    {
+      bufferCount = 4;
+      bytePages = 4;
+      holder = "network-service";
+      loanCount = 4;
+      mappingCount = 4;
+    };
+    {
+      bufferCount = 0;
+      bytePages = 0;
+      holder = "zenoh-peer";
+      loanCount = 2;
+      mappingCount = 2;
+    };
+    {
+      bufferCount = 4;
+      bytePages = 4;
+      holder = "zenoh-service";
+      loanCount = 4;
+      mappingCount = 6;
+    };
+  ];
+  state = [];
+  target = "aarch64-sel4-qemu-virt";
+  notificationGrants = [
+    {
+      name = "zenoh-network-request";
+      source = "zenoh-service";
+      target = "network-service";
+    };
+    {
+      name = "zenoh-service-done";
+      source = "network-service";
+      target = "zenoh-service";
+    };
+    {
+      name = "zenoh-peer-done";
+      source = "network-service";
+      target = "zenoh-peer";
+    };
+  ];
+  notificationBindings = [
+    {
+      grant = "zenoh-network-request";
+      holder = "zenoh-service";
+      role = "signal";
+      slot = 0;
+    };
+    {
+      grant = "zenoh-network-request";
+      holder = "zenoh-peer";
+      role = "signal";
+      slot = 1;
+    };
+    {
+      grant = "zenoh-network-request";
+      holder = "network-service";
+      role = "wait";
+      slot = 0;
+    };
+    {
+      grant = "zenoh-service-done";
+      holder = "network-service";
+      role = "signal";
+      slot = 1;
+    };
+    {
+      grant = "zenoh-service-done";
+      holder = "zenoh-service";
+      role = "wait";
+      slot = 1;
+    };
+    {
+      grant = "zenoh-peer-done";
+      holder = "network-service";
+      role = "signal";
+      slot = 2;
+    };
+    {
+      grant = "zenoh-peer-done";
+      holder = "zenoh-peer";
+      role = "wait";
+      slot = 0;
+    };
+  ];
+  clockAuthority = [
+    {
+      holder = "network-service";
+      simulatedAdvance = false;
+      simulatedRead = false;
+      timerBadgeBit = 2;
+      timerNotification = "zenoh-network-request";
+      timerQuota = 1;
+      timerUse = true;
+    };
+    {
+      holder = "zenoh-service";
+      simulatedAdvance = false;
+      simulatedRead = false;
+      timerBadgeBit = 3;
+      timerNotification = "zenoh-service-done";
+      timerQuota = 1;
+      timerUse = true;
+    };
+    {
+      holder = "zenoh-peer";
+      simulatedAdvance = false;
+      simulatedRead = false;
+      timerBadgeBit = 3;
+      timerNotification = "zenoh-peer-done";
+      timerQuota = 1;
+      timerUse = true;
+    };
+  ];
+  networkDestinations = [
+    {
+      address = "127.0.0.1";
+      addressKind = "ipv4";
+      byteBudget = 4096;
+      dnsRecordLimit = 0;
+      holder = "zenoh-service";
+      listenerLimit = 0;
+      port = 7447;
+      queueDepth = 4;
+      reconnectLimit = 0;
+      retryLimit = 2;
+      rights = [
+        "connect";
+        "send";
+        "recv";
+      ];
+      socketLimit = 1;
+      timerBudget = 1;
+      transport = "tcp";
+    };
+  ];
+  networkApplications = [
+    {
+      acceptedSocketLimit = 0;
+      admittedPeer = "";
+      admittedPeerAddress = "";
+      backend = "loopback";
+      backlog = 0;
+      byteBudget = 0;
+      completionNotification = "zenoh-service-done";
+      controlBinding = "zenoh-service-control";
+      holder = "zenoh-service";
+      hopLimit = 64;
+      idleTimeoutMs = 10000;
+      keepaliveMs = 0;
+      localAddress = "0.0.0.0";
+      localPort = 0;
+      nagle = true;
+      provisionBinding = "zenoh-service-provision";
+      queueDepth = 0;
+      reconnectLimit = 0;
+      requestNotification = "zenoh-network-request";
+      retryLimit = 0;
+      rights = [];
+      role = "client";
+      rxBufferBytes = 2048;
+      supervisionBinding = "";
+      timerBudget = 0;
+      txBufferBytes = 2048;
+    };
+    {
+      acceptedSocketLimit = 1;
+      admittedPeer = "zenoh-service";
+      admittedPeerAddress = "";
+      backend = "loopback";
+      backlog = 1;
+      byteBudget = 8192;
+      completionNotification = "zenoh-peer-done";
+      controlBinding = "zenoh-peer-control";
+      holder = "zenoh-peer";
+      hopLimit = 64;
+      idleTimeoutMs = 10000;
+      keepaliveMs = 0;
+      localAddress = "127.0.0.1";
+      localPort = 7447;
+      nagle = true;
+      provisionBinding = "zenoh-peer-provision";
+      queueDepth = 4;
+      reconnectLimit = 0;
+      requestNotification = "zenoh-network-request";
+      retryLimit = 2;
+      rights = [
+        "listen";
+        "send";
+        "recv";
+      ];
+      role = "listener";
+      rxBufferBytes = 2048;
+      supervisionBinding = "";
+      timerBudget = 2;
+      txBufferBytes = 2048;
+    };
+  ];
+  zenohGrants = [
+    {
+      holder = "alpha";
+      key = "0/slime_service/exchange";
+      publish = true;
+      subscribe = false;
+    };
+    {
+      holder = "beta";
+      key = "0/slime_service/exchange";
+      publish = false;
+      subscribe = true;
+    };
+  ];
+  waitSet = [
+    {
+      badgeBit = 0;
+      drainSlot = 2;
+      kind = "stream";
+      notification = "zenoh-network-request";
+      waiter = "network-service";
+    };
+    {
+      badgeBit = 1;
+      drainSlot = 3;
+      kind = "stream";
+      notification = "zenoh-network-request";
+      waiter = "network-service";
+    };
+    {
+      badgeBit = 2;
+      kind = "timer";
+      notification = "zenoh-network-request";
+      waiter = "network-service";
+    };
+    {
+      badgeBit = 1;
+      drainSlot = 2;
+      kind = "stream";
+      notification = "zenoh-service-done";
+      waiter = "zenoh-service";
+    };
+    {
+      badgeBit = 3;
+      kind = "timer";
+      notification = "zenoh-service-done";
+      waiter = "zenoh-service";
+    };
+    {
+      badgeBit = 2;
+      drainSlot = 0;
+      kind = "stream";
+      notification = "zenoh-peer-done";
+      waiter = "zenoh-peer";
+    };
+    {
+      badgeBit = 3;
+      kind = "timer";
+      notification = "zenoh-peer-done";
+      waiter = "zenoh-peer";
+    };
+  ];
+  lifecyclePolicy = {
+    dependencies = [];
+    initialState = "Initialize";
+    parameters = [
+      {
+        holder = "network-service";
+        read = true;
+        subject = "network-service";
+        write = true;
+      };
+    ];
+    restarts = [];
+    terminalState = "Error";
+    transitions = [
+      {
+        from = "Initialize";
+        to = "Running";
+      };
+      {
+        from = "Running";
+        to = "Error";
+      };
+    ];
+  };
+}
