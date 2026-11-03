@@ -109,6 +109,22 @@ _TRANSPORT = "components/runtime/src/syscall/sel4_transport.rs"
 # source pins preserve the existing one-send body, both buffer branches, staging
 # helpers, public dispatch, and descriptor/window constants; they are not a
 # semantic proof for replacement transports. Updating these pins needs a new exam.
+#
+# One addition is allowed in two of these files: the Zenoh grants read, a wrapper that reads a root table on the shape
+# of the entropy and network reads beside it. Each block is the doc comment and the function, as one contiguous run
+# that ends in a blank line. The pin hashes the file with that block removed, so everything else stays frozen, and the
+# block is accepted only if its own bytes hash to the value below. A block with any other bytes is not removed, so the
+# pin then fails on it. The pins below are of the file as it was before the addition.
+_ADDITIONS = {
+    "components/runtime/src/syscall/sel4_transport.rs": (
+        rb"((?:^///[^\n]*\n)+)pub fn zenoh_grants_read\(.*?\n\}\n\n",
+        "3d7fdf1ac087dcb9ea8c8884c98770ba35e63563ac3729b929cefdf270ecfa18",
+    ),
+    "components/runtime/src/syscall.rs": (
+        rb"((?:^///[^\n]*\n)+)pub fn zenoh_grants_read\(.*?\n\}\n\n",
+        "138c76e864fe4875ed7da90787c2d74a74143c11b6eaccdf38e25f1fc2904cfc",
+    ),
+}
 _TRANSPORT_PINS = {
     _TRANSPORT: "0852765ed62a984c28fb7adaa6683d0930cf977bb7f3a7de567e04c2f4083341",
     "components/runtime/src/syscall/wire.rs": "99e0addc975774fc936999b5c7ab99c4cb0b4a242d3bd0de5a175b51f7f48470",
@@ -287,18 +303,33 @@ def _debug_write_documentation(source: bytes) -> re.Match[bytes]:
     return blocks[0]
 
 
+def _without_addition(relative: str, source: bytes) -> bytes:
+    """`source` without its allowed addition, if it has exactly one and the block's bytes match the pinned hash.
+
+    A file with no block is returned as it is. A file with two blocks, or one whose bytes differ, is returned as it is
+    too, so the pin that follows fails on it."""
+    addition = _ADDITIONS.get(relative)
+    if addition is None:
+        return source
+    pattern, digest = addition
+    found = list(re.finditer(pattern, source, re.MULTILINE | re.DOTALL))
+    if len(found) != 1 or hashlib.sha256(found[0].group(0)).hexdigest() != digest:
+        return source
+    return source[: found[0].start()] + source[found[0].end() :]
+
+
 def _transport_sources(root: Path) -> dict[str, bytes]:
-    """Require exact frozen sources, excluding only debug_write's owning docs."""
+    """Require exact frozen sources, excluding only debug_write's owning docs and the allowed additions."""
     sources = {}
     for relative, expected in _TRANSPORT_PINS.items():
         path = root / relative
         if not path.is_file():
             _reject(f"required qualification source missing: {relative}")
         source = path.read_bytes()
-        frozen = source
+        frozen = _without_addition(relative, source)
         if relative == _TRANSPORT:
-            documentation = _debug_write_documentation(source)
-            frozen = source[: documentation.start(1)] + source[documentation.end(1) :]
+            documentation = _debug_write_documentation(frozen)
+            frozen = frozen[: documentation.start(1)] + frozen[documentation.end(1) :]
         if hashlib.sha256(frozen).hexdigest() != expected:
             _reject(f"transport source differs from frozen one-send baseline: {relative}")
         sources[relative] = source
@@ -512,6 +543,70 @@ def audit_routes(root: Path) -> None:
         )
     ):
         _reject("qualified kernel priority count must remain 256, making seL4_MaxPrio 255")
+
+
+def _addition_controls(product_root: Path) -> int:
+    """The allowed addition is exact. The pin holds with it, with it absent, and fails for every other change.
+
+    Each case writes the two files that carry an addition into a temporary root, beside the other pinned files, and
+    asks `_transport_sources` for a verdict. Returns the number of refusals. Without the allowed block, with the block
+    the repository carries, and with the block in a different place, the pin must hold. With a changed block, a second
+    block, a block in the other file, and a block that is not removable, it must refuse."""
+    sources = _transport_sources(product_root)
+    refused = 0
+    with tempfile.TemporaryDirectory(prefix="slime-console-additions-") as temporary:
+        root = Path(temporary)
+
+        def write(overrides: dict[str, bytes]) -> None:
+            for relative in _TRANSPORT_PINS:
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(overrides.get(relative, sources[relative]))
+
+        def stripped(relative: str) -> bytes:
+            return _without_addition(relative, sources[relative])
+
+        def refuses(description: str, overrides: dict[str, bytes], relative: str) -> int:
+            write(overrides)
+            try:
+                _transport_sources(root)
+            except ValueError as error:
+                if f"frozen one-send baseline: {relative}" not in str(error):
+                    _reject(f"addition control rejected for an unrelated reason: {description}")
+                return 1
+            _reject(f"transport pin accepted {description}")
+
+        def accepts(description: str, overrides: dict[str, bytes]) -> None:
+            write(overrides)
+            try:
+                _transport_sources(root)
+            except ValueError as error:
+                _reject(f"transport pin refused {description}: {error}")
+
+        for relative, (pattern, _digest) in _ADDITIONS.items():
+            current = sources[relative]
+            bare = stripped(relative)
+            found = list(re.finditer(pattern, current, re.MULTILINE | re.DOTALL))
+            block = found[0].group(0) if len(found) == 1 else b""
+            accepts(f"the file as it stands, {relative}", {})
+            accepts(f"the file without its addition, {relative}", {relative: bare})
+            if not block:
+                continue
+            refused += refuses(f"a block with one byte changed in {relative}", {relative: current.replace(block, block.replace(b"cursor", b"cursOr", 1), 1)}, relative)
+            refused += refuses(f"the block twice in {relative}", {relative: current + block}, relative)
+            refused += refuses(f"the block reworded in {relative}", {relative: current.replace(block, block.replace(b"/// ", b"/// A ", 1), 1)}, relative)
+            refused += refuses(f"another function in {relative}", {relative: bare + block.replace(b"zenoh_grants_read", b"zenoh_other_read")}, relative)
+            refused += refuses(f"a change beside the block in {relative}", {relative: current.replace(b"fn reserve(", b"fn reserve_x(", 1) if b"fn reserve(" in current else current + b"// x\n"}, relative)
+            # The block removed and the rest of the file also changed: the frozen text must still be exact.
+            refused += refuses(f"the block removed and the file extended in {relative}", {relative: bare + b"// extra\n"}, relative)
+        other = next(iter(_ADDITIONS))
+        for relative in _ADDITIONS:
+            if relative == other:
+                continue
+            block = list(re.finditer(_ADDITIONS[other][0], sources[other], re.MULTILINE | re.DOTALL))
+            if len(block) == 1:
+                refused += refuses(f"{other}'s block in {relative}", {relative: stripped(relative) + block[0].group(0)}, relative)
+    return refused
 
 
 def _audit_controls(product_root: Path) -> int:
@@ -814,7 +909,7 @@ def _audit_controls(product_root: Path) -> int:
             pass
         else:
             _reject("source audit accepted a missing native diagnostic module")
-    return len(mutations) + len(replacements) + len(transport_mutations) + 1
+    return len(mutations) + len(replacements) + len(transport_mutations) + 1 + _addition_controls(product_root)
 
 
 def check_controls(root: Path, gate: object, literal_for: Callable[[str], str]) -> int:
