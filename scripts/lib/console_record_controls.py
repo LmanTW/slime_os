@@ -125,6 +125,12 @@ _ADDITIONS = {
         "138c76e864fe4875ed7da90787c2d74a74143c11b6eaccdf38e25f1fc2904cfc",
     ),
 }
+# The allowed blocks, byte for byte. The controls build their fixtures from these, so they run the same on a tree
+# that has the addition and on one that does not.
+_ADDITION_BLOCKS = {
+    'components/runtime/src/syscall/sel4_transport.rs': b'/// Read authenticated Zenoh grants rows into the transfer window.\npub fn zenoh_grants_read(cursor: usize, out: &mut [u8]) -> i64 {\n    let transfer = match reserve(out.len(), 0) {\n        Ok(transfer) => transfer,\n        Err(error) => return error,\n    };\n    let (result, returned) = match outcome(&call(\n        capability_table_labels::ZENOH_GRANTS_READ,\n        &[cursor as Word, 0, transfer as Word],\n    )) {\n        Ok(pair) => pair,\n        Err(error) => return error,\n    };\n    if result < 0 {\n        return result;\n    }\n    match collect(returned, out, None) {\n        Ok(_) => result,\n        Err(error) => error,\n    }\n}\n\n',
+    'components/runtime/src/syscall.rs': b"/// Read the authenticated `zenoh-service-grants-table/v1` rows served to this\n/// generation's Zenoh service, returning how many rows were copied. The request\n/// is self-scoped and names no holder or key; what each row grants is the\n/// service's to enforce.\npub fn zenoh_grants_read(cursor: usize, out: &mut [u8]) -> Result<usize, i64> {\n    let result = transport::zenoh_grants_read(cursor, out);\n    if result < 0 {\n        Err(result)\n    } else {\n        Ok(result as usize)\n    }\n}\n\n",
+}
 _TRANSPORT_PINS = {
     _TRANSPORT: "0852765ed62a984c28fb7adaa6683d0930cf977bb7f3a7de567e04c2f4083341",
     "components/runtime/src/syscall/wire.rs": "99e0addc975774fc936999b5c7ab99c4cb0b4a242d3bd0de5a175b51f7f48470",
@@ -583,29 +589,26 @@ def _addition_controls(product_root: Path) -> int:
             except ValueError as error:
                 _reject(f"transport pin refused {description}: {error}")
 
-        for relative, (pattern, _digest) in _ADDITIONS.items():
-            current = sources[relative]
+        for relative, (pattern, digest) in _ADDITIONS.items():
+            block = _ADDITION_BLOCKS[relative]
+            if hashlib.sha256(block).hexdigest() != digest:
+                _reject(f"the control block for {relative} does not hash to its pin")
             bare = stripped(relative)
-            found = list(re.finditer(pattern, current, re.MULTILINE | re.DOTALL))
-            block = found[0].group(0) if len(found) == 1 else b""
-            accepts(f"the file as it stands, {relative}", {})
+            current = bare + block
+            if len(list(re.finditer(pattern, current, re.MULTILINE | re.DOTALL))) != 1:
+                _reject(f"the control block for {relative} is not one match of its pattern")
+            accepts(f"the file with its addition, {relative}", {relative: current})
             accepts(f"the file without its addition, {relative}", {relative: bare})
-            if not block:
-                continue
-            refused += refuses(f"a block with one byte changed in {relative}", {relative: current.replace(block, block.replace(b"cursor", b"cursOr", 1), 1)}, relative)
+            refused += refuses(f"a block with one byte changed in {relative}", {relative: bare + block.replace(b"cursor", b"cursOr", 1)}, relative)
             refused += refuses(f"the block twice in {relative}", {relative: current + block}, relative)
-            refused += refuses(f"the block reworded in {relative}", {relative: current.replace(block, block.replace(b"/// ", b"/// A ", 1), 1)}, relative)
+            refused += refuses(f"the block reworded in {relative}", {relative: bare + block.replace(b"/// ", b"/// A ", 1)}, relative)
             refused += refuses(f"another function in {relative}", {relative: bare + block.replace(b"zenoh_grants_read", b"zenoh_other_read")}, relative)
-            refused += refuses(f"a change beside the block in {relative}", {relative: current.replace(b"fn reserve(", b"fn reserve_x(", 1) if b"fn reserve(" in current else current + b"// x\n"}, relative)
-            # The block removed and the rest of the file also changed: the frozen text must still be exact.
+            refused += refuses(f"a change beside the block in {relative}", {relative: current + b"// x\n"}, relative)
             refused += refuses(f"the block removed and the file extended in {relative}", {relative: bare + b"// extra\n"}, relative)
-        other = next(iter(_ADDITIONS))
-        for relative in _ADDITIONS:
-            if relative == other:
-                continue
-            block = list(re.finditer(_ADDITIONS[other][0], sources[other], re.MULTILINE | re.DOTALL))
-            if len(block) == 1:
-                refused += refuses(f"{other}'s block in {relative}", {relative: stripped(relative) + block[0].group(0)}, relative)
+        names = list(_ADDITIONS)
+        for relative, other in zip(names, names[1:] + names[:1]):
+            if relative != other:
+                refused += refuses(f"{other}'s block in {relative}", {relative: stripped(relative) + _ADDITION_BLOCKS[other]}, relative)
     return refused
 
 
