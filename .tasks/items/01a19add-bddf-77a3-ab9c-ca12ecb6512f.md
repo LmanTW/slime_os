@@ -41,6 +41,29 @@ devloop:
         intValue: 0
         boolValue: true
         textValue: ''
+  - acceptance: data-volume-observed
+    gate: just-target
+    mode: automated
+    identity:
+      requirements: b51960c172938f47c2ae6ebb265227ce3ac0a61c18b74cc96b0ed1d3463d7a22
+      helper: devloop-helpers/v1:93745c5aa610e8859ed5f5d937e47d55d36ac612cc60b3a22141fa6763fe1c23
+      code: 51644df95c758660bfb44c65f2f606b051ce51e7152eb6b935a7cc96003bec00
+      policy: c78e9c9ca69f30daca41248b621ae25de3b343b41ce3a93ac00d8e6b4b0350f9
+      inputs: 1efdc5d4291dcfafd750f5a5f74ac8558bcd745e1e1bd9547aa55804a32777f8
+      target: aarch64-darwin
+      image: data-volume-main-d712bcb9796c
+      epoch: 2bed3a7d-9a41-4fd4-baae-b8c4e332f8b4
+    observedAt: 1793680952
+    expiresAt: 1793767352
+    passed: true
+    observer: argv:["python3", "scripts/check/devloop-gate.py", "just-target"]
+    observations:
+    - id: passed
+      value:
+        kind: bool
+        intValue: 0
+        boolValue: true
+        textValue: ''
 ---
 
 # A hash-pinned frame store read from a read-only QEMU disk
