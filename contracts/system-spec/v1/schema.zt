@@ -274,6 +274,15 @@ SystemEntropyAuthority :: type {
   seed? : Text;
 };
 
+-- Zenoh service grant row, as `ZenohGrantEntry`. Optional at the spec level so
+-- the specs that predate it need no row.
+SystemZenohGrant :: type {
+  holder : Text;
+  key : Text;
+  publish : Bool;
+  subscribe : Bool;
+};
+
 -- Application bindings and exact local listener policy, distinct from remote destinations.
 SystemNetworkApplication :: type {
   holder : Text;
@@ -645,6 +654,8 @@ SystemSpec :: type {
   networkApplicationsObject? : Bool;
   entropyAuthority? : List SystemEntropyAuthority;
   entropyAuthorityObject? : Bool;
+  zenohGrants? : List SystemZenohGrant;
+  zenohGrantsObject? : Bool;
   blockRingAuthority : List SystemBlockRingAuthority;
   blockRingAuthorityObject : Bool;
   waitSet : List SystemWaitSetSource;
@@ -663,6 +674,7 @@ FromData @SystemNetworkDestination :: derive
 FromData @SystemNetworkInterface :: derive
 FromData @SystemNetworkApplication :: derive
 FromData @SystemEntropyAuthority :: derive
+FromData @SystemZenohGrant :: derive
 FromData @SystemBlockRingAuthority :: derive
 FromData @SystemWaitSetSource :: derive
 FromData @SystemSchedulingClassBand :: derive
@@ -728,6 +740,8 @@ maxNetworkInterfaces :: Int = 8;
 maxNetworkApplications :: Int = 4;
 -- `entropy-authority/v1`'s holder ceiling.
 maxEntropyAuthority :: Int = 16;
+-- The most Zenoh grant rows a system spec may declare. The grants table itself allows 65535.
+maxZenohGrants :: Int = 64;
 maxBlockRingAuthority :: Int = 128;
 maxWaitSetSources :: Int = 128;
 maxSchedulingClassBands :: Int = 8;
@@ -767,6 +781,7 @@ decodeSystemSpec :: Data -> Validation DecodeIssue SystemSpec
   SystemNetworkInterface =;
   SystemNetworkApplication =;
   SystemEntropyAuthority =;
+  SystemZenohGrant =;
   SystemBlockRingAuthority =;
   SystemWaitSetSource =;
   SystemSchedulingClassBand =;
@@ -808,6 +823,7 @@ decodeSystemSpec :: Data -> Validation DecodeIssue SystemSpec
   maxNetworkInterfaces =;
   maxNetworkApplications =;
   maxEntropyAuthority =;
+  maxZenohGrants =;
   maxBlockRingAuthority =;
   maxWaitSetSources =;
   maxSchedulingClassBands =;

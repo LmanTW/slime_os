@@ -716,6 +716,19 @@ pub fn network_interface_read(cursor: usize, out: &mut [u8]) -> Result<usize, i6
     }
 }
 
+/// Read the authenticated `zenoh-service-grants-table/v1` rows served to this
+/// generation's Zenoh service, returning how many rows were copied. The request
+/// is self-scoped and names no holder or key; what each row grants is the
+/// service's to enforce.
+pub fn zenoh_grants_read(cursor: usize, out: &mut [u8]) -> Result<usize, i64> {
+    let result = transport::zenoh_grants_read(cursor, out);
+    if result < 0 {
+        Err(result)
+    } else {
+        Ok(result as usize)
+    }
+}
+
 /// Read the authenticated `entropy-authority/v1` entries served to this
 /// generation's entropy service, returning how many entries were copied. The
 /// request is self-scoped and names no holder; budgets and streams are the

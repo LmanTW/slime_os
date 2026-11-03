@@ -41,6 +41,7 @@ render :: Text = t.join "" {
   line "MAX_NETWORK_INTERFACES" schema.maxNetworkInterfaces;
   line "MAX_NETWORK_APPLICATIONS" schema.maxNetworkApplications;
   line "MAX_ENTROPY_AUTHORITY" schema.maxEntropyAuthority;
+  line "MAX_ZENOH_GRANTS" schema.maxZenohGrants;
   line "MAX_BLOCK_RING_AUTHORITY" schema.maxBlockRingAuthority;
   line "MAX_WAIT_SET_SOURCES" schema.maxWaitSetSources;
   line "MAX_SCHEDULING_CLASS_BANDS" schema.maxSchedulingClassBands;

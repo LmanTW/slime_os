@@ -388,6 +388,11 @@ operations :: List Operation = {
   -- and the root copies rows only to the instance named `entropy-service`.
   -- The root draws no entropy and enforces no budget; both are the service's.
   operation "capabilityTable" "ENTROPY_AUTHORITY_READ" 74;
+  -- The authenticated `zenoh-service-grants-table/v1` table, on
+  -- `ENTROPY_AUTHORITY_READ`'s exact shape: the request names only a row
+  -- cursor, and the root copies rows only to the instance named
+  -- `zenoh-service`. No operand names a holder or a key.
+  operation "capabilityTable" "ZENOH_GRANTS_READ" 75;
   -- IO1's root-brokered hardware-resource mechanism. Every object operand is a
   -- logical capability slot from the authenticated caller's own authority
   -- table; no task, driver, device, physical address, or interrupt number is

@@ -44,6 +44,7 @@ pub mod zenoh_service;
 pub mod zenoh_service_client;
 #[cfg(test)]
 mod zenoh_service_link;
+pub mod zenoh_service_server;
 #[cfg(test)]
 mod zenoh_stock;
 #[cfg(test)]

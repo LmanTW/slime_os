@@ -671,6 +671,7 @@ def _validate_bounds(spec: dict, contract: ModuleType) -> None:
         ("networkInterfaces", contract.MAX_NETWORK_INTERFACES),
         ("networkApplications", contract.MAX_NETWORK_APPLICATIONS),
         ("entropyAuthority", contract.MAX_ENTROPY_AUTHORITY),
+        ("zenohGrants", contract.MAX_ZENOH_GRANTS),
         ("blockRingAuthority", contract.MAX_BLOCK_RING_AUTHORITY),
         ("waitSet", contract.MAX_WAIT_SET_SOURCES),
         ("recording", contract.MAX_RECORDING_ENTRIES),

@@ -147,8 +147,31 @@ subscription holds is refused as `undeclared-key`.
 
 Each holder has a ring of fixed slots. A holder that does not take never blocks another. A full ring
 keeps its newest samples and counts what it dropped, and the next take reports the count once. The core
-serves whole-frame samples only, so a session that reassembles fragments is refused. A component that
-wraps the core, the client interface and the path of the grants from the system spec are later items.
+serves whole-frame samples only, so a session that reassembles fragments is refused.
+
+## Grants path and the service component
+
+The grants reach the service in four steps. A system spec declares them with the keys `zenohGrants` and `zenohGrantsObject`,
+at most `maxZenohGrants` of 64 rows. The generation builder encodes them as the resource object `zenoh-grants`, in the
+layout of `contracts/zenoh-service-grants-table/v1`. The root reads that object on the label `ZENOH_GRANTS_READ`, 75. The
+reader serves 168-byte rows, at most six for one call, from a row cursor, and only to the instance named `zenoh-service`.
+The root decides no grant. It copies authenticated bytes. The runtime wrapper `zenoh_grants_read` makes the call.
+
+The server half (`components/lib/src/zenoh_service_server.rs`) answers the client protocol of
+`contracts/zenoh-service-client/v1`. It takes one request, the payload that travelled with it and the time, and returns the
+completion the client checks. It makes no runtime call, so a host test drives it. A request must be exactly 32 bytes. It
+names a grant row by an index below the holder's own row count and never a key. The holder is the one whose endpoint the
+request arrived on. A refused request changes no ring and writes nothing to the peer. A publication pumps the link and settles
+up to eight times, and a link that has not flushed by then is reported as closed.
+
+The component (`components/services/zenoh-service`) reads its grants, attaches to the network service and opens the link. It
+lends each holder a ring and a data page as shared-buffer loans, and serves them with the server half. A detach or an abort counts
+only when the server accepted it. A holder whose buffers could not be created is put back to having no session. The service
+ends when every holder that attached has detached.
+
+What is not yet shown: nothing in the component has run. Its loans, its control loop and its link loop are compiled and
+linted, and no host test and no boot exercised them. The composition that boots it is a later item. The component carries
+fixed limits of two holders and two rows, and it refuses any other table.
 
 ## Link behaviour
 

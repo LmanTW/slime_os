@@ -1,0 +1,24 @@
+[package]
+name = "slime-component-zenoh-service"
+version = "0.1.0"
+edition = "2024"
+publish = false
+rust-version = "1.96"
+build = "build.rs"
+
+[[bin]]
+name = "zenoh-service"
+path = "src/main.rs"
+test = false
+
+[dependencies]
+boot-contracts = { path = "../../../boot-contracts" }
+slime-components = { path = "../../lib" }
+slime-proto = { path = "../../proto" }
+slime-rt = { path = "../../runtime" }
+
+[build-dependencies]
+slime-build-support = { path = "../../build-support" }
+
+[lints]
+workspace = true

@@ -59,7 +59,7 @@ pub use syscall::{
     shared_buffer_occupancy, shared_buffer_release, shared_buffer_return, shared_buffer_revoke,
     shared_buffer_seal, shared_buffer_unmap, simulated_time_advance, simulated_time_read, spawn,
     spawn_budget, supervision_derive, supervision_status, timer_arm, timer_cancel, try_send,
-    unhealthy, wait_sources, yield_now,
+    unhealthy, wait_sources, yield_now, zenoh_grants_read,
 };
 
 /// C9.2's wait set, re-exported for the common case: a component builds one over

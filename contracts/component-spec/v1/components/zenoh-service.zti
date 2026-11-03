@@ -1,0 +1,63 @@
+{
+  formatVersion = 1;
+  name = "zenoh-service";
+  componentType = "service";
+  version = "1.0.0";
+  owner = "root";
+  purpose = "Serves one Zenoh Profile 0 session to local holders by their grants, over a link it owns through the network service.";
+  implementation = {
+    provider = "workspace";
+    binary = "zenoh-service";
+    contentHash = "";
+  };
+  provides = [
+    "endpoint";
+  ];
+  requires = [
+    "endpoint";
+  ];
+  interfaces = [];
+  dependencies = [];
+  communication = {
+    semantic = "none";
+    qos = [];
+  };
+  configuration = [];
+  lifecycle = [
+    "Initialize";
+    "Start";
+    "Ready";
+    "Running";
+    "Error";
+  ];
+  runtime = {
+    executionEnvironment = "aarch64-sel4-qemu-virt";
+    resource = {
+      stackBytes = 32768;
+      spawnBudget = 0;
+      extraThreads = 0;
+      bufferBytePages = 0;
+      bufferCount = 0;
+      mappingCount = 0;
+      loanCount = 0;
+      privatePageQuota = 0;
+    };
+    devices = [];
+  };
+  health = "required";
+  lifetime = "bounded";
+  compatibility = {
+    platform = "aarch64-sel4-qemu-virt";
+    interface = "contracts/interface-schema/v1";
+    dependency = "none";
+    resource = "atMost";
+    runtime = "exact";
+    qos = "none";
+  };
+  test = {
+    testCondition = "the zenoh_service_booted_check gate boots the sel4-zenoh-service composition, in which two holders exchange samples through the service";
+    expectedResult = "the service reads its grants table, serves each holder by its own rows, delivers a publication to every holder that may subscribe to its key, and refuses a key a holder lacks";
+    passFailCriteria = "zenoh profile 0 service-booted check";
+    requiredTestEnvironment = "zenoh_service_booted_check";
+  };
+}
