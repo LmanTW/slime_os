@@ -551,11 +551,13 @@ def audit_routes(root: Path) -> None:
         _reject("qualified kernel priority count must remain 256, making seL4_MaxPrio 255")
 
 
-# Refusals `_addition_controls` makes: six for each of the two blocks, and one block planted in the other file each way.
+# What `addition_results` judges: the file with its block and without it for each of the two files, and the refusals: six
+# for each block, and one block planted in the other file each way.
+_ADDITION_ACCEPTED = 4
 _ADDITION_REFUSALS = 14
 
 
-def _addition_controls(product_root: Path) -> int:
+def addition_results(product_root: Path) -> tuple[int, int]:
     """The allowed addition is exact. The pin holds with it, with it absent, and fails for every other change.
 
     Each case writes the two files that carry an addition into a temporary root, beside the other pinned files, and
@@ -564,6 +566,7 @@ def _addition_controls(product_root: Path) -> int:
     block, a block in the other file, and a block that is not removable, it must refuse."""
     sources = _transport_sources(product_root)
     refused = 0
+    accepted = 0
     with tempfile.TemporaryDirectory(prefix="slime-console-additions-") as temporary:
         root = Path(temporary)
 
@@ -587,11 +590,13 @@ def _addition_controls(product_root: Path) -> int:
             _reject(f"transport pin accepted {description}")
 
         def accepts(description: str, overrides: dict[str, bytes]) -> None:
+            nonlocal accepted
             write(overrides)
             try:
                 _transport_sources(root)
             except ValueError as error:
                 _reject(f"transport pin refused {description}: {error}")
+            accepted += 1
 
         for relative, (pattern, digest) in _ADDITIONS.items():
             block = _ADDITION_BLOCKS[relative]
@@ -613,9 +618,17 @@ def _addition_controls(product_root: Path) -> int:
         for relative, other in zip(names, names[1:] + names[:1], strict=True):
             if relative != other:
                 refused += refuses(f"{other}'s block in {relative}", {relative: stripped(relative) + _ADDITION_BLOCKS[other]}, relative)
-    if refused != _ADDITION_REFUSALS:
-        _reject(f"addition controls made {refused} refusals, the exam pins {_ADDITION_REFUSALS}")
-    return refused
+    if (accepted, refused) != (_ADDITION_ACCEPTED, _ADDITION_REFUSALS):
+        _reject(
+            f"addition controls accepted {accepted} and refused {refused}, "
+            f"the exam pins {_ADDITION_ACCEPTED} and {_ADDITION_REFUSALS}"
+        )
+    return accepted, refused
+
+
+def _addition_controls(product_root: Path) -> int:
+    """The refusals of `addition_results`, for the audit controls' total."""
+    return addition_results(product_root)[1]
 
 
 def _audit_controls(product_root: Path) -> int:
