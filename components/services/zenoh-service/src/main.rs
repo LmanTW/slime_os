@@ -207,7 +207,6 @@ fn main(_startup_arg: u32) {
             yield_now();
         }
     }
-    drop(link);
     if !io
         .close(connection)
         .unwrap_or_else(|_| fail(b"close request"))
