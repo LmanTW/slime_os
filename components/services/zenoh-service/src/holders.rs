@@ -253,7 +253,8 @@ pub fn serve<'k>(
                     reply(&answer, end.control);
                     let accepted = WireServiceCompletion::decode(&answer.completion)
                         .is_some_and(|completion| completion.status == 0);
-                    let teardown = i64::from(op) == wire::OP_DETACH || i64::from(op) == wire::OP_ABORT;
+                    let teardown =
+                        i64::from(op) == wire::OP_DETACH || i64::from(op) == wire::OP_ABORT;
                     if teardown
                         && accepted
                         && let Some(session) = sessions[index].take()

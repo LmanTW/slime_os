@@ -44,13 +44,21 @@ mod tests {
     }
 
     fn one_holder() -> (Server<1>, Core<'static, 1, 1, 12, 1>) {
-        let rows = [Row { holder: 0, key: "0/a/b", publish: true, subscribe: true }];
-        let core = Core::new(&rows, [0; 16], &crate::zenoh_service::exam::params()).expect("grants");
+        let rows = [Row {
+            holder: 0,
+            key: "0/a/b",
+            publish: true,
+            subscribe: true,
+        }];
+        let core =
+            Core::new(&rows, [0; 16], &crate::zenoh_service::exam::params()).expect("grants");
         (Server::new(), core)
     }
 
     fn status(answer: &Answer) -> i32 {
-        WireServiceCompletion::decode(&answer.completion).expect("a completion").status
+        WireServiceCompletion::decode(&answer.completion)
+            .expect("a completion")
+            .status
     }
 
     #[test]
@@ -60,24 +68,45 @@ mod tests {
         longer[..REQUEST_BYTES].copy_from_slice(&request(wire::OP_ATTACH));
         assert_eq!(status(&server.control(&core, 0, &longer)), STATUS_MALFORMED);
         assert!(!server.attached(0), "a refused request changes nothing");
-        assert_eq!(status(&server.control(&core, 0, &request(wire::OP_ATTACH))), 0);
+        assert_eq!(
+            status(&server.control(&core, 0, &request(wire::OP_ATTACH))),
+            0
+        );
         assert!(server.attached(0));
-        assert_eq!(status(&server.control(&core, 0, &longer[..REQUEST_BYTES - 1])), STATUS_MALFORMED);
+        assert_eq!(
+            status(&server.control(&core, 0, &longer[..REQUEST_BYTES - 1])),
+            STATUS_MALFORMED
+        );
     }
 
     #[test]
     fn a_holder_the_host_could_not_provision_may_attach_again() {
         let (mut server, core) = one_holder();
-        assert_eq!(status(&server.control(&core, 0, &request(wire::OP_ATTACH))), 0);
-        assert_eq!(status(&server.control(&core, 0, &request(wire::OP_ATTACH))), STATUS_DENIED);
+        assert_eq!(
+            status(&server.control(&core, 0, &request(wire::OP_ATTACH))),
+            0
+        );
+        assert_eq!(
+            status(&server.control(&core, 0, &request(wire::OP_ATTACH))),
+            STATUS_DENIED
+        );
         server.unattach(0);
         assert!(!server.attached(0));
-        assert_eq!(status(&server.control(&core, 0, &request(wire::OP_ATTACH))), 0);
+        assert_eq!(
+            status(&server.control(&core, 0, &request(wire::OP_ATTACH))),
+            0
+        );
         // A holder that never attached, or already ended, is not moved.
         server.unattach(5);
-        assert_eq!(status(&server.control(&core, 0, &request(wire::OP_DETACH))), 0);
+        assert_eq!(
+            status(&server.control(&core, 0, &request(wire::OP_DETACH))),
+            0
+        );
         server.unattach(0);
-        assert_eq!(status(&server.control(&core, 0, &request(wire::OP_ATTACH))), STATUS_DENIED);
+        assert_eq!(
+            status(&server.control(&core, 0, &request(wire::OP_ATTACH))),
+            STATUS_DENIED
+        );
     }
 }
 
@@ -408,7 +437,8 @@ fn take<'k, const H: usize, const N: usize, const P: usize, const R: usize>(
 /// it names, and changes nothing.
 fn decode(bytes: &[u8]) -> Result<WireServiceRequest, Answer> {
     // The wire request is exactly `REQUEST_BYTES`. A longer slice is not a request, whatever its prefix says.
-    let Some(request) = WireServiceRequest::decode(bytes).filter(|_| bytes.len() == REQUEST_BYTES) else {
+    let Some(request) = WireServiceRequest::decode(bytes).filter(|_| bytes.len() == REQUEST_BYTES)
+    else {
         return Err(refusal(0, STATUS_MALFORMED, 0));
     };
     let op = request.op;
