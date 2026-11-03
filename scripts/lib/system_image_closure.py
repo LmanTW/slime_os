@@ -851,6 +851,8 @@ def resolve_closure(
         "root-target",
         "target-spec",
         "workspace-manifest",
+        "zenoh-grants-table-contract",
+        "zenoh-grants-table-encoder",
     }
     if set(release_names) != required_release_inputs:
         _fail(

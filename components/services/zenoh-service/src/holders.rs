@@ -216,7 +216,9 @@ pub fn serve<'k>(
         *end = Some(endpoints(&names.bytes[index][..names.lens[index]]));
     }
     let mut epoch = 1u64;
-    while attached == 0 || detached < attached {
+    // The service ends once every holder the grants name has attached and detached, so a holder that attaches late is
+    // still served.
+    while attached < names.count || detached < attached {
         // `millis` takes the counter as the root returns it and subtracts its own base.
         let ticks = monotonic_read().unwrap_or_else(|_| fail(b"clock read"));
         let now = clock.millis(ticks);

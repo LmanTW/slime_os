@@ -289,18 +289,42 @@ mod tests {
         };
         let published = completion(wire::OP_PUBLISH as u8, 0, wire::ITEM_NONE as u8, 1, 2, 0);
         assert_eq!(
-            text(exchange_line(b"alpha", &req(wire::OP_PUBLISH, 1, 3), &published, &[])).as_deref(),
+            text(exchange_line(
+                b"alpha",
+                &req(wire::OP_PUBLISH, 1, 3),
+                &published,
+                &[]
+            ))
+            .as_deref(),
             Some("[zenoh-service] published holder=alpha row=1 sequence=3 reached=2 peer=none\n")
         );
         let sent = completion(
-            wire::OP_PUBLISH as u8, 0, wire::ITEM_NONE as u8, 0, 1, wire::FLAG_PEER_SENT as u32,
+            wire::OP_PUBLISH as u8,
+            0,
+            wire::ITEM_NONE as u8,
+            0,
+            1,
+            wire::FLAG_PEER_SENT as u32,
         );
         assert!(
-            text(exchange_line(b"alpha", &req(wire::OP_PUBLISH, 0, 0), &sent, &[])).unwrap().ends_with("peer=sent\n")
+            text(exchange_line(
+                b"alpha",
+                &req(wire::OP_PUBLISH, 0, 0),
+                &sent,
+                &[]
+            ))
+            .unwrap()
+            .ends_with("peer=sent\n")
         );
         let denied_publish = refusal(wire::OP_PUBLISH as u8, STATUS_DENIED, 5);
         assert_eq!(
-            text(exchange_line(b"beta", &req(wire::OP_PUBLISH, 5, 0), &denied_publish, &[])).as_deref(),
+            text(exchange_line(
+                b"beta",
+                &req(wire::OP_PUBLISH, 5, 0),
+                &denied_publish,
+                &[]
+            ))
+            .as_deref(),
             Some("[zenoh-service] denial class=not-granted holder=beta refused=1\n")
         );
         let too_large = refusal(wire::OP_PUBLISH as u8, STATUS_TOO_LARGE, 0);
@@ -309,7 +333,13 @@ mod tests {
         let mut page = [0u8; HEADER_BYTES + 4];
         page[..8].copy_from_slice(&2i64.to_le_bytes());
         assert_eq!(
-            text(exchange_line(b"beta", &req(wire::OP_TAKE, 0, 0), &sample, &page)).as_deref(),
+            text(exchange_line(
+                b"beta",
+                &req(wire::OP_TAKE, 0, 0),
+                &sample,
+                &page
+            ))
+            .as_deref(),
             Some("[zenoh-service] delivered holder=beta row=0 sequence=2\n")
         );
         let empty = completion(wire::OP_TAKE as u8, 0, wire::ITEM_NONE as u8, 0, 0, 0);

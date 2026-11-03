@@ -248,6 +248,7 @@ SPEC_NATIVE_SYSTEMS = frozenset({
     "sel4-net",
     "sel4-zenoh",
     "sel4-zenoh-external",
+    "sel4-zenoh-service",
     "sel4-private-memory-stress",
     "sel4-private-memory-stress-rv64",
     "sel4-private-memory-heap-stress",

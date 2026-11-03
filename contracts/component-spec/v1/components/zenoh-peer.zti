@@ -1,0 +1,50 @@
+{
+  formatVersion = 1;
+  name = "zenoh-peer";
+  componentType = "application";
+  version = "1.0.0";
+  owner = "root";
+  purpose = "Listens on 127.0.0.1:7447, accepts the service's connection, completes a Zenoh session that declares no subscriber, and closes when the service closes.";
+  implementation = {
+    provider = "workspace";
+    binary = "zenoh-peer";
+    contentHash = "";
+  };
+  provides = [];
+  requires = [ "endpoint"; ];
+  interfaces = [];
+  dependencies = [ "network-service"; ];
+  communication = { semantic = "none"; qos = []; };
+  configuration = [];
+  lifecycle = [ "Initialize"; "Start"; "Running"; "Error"; ];
+  runtime = {
+    executionEnvironment = "aarch64-sel4-qemu-virt";
+    resource = {
+      stackBytes = 16384;
+      spawnBudget = 0;
+      extraThreads = 0;
+      bufferBytePages = 0;
+      bufferCount = 0;
+      mappingCount = 2;
+      loanCount = 2;
+      privatePageQuota = 0;
+    };
+    devices = [];
+  };
+  health = "required";
+  lifetime = "bounded";
+  compatibility = {
+    platform = "aarch64-sel4-qemu-virt";
+    interface = "contracts/interface-schema/v1";
+    dependency = "exact";
+    resource = "atMost";
+    runtime = "exact";
+    qos = "none";
+  };
+  test = {
+    testCondition = "the zenoh_service_booted_check gate boots the sel4-zenoh-service composition";
+    expectedResult = "the peer accepts the service's connection, completes a Zenoh session with no declared subscriber, and closes when the service closes";
+    passFailCriteria = "zenoh profile 0 service-booted check";
+    requiredTestEnvironment = "zenoh_service_booted_check";
+  };
+}

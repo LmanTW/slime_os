@@ -653,6 +653,21 @@ opt-level = "s"
 codegen-units = 1
 debug = false
 
+[profile.release.package.slime-component-zenoh-holder-publisher]
+opt-level = "s"
+codegen-units = 1
+debug = false
+
+[profile.release.package.slime-component-zenoh-holder-subscriber]
+opt-level = "s"
+codegen-units = 1
+debug = false
+
+[profile.release.package.slime-component-zenoh-peer]
+opt-level = "s"
+codegen-units = 1
+debug = false
+
 [profile.release.package.slime-component-entropy-probe]
 opt-level = "s"
 codegen-units = 1

@@ -167,11 +167,22 @@ up to eight times, and a link that has not flushed by then is reported as closed
 The component (`components/services/zenoh-service`) reads its grants, attaches to the network service and opens the link. It
 lends each holder a ring and a data page as shared-buffer loans, and serves them with the server half. A detach or an abort counts
 only when the server accepted it. A holder whose buffers could not be created is put back to having no session. The service
-ends when every holder that attached has detached.
+ends when every holder the grants name has attached and detached. It then closes the link, gives the link bounded pumps to flush
+its CLOSE, and closes its connection through the network service.
 
-What is not yet shown: nothing in the component has run. Its loans, its control loop and its link loop are compiled and
-linted, and no host test and no boot exercised them. The composition that boots it is a later item. The component carries
-fixed limits of two holders and two rows, and it refuses any other table.
+The service prints one line for a publication, a taken sample and a publication refused for a row the holder may not publish.
+`exchange_line` in the server half builds them from the request and the answer, and a host test drives it. The booted exchange is
+judged on these lines.
+
+The composition `sel4-zenoh-service` (generation 171) runs the service, a peer, and two holders named `alpha` and `beta`. The
+peer listens on 127.0.0.1:7447 over the network service's loopback backend and declares no subscriber, so a publication reaches
+the holders and not the peer. `alpha` may publish the key and `beta` may subscribe to it. `beta` then asks to publish and is refused.
+The grants-table contract and encoder are release inputs of every closure, so a change to either changes each closure identity.
+
+What is shown: one boot of this composition under QEMU, in which `alpha` published four samples, `beta` was delivered all four,
+the service refused `beta`'s publish, and every instance exited with status 0. What is not shown: a second boot, a malformed
+request, a link that stalls, or any sample crossing to a peer that subscribes. The component carries fixed limits of two holders
+and two rows, and it refuses any other table.
 
 ## Link behaviour
 

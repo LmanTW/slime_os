@@ -151,6 +151,8 @@ PLANES: tuple[tuple[str, str], ...] = (
     # The same demo with its publisher dialling a stock peer through a virtio NIC. Init holds nothing
     # here either: the nodes, the network service and the driver are all root-autostart.
     ("sel4-zenoh-external", "slime-sel4-zenoh-external.elf"),
+    # The shared Zenoh service with its two holders and a peer. Init holds only the two buffer factories.
+    ("sel4-zenoh-service", "slime-sel4-zenoh-service.elf"),
 )
 
 # The subset P6.4 replays on x86-64: the resident product graph plus the two

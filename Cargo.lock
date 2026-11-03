@@ -1839,6 +1839,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "slime-component-zenoh-holder-publisher"
+version = "0.1.0"
+dependencies = [
+ "slime-build-support",
+ "slime-components",
+ "slime-proto",
+ "slime-rt",
+]
+
+[[package]]
+name = "slime-component-zenoh-holder-subscriber"
+version = "0.1.0"
+dependencies = [
+ "slime-build-support",
+ "slime-components",
+ "slime-proto",
+ "slime-rt",
+]
+
+[[package]]
+name = "slime-component-zenoh-peer"
+version = "0.1.0"
+dependencies = [
+ "slime-build-support",
+ "slime-components",
+ "slime-proto",
+ "slime-rt",
+]
+
+[[package]]
 name = "slime-component-zenoh-service"
 version = "0.1.0"
 dependencies = [
