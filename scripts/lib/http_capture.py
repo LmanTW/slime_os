@@ -31,8 +31,8 @@ def _checksum(data: bytes) -> int:
     return (~total) & 0xFFFF
 
 
-def _frames(data: bytes, *, allow_empty: bool = False):
-    _need(24 <= len(data) <= MAX_CAPTURE, "capture size outside bound")
+def _frames(data: bytes, *, allow_empty: bool = False, max_bytes: int = MAX_CAPTURE, max_frames: int = MAX_FRAMES):
+    _need(24 <= len(data) <= max_bytes, "capture size outside bound")
     formats = {
         b"\xd4\xc3\xb2\xa1": ("<", 1_000_000),
         b"\xa1\xb2\xc3\xd4": (">", 1_000_000),
@@ -56,7 +56,7 @@ def _frames(data: bytes, *, allow_empty: bool = False):
         _need(14 <= captured <= snaplen and captured == original, "truncated/oversized frame")
         _need(offset + captured <= len(data), "truncated PCAP payload")
         count += 1
-        _need(count <= MAX_FRAMES, "frame count bound")
+        _need(count <= max_frames, "frame count bound")
         yield timestamp / scale, data[offset:offset + captured]
         offset += captured
     _need(count != 0 or allow_empty, "empty packet observation")

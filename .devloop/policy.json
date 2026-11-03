@@ -200,6 +200,7 @@
     "scripts/lib/interface_schema.py",
     "scripts/lib/interface_schema_contract.py",
     "scripts/lib/just_metadata.py",
+    "scripts/lib/lidar_publish_exam.py",
     "scripts/lib/link_peer.py",
     "scripts/lib/link_wake.py",
     "scripts/lib/markdown_anchors.py",

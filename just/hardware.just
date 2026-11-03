@@ -235,6 +235,16 @@ rpi5_ros2_zenoh_check: sel4_pin_check zenoh_composition_check zenoh_encoder_chec
 zenoh_external_check: sel4_pin_check
     python3 scripts/check/check-sel4-io-network-plane.py --arm zenoh-external
 
+# 01a19cdb-5986-7d5f-a948-0d23122f52e5: sel4-lidar-external reads the LiDAR frame store from a read-only disk
+# and publishes every frame to a stock eclipse-zenoh 1.0.0 peer on the host, built from the wheel pinned for
+# this host. The exam encodes the store from the bag SLIME_LIDAR_BAG names, and judges the transcript, the NIC
+# capture and the peer's contracts/zenoh-digest-receipt/v1 record against it; the expectation is
+# scripts/lib/lidar_publish_exam.py. Needs the bag and a registry, so it is explicit and in no aggregate.
+# Fails until the sel4-lidar-external composition lands.
+[group('hardware')]
+lidar_publish_check: sel4_pin_check
+    python3 scripts/check/check-sel4-io-network-plane.py --arm lidar-publish
+
 [group('hardware')]
 rpi5_artifact_check: architecture_contract_check rpi5_ros2_demo_contract_v2_check
     python3 scripts/check/check-rpi5-artifacts.py

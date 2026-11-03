@@ -1,0 +1,127 @@
+-- What a stock eclipse-zenoh listener outside the VM reports it received, by digest.
+--
+-- `scripts/lib/zenoh_listener_peer.py` runs the pinned `eclipse-zenoh==1.0.0` Python binding in a
+-- separate process, subscribes to one key, and writes one record of this shape when it is done.
+-- `scripts/check/check-sel4-io-network-plane.py --arm lidar-publish` reads it back and holds it
+-- against the frame store and the packet capture. It crosses a process boundary, so it is a
+-- versioned contract here and not a text format either side parses by hand.
+--
+-- `contracts/zenoh-external-receipt/v1` carries each payload whole as hexadecimal, which bounds it
+-- to the demo's 12-byte samples. This record carries a payload as its length and its SHA-256, so a
+-- record of thousands of samples of megabytes each stays small. The samples are in the order the
+-- peer's own subscriber delivered them; the peer did not read them from the wire the exam captured.
+
+Sample :: type {
+  key : Text;
+  payloadBytes : Int;
+  payloadSha256 : Text;
+  attachmentHex : Text;
+};
+
+Receipt :: type {
+  formatVersion : Int;
+  peerVersion : Text;
+  listen : Text;
+  maxRemotePeers : Int;
+  samples : List Sample;
+};
+
+FromData @Sample :: derive
+FromData @Receipt :: derive
+
+formatVersion :: Int = 1;
+peerVersion :: Text = "1.0.0";
+
+-- At most as many samples as a contracts/frame-store/v1 store holds frames, each a payload of at
+-- most a frame-store payload's 16 MiB, a key of at most 256 bytes and the 33-byte rmw_zenoh
+-- attachment (8 + 8 + a length byte + a 16-byte GID). A SHA-256 is 32 bytes.
+maxSamples :: Int = 4096;
+maxKeyBytes :: Int = 256;
+maxPayloadBytes :: Int = 16777216;
+sha256Bytes :: Int = 32;
+attachmentBytes :: Int = 33;
+
+-- The peer counts the remote peers it sees while it runs; the guest is one.
+minRemotePeers :: Int = 1;
+maxRemotePeers :: Int = 8;
+
+d ::= import stdlib.data;
+l ::= import stdlib.list;
+r ::= import stdlib.result;
+t ::= import stdlib.text;
+
+-- The record is closed. `decode` reads the fields it knows and ignores the rest, so a field the
+-- contract does not name would pass unseen. `onlyFields` refuses one at the top level and in every
+-- sample; a value that is not a record or a list is left to `decode`, which refuses it with its type.
+receiptFields :: List Text = { "formatVersion"; "peerVersion"; "listen"; "maxRemotePeers"; "samples"; };
+sampleFields :: List Text = { "key"; "payloadBytes"; "payloadSha256"; "attachmentHex"; };
+
+named :: List Text -> d.DataField -> Bool
+  = names field => l.any (\name. name == field.name) names;
+
+onlyFields :: List Text -> Data -> Bool
+  = names data => match d.asRecord data {
+    | #ok { value = fields; } => l.all (named names) fields;
+    | #err { error = _; } => true;
+  };
+
+samplesClosed :: Data -> Bool
+  = data => match d.field "samples" data {
+    | #ok { value = value; } => match d.asList value {
+      | #ok { value = items; } => l.all (onlyFields sampleFields) items;
+      | #err { error = _; } => true;
+    };
+    | #err { error = _; } => true;
+  };
+
+closed :: Data -> Bool
+  = data => onlyFields receiptFields data && samplesClosed data;
+
+-- Lowercase hexadecimal of `bytes` bytes: twice that many characters, none outside 0-9 and a-f.
+-- Removing each permitted digit in turn must leave nothing.
+lowerHexDigits :: List Text = { "0"; "1"; "2"; "3"; "4"; "5"; "6"; "7"; "8"; "9"; "a"; "b"; "c"; "d"; "e"; "f"; };
+
+hexOf :: Int -> Text -> Bool
+  = bytes value => t.length value == bytes * 2
+    && t.length (l.fold (\rest digit. t.replace digit "" rest) value lowerHexDigits) == 0;
+
+sampleOk :: Sample -> Bool
+  = s => t.length s.key >= 1 && t.length s.key <= maxKeyBytes
+    && s.payloadBytes >= 0 && s.payloadBytes <= maxPayloadBytes
+    && hexOf sha256Bytes s.payloadSha256
+    && hexOf attachmentBytes s.attachmentHex;
+
+receiptOk :: Receipt -> Bool
+  = rec => rec.formatVersion == formatVersion && rec.peerVersion == peerVersion
+    && rec.maxRemotePeers >= minRemotePeers && rec.maxRemotePeers <= maxRemotePeers
+    && l.length rec.samples <= maxSamples && l.all sampleOk rec.samples;
+
+unknownField :: DecodeIssue
+  = { path = {;}; error = #custom { message = "a field the contract does not name"; }; };
+
+outOfBounds :: DecodeIssue
+  = { path = {;}; error = #custom { message = "a value outside the bounds the contract declares"; }; };
+
+bounded :: Validation DecodeIssue Receipt -> Validation DecodeIssue Receipt
+  = checked => match checked {
+    | #valid { value = rec; } => if receiptOk rec then #valid { value = rec; } else r.invalidOne outOfBounds;
+    | #invalid { errors = errs; } => #invalid { errors = errs; };
+  };
+
+decodeReceipt :: Data -> Validation DecodeIssue Receipt
+  = data => if closed data then bounded (decode data) else r.invalidOne unknownField;
+
+{
+  Sample =;
+  Receipt =;
+  decodeReceipt =;
+  formatVersion =;
+  peerVersion =;
+  maxSamples =;
+  maxKeyBytes =;
+  maxPayloadBytes =;
+  sha256Bytes =;
+  attachmentBytes =;
+  minRemotePeers =;
+  maxRemotePeers =;
+}

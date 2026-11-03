@@ -41,6 +41,10 @@ The net arm boots `sel4-net`, the product shell beside the network stack, and
 types seven Slisp lines into the resident shell one at a time: a spawned
 numeric fetch judged against the controlled HTTP peer, and refusals that must
 leave no forbidden packet on the captured wire; it is also explicit.
+The lidar-publish arm boots `sel4-lidar-external` with the LiDAR frame store on a
+read-only disk and a stock eclipse-zenoh 1.0.0 peer on the host, and judges the
+transcript, the NIC capture and the peer's digest record against the store
+(`scripts/lib/lidar_publish_exam.py`); it needs the bag, so it is explicit.
 The HTTP arms instead use QEMU user networking and ordinary host TCP/UDP sockets;
 public DNS/HTTP remains an explicitly requested smoke, never part of ``all``.
 """
@@ -80,6 +84,8 @@ import zenoh_capture  # noqa: E402
 import zenoh_exchange  # noqa: E402
 import zenoh_service_arm  # noqa: E402
 import zenoh_listener_peer  # noqa: E402
+import data_volume_exam  # noqa: E402
+import lidar_publish_exam  # noqa: E402
 from sel4_gate_markers import match_marker_contract  # noqa: E402
 from sel4_plane import run_plane  # noqa: E402
 
@@ -1406,6 +1412,87 @@ def run_zenoh_external_arm(transcript_path: Path | None) -> None:
     devloop_observations.record(casesObserved=result["receipt"], bytesObserved=result["bytes"], negativeControlsRefused=controls)
 
 
+def run_lidar_publish_arm(transcript_path: Path | None) -> None:
+    """Boot the LiDAR publisher with the frame store on a read-only disk, against a stock peer on the host.
+
+    The judges are held to their controls first. The store is encoded by the exam from the pinned bag,
+    the builder's disk must be the contract's one image of it, and the composition must grant exactly
+    one outbound connection and one read ring. QEMU attaches virtio-net-device and then virtio-blk-device,
+    and captures the NIC. The transcript, the capture and the stock peer's digest record are judged
+    against the store. Needs the bag and a registry, so this arm is explicit and in no aggregate.
+    """
+    try:
+        accepted, refused = lidar_publish_exam.controls()
+    except lidar_publish_exam.ExamError as error:
+        fail(str(error))
+    print(f"[lidar-publish] controls accepted={accepted} refused={refused}")
+    for path in (lidar_publish_exam.SYSTEM, lidar_publish_exam.COMPOSITION):
+        if not path.is_file():
+            fail(f"{path.relative_to(ROOT)} does not exist; the {lidar_publish_exam.CLOSURE} composition has not landed")
+    try:
+        ceiling = lidar_publish_exam.read_ceiling(lidar_publish_exam.SYSTEM.read_text(encoding="utf-8"))
+        rows = lidar_publish_exam.composition_from_text(lidar_publish_exam.COMPOSITION.read_text(encoding="utf-8"))
+        facts = lidar_publish_exam.check_rows(*rows)
+        store = lidar_publish_exam.store_from_bag(os.environ.get("SLIME_LIDAR_BAG"))
+        want = lidar_publish_exam.expected(store)
+    except (lidar_publish_exam.ExamError, zenoh_exchange.ExchangeError) as error:
+        fail(str(error))
+    generation = rows[0]
+    image = build_image(lidar_publish_exam.CLOSURE)
+    netdev = f"user,id=slimenet,net=10.0.2.0/24,host={zenoh_capture.PEER},dhcpstart={zenoh_capture.GUEST},ipv6=off"
+    try:
+        with tempfile.TemporaryDirectory(prefix="slime-lidar-publish-") as name:
+            directory = Path(name)
+            source, disk = directory / "lidar.store", directory / "lidar.img"
+            source.write_bytes(store)
+            built = subprocess.run(
+                [sys.executable, str(ROOT / data_volume_exam.BUILDER), "--kind", "frame-store", "--payload", str(source), "--output", str(disk)],
+                cwd=ROOT, capture_output=True, text=True, check=False,
+            )
+            if built.returncode != 0 or not disk.is_file():
+                fail(f"{data_volume_exam.BUILDER} exited {built.returncode}: {built.stderr.strip()[-300:]}")
+            if disk.read_bytes() != data_volume_exam.encode(store):
+                fail("the builder's disk is not the data-volume contract's one image of the store")
+            receipt = directory / "receipt.zti"
+            with zenoh_listener_peer.Listener(
+                receipt, zenoh_capture.PORT, key=lidar_publish_exam.KEY, samples=len(want.frames),
+                form="digest", deadline=lidar_publish_exam.LISTENER_SECONDS,
+            ) as listener:
+                capture = directory / "network.pcap"
+                transcript = run_plane(
+                    image=image, timeout=lidar_publish_exam.QEMU_SECONDS, terminal_condition=lidar_publish_exam.TERMINAL,
+                    fail=fail, pins_path=PINS,
+                    additional_arguments=(
+                        "-netdev", netdev,
+                        "-device", f"virtio-net-device,netdev=slimenet,mac={lidar_publish_exam.INTERFACE['mac']}",
+                        "-object", f"filter-dump,id=netcapture,netdev=slimenet,file={capture}",
+                        "-drive", f"if=none,id=slimedata,format=raw,readonly=on,file={disk}",
+                        "-device", "virtio-blk-device,drive=slimedata",
+                    ),
+                )
+                if not capture.is_file():
+                    fail("QEMU did not produce the lidar-publish packet observation")
+                packets = capture.read_bytes()
+                listener_output = listener.finish(lidar_publish_exam.LISTENER_SECONDS)
+                if transcript_path is not None:
+                    transcript_path.write_text(transcript + "\n" + listener_output, encoding="utf-8")
+                    transcript_path.with_suffix(".pcap").write_bytes(packets)
+                try:
+                    run = lidar_publish_exam.judge_transcript(transcript, want, ceiling, generation)
+                    wire = lidar_publish_exam.judge_capture(packets, want)
+                    samples = lidar_publish_exam.judge_receipt(*lidar_publish_exam.read_receipt(receipt), want)
+                except lidar_publish_exam.ExamError as error:
+                    print(transcript)
+                    fail(f"lidar-publish evidence refused: {error}")
+    except (OSError, RuntimeError, ValueError) as error:
+        fail(f"lidar-publish evidence refused: {error}")
+    span_s = wire["span_ns"] / 1e9
+    rate = want.total / span_s / 1e6 if span_s else 0.0
+    print(f"[lidar-publish-wire] puts={wire['puts']} batches={wire['batches']} largest-batch={wire['largest_batch']} guest-stream={wire['guest_stream']} min-gap-ms={wire['min_gap_ns'] / 1e6:.3f} span-s={span_s:.3f} mb-per-s={rate:.3f}")
+    print(f"[lidar-publish] samples-in-receipt={samples} bytes={want.total} late={run['late']} elapsed-ms={run['elapsed_ms']} ceiling={run['ceiling']} authority-facts={facts}")
+    devloop_observations.record(casesObserved=samples, bytesObserved=want.total, negativeControlsRefused=refused)
+
+
 def http_launch_text(url: str) -> str:
     """Serialize only through the schema-generated launch binding."""
     encoded = url.encode("ascii")
@@ -1594,8 +1681,8 @@ def run_http_public_arm(image: Path, transcript_path: Path | None) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Boot and check the seL4 I/O network proof planes")
     parser.add_argument("--no-build", action="store_true")
-    parser.add_argument("--arm", choices=("authority", "tcp", "local", "lifetime", "service-fault", "driver-reset", "tcp-impairment", "tcp-listener", "tcp-options", "tcp-buffers", "root-diagnostics", "link-wake", "net", "zenoh", "zenoh-service", "zenoh-external", "http", "http-public", "all"), default="all")
-    parser.add_argument("--controls-only", action="store_true", help="zenoh-external arm only: run the judges against their mutated evidence, without QEMU or a listener")
+    parser.add_argument("--arm", choices=("authority", "tcp", "local", "lifetime", "service-fault", "driver-reset", "tcp-impairment", "tcp-listener", "tcp-options", "tcp-buffers", "root-diagnostics", "link-wake", "net", "zenoh", "zenoh-service", "zenoh-external", "lidar-publish", "http", "http-public", "all"), default="all")
+    parser.add_argument("--controls-only", action="store_true", help="zenoh-external, zenoh-service and lidar-publish arms: run the judges against their mutated evidence, without QEMU or a listener")
     parser.add_argument("--allow-public", action="store_true", help="explicitly authorize the opt-in public DNS/HTTP smoke")
     parser.add_argument("--http-case", choices=tuple(case.name for case in http_peer.cases()))
     parser.add_argument(
@@ -1620,8 +1707,8 @@ def main() -> None:
         fail(f"run from repository root: {ROOT}")
     if arguments.arm == "http-public" and not arguments.allow_public:
         fail("public HTTP requires explicit --allow-public; unavailable public access is not a pass")
-    if arguments.controls_only and arguments.arm not in ("zenoh-external", "zenoh-service"):
-        fail("--controls-only requires --arm zenoh-external or --arm zenoh-service")
+    if arguments.controls_only and arguments.arm not in ("zenoh-external", "zenoh-service", "lidar-publish"):
+        fail("--controls-only requires --arm zenoh-external, --arm zenoh-service or --arm lidar-publish")
     if arguments.http_case is not None and arguments.arm != "http":
         fail("--http-case requires --arm http")
     if arguments.arm == "http":
@@ -1798,6 +1885,16 @@ def main() -> None:
             fail(str(error))
         print(f"zenoh external judges: {samples} samples on an honest capture, {accepted} honest variants accepted, {mutations} mutated captures and in-memory receipts refused, {receipts_accepted} listener records accepted and {receipts_refused} refused by the contract's decoder, {facts} authority facts on an honest composition, {composition} mutations refused")
         return
+    if arguments.arm == "lidar-publish" and arguments.controls_only:
+        try:
+            accepted, refused = lidar_publish_exam.controls()
+        except lidar_publish_exam.ExamError as error:
+            fail(str(error))
+        print(f"lidar publish judges: {accepted} honest variants accepted, {refused} corruptions refused")
+        return
+    if arguments.arm == "lidar-publish":
+        run_lidar_publish_arm(arguments.transcript)
+        print("seL4 lidar publish check: the guest read every frame from the read-only disk and sent it over one TCP connection to a stock eclipse-zenoh 1.0.0 peer, which received each frame byte for byte, in order and never early")
     if arguments.arm == "zenoh-external":
         run_zenoh_external_arm(arguments.transcript)
         print("seL4 zenoh external check: the guest connected out over TCP to a stock eclipse-zenoh 1.0.0 listener, which delivered all four samples, and the capture holds exactly that one connection")

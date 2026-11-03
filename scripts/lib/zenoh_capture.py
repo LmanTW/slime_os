@@ -166,12 +166,14 @@ def _record_times(data: bytes) -> list[int]:
     return times
 
 
-def segments(data: bytes) -> tuple[list[Segment], int]:
-    """Every TCP segment in the capture, and the number of ARP frames. Anything else is refused."""
+def segments(data: bytes, max_capture: int = http_capture.MAX_CAPTURE, max_frames: int = http_capture.MAX_FRAMES) -> tuple[list[Segment], int]:
+    """Every TCP segment in the capture, and the number of ARP frames. Anything else is refused.
+
+    A capture over `max_capture` bytes or `max_frames` frames is refused."""
     found: list[Segment] = []
     arp = 0
     try:
-        frames = list(http_capture._frames(data))
+        frames = list(http_capture._frames(data, max_bytes=max_capture, max_frames=max_frames))
         times = _record_times(data)
     except ValueError as error:
         raise CaptureError(str(error)) from error
@@ -242,7 +244,7 @@ class _Timing:
         raise CaptureError(f"the stream never reached byte {end}")
 
 
-def _reassemble(segs: list[Segment], isn: int, label: str) -> tuple[bytes, _Timing]:
+def _reassemble(segs: list[Segment], isn: int, label: str, max_stream: int = MAX_STREAM) -> tuple[bytes, _Timing]:
     """One direction's byte stream, from the sender's own sequence numbers.
 
     Retransmission and reordering are allowed; a gap, a retransmission that differs, and a FIN
@@ -273,7 +275,7 @@ def _reassemble(segs: list[Segment], isn: int, label: str) -> tuple[bytes, _Timi
         overlap = bytes(stream[offset : offset + len(payload)])
         _need(payload[: len(overlap)] == overlap, f"{label}: a retransmission differs from the first bytes")
         stream += payload[len(overlap) :]
-        _need(len(stream) <= MAX_STREAM, f"{label}: stream over {MAX_STREAM} bytes")
+        _need(len(stream) <= max_stream, f"{label}: stream over {max_stream} bytes")
     _need(fin is not None, f"{label}: the stream was never closed with a FIN")
     _need(fin == len(stream), f"{label}: the FIN is at {fin} but {len(stream)} bytes were delivered")
     return bytes(stream), _Timing(parts, times, min(s.index for s in segs if s.flags & TCP_FIN))
@@ -325,9 +327,14 @@ def _check_established(segs: list[Segment], peer_isn: int) -> None:
                   f"a {'guest' if s.outgoing else 'peer'} payload recorded before the peer's SYN was acknowledged")
 
 
-def streams(data: bytes) -> tuple[bytes, bytes, int, _Timing, _Timing]:
-    """The two streams of the capture's one connection, its ARP count, and where each was carried."""
-    segs, arp = segments(data)
+def streams(
+    data: bytes, max_stream: int = MAX_STREAM, max_capture: int = http_capture.MAX_CAPTURE, max_frames: int = http_capture.MAX_FRAMES,
+) -> tuple[bytes, bytes, int, _Timing, _Timing]:
+    """The two streams of the capture's one connection, its ARP count, and where each was carried.
+
+    Each direction is refused past `max_stream` bytes, and the capture past `max_capture` bytes or
+    `max_frames` frames."""
+    segs, arp = segments(data, max_capture, max_frames)
     syns = [s for s in segs if s.outgoing and s.flags & TCP_SYN and not s.flags & TCP_ACK]
     _need(len(syns) >= 1, "no connection attempt: the capture holds no guest SYN")
     _need(len({s.source_port for s in syns}) == 1, f"{len({s.source_port for s in syns})} connections, exactly one is admitted")
@@ -371,19 +378,21 @@ def streams(data: bytes) -> tuple[bytes, bytes, int, _Timing, _Timing]:
     _need(len({_negotiated(s) for s in synacks}) == 1, "a peer SYN-ACK retransmitted with another window or option")
     _check_acks(segs, syn.seq, synacks[0].seq)
     _check_established(segs, synacks[0].seq)
-    guest, guest_time = _reassemble([s for s in segs if s.outgoing], syn.seq, "guest stream")
-    peer, peer_time = _reassemble([s for s in segs if not s.outgoing], synacks[0].seq, "peer stream")
+    guest, guest_time = _reassemble([s for s in segs if s.outgoing], syn.seq, "guest stream", max_stream)
+    peer, peer_time = _reassemble([s for s in segs if not s.outgoing], synacks[0].seq, "peer stream", max_stream)
     return guest, peer, arp, guest_time, peer_time
 
 
-def split(stream: bytes, label: str) -> tuple[list[bytes], list[tuple[int, int]]]:
-    """Zenoh batches by their two-byte little-endian stream length, and where each one sits in the stream."""
+def split(stream: bytes, label: str, max_batch: int = MAX_BATCH_BYTES) -> tuple[list[bytes], list[tuple[int, int]]]:
+    """Zenoh batches by their two-byte little-endian stream length, and where each one sits in the stream.
+
+    A batch longer than `max_batch` bytes after its length prefix is refused."""
     batches, spans, at = [], [], 0
     while at < len(stream):
         _need(at + 2 <= len(stream), f"{label}: a stream length cut short")
         length = int.from_bytes(stream[at : at + 2], "little")
         _need(length > 0, f"{label}: an empty batch")
-        _need(length <= MAX_BATCH_BYTES, f"{label}: a batch of {length} bytes, the profile bounds a batch at {MAX_BATCH_BYTES}")
+        _need(length <= max_batch, f"{label}: a batch of {length} bytes, the profile bounds a batch at {max_batch}")
         _need(at + 2 + length <= len(stream), f"{label}: a batch of {length} bytes with {len(stream) - at - 2} left")
         batches.append(stream[at + 2 : at + 2 + length])
         spans.append((at, at + 2 + length))

@@ -81,7 +81,11 @@ the Zenoh default so the demo's loopback 7447 stays distinct.
 
 ## Limits
 
-- One peer, one wheel, one x86_64 Linux machine. QEMU user networking is not a physical NIC,
+- One peer, one x86_64 Linux machine. Work item `01a19cdb-5986-7d5f-a948-0d23122f52e5` adds
+  a second pin of the same release for macOS on Apple silicon
+  (`eclipse_zenoh-1.0.0-cp38-abi3-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl`,
+  sha256 `08b0871119786a1432864af8aa0cf42019a4b7bc8cfe725588cbc15f7d007f90`). The listener
+  installs the pin for its host and refuses a host with none. QEMU user networking is not a physical NIC,
   and its translation of the guest's connection to the host's loopback is not the wire a real
   network shows.
 - Outbound only. No inbound connection, listener on a NIC, DNS or scouting.

@@ -1,12 +1,14 @@
 """A stock eclipse-zenoh 1.0.0 listener on the host, and the record it writes about what it received.
 
 Two halves in one file. The importing half (`ensure_venv`, `Listener`) runs under the system
-Python: it builds a virtual environment under `build/zenoh-external/` from the one wheel pinned
-below with `pip --require-hashes --no-deps`, then starts the second half in that environment.
-The script half (`python zenoh_listener_peer.py <port> <receipt>`) is the stock peer: mode peer,
-multicast scouting and gossip off, one TCP listener on the host loopback, one subscriber on the
-demo key. It writes a record of `contracts/zenoh-external-receipt/v1` when the guest's session
-ends, and never reads the wire the packet capture holds.
+Python: it builds a virtual environment under `build/zenoh-external/` from the wheel pinned below
+for the host's platform with `pip --require-hashes --no-deps`, then starts the second half in that
+environment. The script half (`python zenoh_listener_peer.py <port> <receipt> <key> <samples>
+<form> <deadline>`) is the stock peer: mode peer, multicast scouting and gossip off, one TCP
+listener on the host loopback, one subscriber on the key. When the guest's session ends it writes
+one record: `contracts/zenoh-external-receipt/v1` for the `whole` form, each payload as
+hexadecimal, or `contracts/zenoh-digest-receipt/v1` for the `digest` form, each payload as its
+length and SHA-256. It never reads the wire the packet capture holds.
 
 QEMU user networking forwards the guest's `10.0.2.2` to the host's loopback, so the listener
 binds `127.0.0.1` and nothing wider. The wheel is a registry download and this is an explicit
@@ -15,7 +17,9 @@ local experiment, never part of CI.
 
 from __future__ import annotations
 
+import hashlib
 import os
+import platform
 import subprocess
 import sys
 import threading
@@ -24,9 +28,20 @@ from pathlib import Path
 
 from harness import ROOT
 
-WHEEL = "eclipse_zenoh-1.0.0-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"
-WHEEL_SHA256 = "1763912951ecd2a3706f668faf0541245387096b37a4fefb73af7848dadd46ff"
+# One wheel per host platform the exams run on, each pinned by its registry SHA-256. A host with
+# no pin here is refused rather than given whichever wheel the registry offers it.
+WHEELS = {
+    ("linux", "x86_64"): (
+        "eclipse_zenoh-1.0.0-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+        "1763912951ecd2a3706f668faf0541245387096b37a4fefb73af7848dadd46ff",
+    ),
+    ("darwin", "arm64"): (
+        "eclipse_zenoh-1.0.0-cp38-abi3-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl",
+        "08b0871119786a1432864af8aa0cf42019a4b7bc8cfe725588cbc15f7d007f90",
+    ),
+}
 VERSION = "1.0.0"
+FORMS = ("whole", "digest")
 PORT = 17447
 SCRATCH = ROOT / "build" / "zenoh-external"
 VENV = SCRATCH / "venv"
@@ -54,6 +69,14 @@ def venv_python() -> Path:
     return VENV / "bin" / "python"
 
 
+def wheel_pin() -> tuple[str, str]:
+    """The pinned wheel's file name and SHA-256 for this host, or a refusal."""
+    host = (sys.platform, platform.machine())
+    if host not in WHEELS:
+        raise ListenerError(f"no eclipse-zenoh {VERSION} wheel is pinned for {host[0]} {host[1]}")
+    return WHEELS[host]
+
+
 def ensure_venv() -> Path:
     """The pinned peer's interpreter, built fresh from the hash-pinned wheel on every call.
 
@@ -62,7 +85,8 @@ def ensure_venv() -> Path:
     """
     interpreter = venv_python()
     SCRATCH.mkdir(parents=True, exist_ok=True)
-    REQUIREMENTS.write_text(f"eclipse-zenoh=={VERSION} --hash=sha256:{WHEEL_SHA256}\n", encoding="utf-8")
+    _wheel, digest = wheel_pin()
+    REQUIREMENTS.write_text(f"eclipse-zenoh=={VERSION} --hash=sha256:{digest}\n", encoding="utf-8")
     steps = (
         [sys.executable, "-I", "-m", "venv", "--clear", str(VENV)],
         # --isolated ignores environment variables and every pip configuration file, user and global,
@@ -79,15 +103,21 @@ def ensure_venv() -> Path:
 class Listener:
     """The stock peer as a child process; the context returns once it is subscribed."""
 
-    def __init__(self, receipt: Path, port: int = PORT) -> None:
-        self.receipt, self.port = receipt, port
+    def __init__(
+        self, receipt: Path, port: int = PORT, key: str = KEY, samples: int = SAMPLES,
+        form: str = "whole", deadline: int = DEADLINE_SECONDS,
+    ) -> None:
+        if form not in FORMS:
+            raise ListenerError(f"a record form {form!r}, the listener writes {FORMS}")
+        self.receipt, self.port, self.key, self.samples, self.form, self.deadline = receipt, port, key, samples, form, deadline
         self.process: subprocess.Popen[str] | None = None
 
     def __enter__(self) -> Listener:
         interpreter = ensure_venv()
         self.receipt.unlink(missing_ok=True)
+        arguments = (self.port, self.receipt, self.key, self.samples, self.form, self.deadline)
         self.process = subprocess.Popen(
-            [str(interpreter), "-E", str(Path(__file__).resolve()), str(self.port), str(self.receipt)],
+            [str(interpreter), "-E", str(Path(__file__).resolve()), *map(str, arguments)],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=_clean_environment(),
         )
         assert self.process.stdout is not None
@@ -140,7 +170,21 @@ def receipt_text(listen: str, remote_peers: int, samples: list[tuple[str, bytes,
     return f'{{\n  formatVersion = 1;\n  peerVersion = "{VERSION}";\n  listen = "{listen}";\n  maxRemotePeers = {remote_peers};\n  samples = [\n{rows}  ];\n}}\n'
 
 
-def serve(port: int, receipt: Path) -> int:
+def digested(key: str, payload: bytes, attachment: bytes) -> tuple[str, int, str, bytes]:
+    """One delivery reduced to what the digest record keeps, so the peer never holds a payload."""
+    return key, len(payload), hashlib.sha256(payload).hexdigest(), attachment
+
+
+def digest_receipt_text(listen: str, remote_peers: int, samples: list[tuple[str, int, str, bytes]]) -> str:
+    """A `contracts/zenoh-digest-receipt/v1` record from rows `digested` made."""
+    rows = "".join(
+        f'    {{ key = "{key}"; payloadBytes = {size}; payloadSha256 = "{sha256}"; attachmentHex = "{attachment.hex()}"; }};\n'
+        for key, size, sha256, attachment in samples
+    )
+    return f'{{\n  formatVersion = 1;\n  peerVersion = "{VERSION}";\n  listen = "{listen}";\n  maxRemotePeers = {remote_peers};\n  samples = [\n{rows}  ];\n}}\n'
+
+
+def serve(port: int, receipt: Path, key: str = KEY, expected: int = SAMPLES, form: str = "whole", seconds: int = DEADLINE_SECONDS) -> int:
     import json
 
     import zenoh
@@ -158,7 +202,7 @@ def serve(port: int, receipt: Path) -> int:
         print(f"[zenoh-listener] fail: zenoh imported from {location}, not from {sys.prefix}", flush=True)
         return 1
     session = zenoh.open(config)
-    received: list[tuple[str, bytes, bytes]] = []
+    received: list[tuple] = []
     # A sample is delivered by a remote peer, so the peers the session holds when one arrives are
     # the peers that sent it. A peer that connects, publishes and leaves between two polls is
     # still counted, because the delivery itself records it.
@@ -178,30 +222,34 @@ def serve(port: int, receipt: Path) -> int:
     def on_sample(sample: zenoh.Sample) -> None:
         attachment = sample.attachment
         nonlocal last_delivery
+        row = (str(sample.key_expr), bytes(sample.payload), b"" if attachment is None else bytes(attachment))
+        if form == "digest":
+            row = digested(*row)
         with lock:
-            received.append((str(sample.key_expr), bytes(sample.payload), b"" if attachment is None else bytes(attachment)))
+            received.append(row)
             last_delivery = time.monotonic()
         # A delivery is evidence of a remote peer even when no snapshot shows one.
         note(max(len(session.info.peers_zid()), 1))
 
-    subscriber = session.declare_subscriber(KEY, on_sample)
+    subscriber = session.declare_subscriber(key, on_sample)
     print(READY, flush=True)
-    deadline = time.monotonic() + DEADLINE_SECONDS
+    deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         note(len(session.info.peers_zid()))
         with lock:
             delivered, quiet = len(received), time.monotonic() - last_delivery
         # The connector keeps its link open until the peer closes it, so waiting for the peer to
-        # disconnect first would wait out the whole deadline. Once all four samples have arrived and
-        # none has followed for the settle time, the session is closed from this side.
-        if delivered >= SAMPLES and quiet >= SETTLE_SECONDS:
+        # disconnect first would wait out the whole deadline. Once every expected sample has arrived
+        # and none has followed for the settle time, the session is closed from this side.
+        if delivered >= expected and quiet >= SETTLE_SECONDS:
             break
         time.sleep(0.2)
     with lock:
         # A record with samples and no peer cannot be honest: floor the count at one.
         count = max(most, 1 if received else 0)
         samples = list(received)
-    receipt.write_text(receipt_text(listen, count, samples), encoding="utf-8")
+    writer = digest_receipt_text if form == "digest" else receipt_text
+    receipt.write_text(writer(listen, count, samples), encoding="utf-8")
     print(f"[zenoh-listener] received={len(samples)} remote-peers={count}", flush=True)
     # The handle is held to here so the subscriber stays declared for the whole collection.
     subscriber.undeclare()
@@ -210,4 +258,4 @@ def serve(port: int, receipt: Path) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(serve(int(sys.argv[1]), Path(sys.argv[2])))
+    raise SystemExit(serve(int(sys.argv[1]), Path(sys.argv[2]), sys.argv[3], int(sys.argv[4]), sys.argv[5], int(sys.argv[6])))
