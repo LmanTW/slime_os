@@ -57,6 +57,7 @@
     "scripts/check/check-external-component-admission.py",
     "scripts/check/check-fabric-manifest.py",
     "scripts/check/check-data-volume.py",
+    "scripts/check/check-lidar-publish.py",
     "scripts/check/check-frame-store.py",
     "scripts/check/check-framework-authority.py",
     "scripts/check/check-framework-cpu-boot.py",

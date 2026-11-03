@@ -6,8 +6,8 @@ the publisher's code, its link configuration or the Rust frame-store reader:
 * the store: the frames the guest must send, read from a frame store the caller encoded from the
   hash-pinned bag with `frame_store_exam`;
 * the composition: the derived manifest grants the publisher one outbound TCP connection and one
-  block ring with read rights only, and its system spec declares an arrival ceiling above the root's
-  default;
+  block ring with read rights only, on the device the block driver drives, and its system spec
+  declares an arrival ceiling above the root's default;
 * the transcript: the root reports that ceiling before the publisher's first line, the publisher
   reports the store and a summary equal to it and then the closed session, and the graph ends healthy;
 * the capture: one TCP connection to the host peer carries every Put as FRAGMENT batches of at most
@@ -62,6 +62,10 @@ TAG = f"[{PUBLISHER}] "
 INSTANCES = ("init", "network-service", "virtio-net-driver", "virtio-blk-driver", PUBLISHER)
 INTERFACE = dict(zenoh_capture.INTERFACE)
 PEER, PORT, LISTEN = zenoh_capture.PEER, zenoh_capture.PORT, zenoh_capture.LISTEN
+# QEMU gives command-line devices transports from the highest address down, and the root numbers
+# devices in that reverse physical order. The arm attaches the NIC and then the disk, so the network
+# driver drives device 0 and the block driver device 1.
+DRIVER_DEVICES = {"virtio-net-driver": 0, "virtio-blk-driver": 1}
 KEY = "0/velodyne_points/sensor_msgs::msg::dds_::PointCloud2_/" + frames.BAG_TYPE_HASH
 GID = zenoh_capture.DEMO_GID
 PERIOD_NS = 500_000_000
@@ -170,15 +174,17 @@ def read_ceiling(text: str) -> int:
 
 
 def composition_from_text(text: str) -> tuple:
-    """Generation, instances, interfaces, destinations, applications and block rings of a derived manifest."""
+    """Generation, instances, interfaces, destinations, applications, block rings and driver budgets
+    of a derived manifest."""
     generation, instances, destinations, applications = zenoh_exchange.composition_from_text(text)
     interfaces = zenoh_exchange.parse_rows(text, "networkInterfaces")
     rings = zenoh_exchange.parse_rows(text, "blockRingAuthority")
-    return generation, instances, interfaces, destinations, applications, rings
+    budgets = zenoh_exchange.parse_rows(text, "ioResourceBudget")
+    return generation, instances, interfaces, destinations, applications, rings, budgets
 
 
 def check_rows(generation: int, instances: list[str], interfaces: list[dict], destinations: list[dict],
-               applications: list[dict], rings: list[dict]) -> int:
+               applications: list[dict], rings: list[dict], budgets: list[dict]) -> int:
     """Refuse a composition that grants the publisher more or less than one connection and one read ring.
 
     Returns the number of authority facts verified."""
@@ -209,7 +215,12 @@ def check_rows(generation: int, instances: list[str], interfaces: list[dict], de
     ring = rings[0]
     need(ring.get("holder") == PUBLISHER, "the block ring is not held by the publisher")
     need(ring.get("rights") == ["blockRead"], f"the block ring grants {ring.get('rights')}, the exam declares read rights only")
-    need((ring.get("device"), ring.get("ring")) == (0, 0), "the block ring is not ring 0 of device 0")
+    # A budget row that names no device drives device 0, as the manifest contract defaults it.
+    driven = {row.get("holder"): row.get("device", 0) for row in budgets}
+    need(len(budgets) == len(DRIVER_DEVICES) and driven == DRIVER_DEVICES,
+         f"the drivers' device budgets are {driven}, the arm's QEMU order gives {DRIVER_DEVICES}")
+    need(ring.get("ring") == 0 and ring.get("device", 0) == driven["virtio-blk-driver"],
+         "the block ring is not ring 0 of the device the block driver drives")
     return facts
 
 
@@ -219,8 +230,10 @@ def good_rows() -> tuple:
         "rights": ["connect", "send", "recv"], "listenerLimit": 0, "dnsRecordLimit": 0,
     }
     publisher = {"holder": PUBLISHER, "role": "client", "backend": "external", "rights": [], "admittedPeer": "", "admittedPeerAddress": ""}
-    ring = {"device": 0, "holder": PUBLISHER, "rights": ["blockRead"], "ring": 0, "sectorLimit": 200000}
-    return (171, list(INSTANCES), [dict(INTERFACE)], [destination], [publisher], [ring])
+    ring = {"device": 1, "holder": PUBLISHER, "rights": ["blockRead"], "ring": 0, "sectorLimit": 200000}
+    net = {"holder": "virtio-net-driver", "mmioMappings": 1}
+    blk = {"device": 1, "holder": "virtio-blk-driver", "mmioMappings": 1}
+    return (171, list(INSTANCES), [dict(INTERFACE)], [destination], [publisher], [ring], [net, blk])
 
 
 def row_mutations() -> list[tuple[str, Callable[[list], None]]]:
@@ -235,6 +248,9 @@ def row_mutations() -> list[tuple[str, Callable[[list], None]]]:
 
     def ring(**c: object) -> Callable[[list], None]:
         return lambda v: v[5][0].update(c)
+
+    def budget(index: int, **c: object) -> Callable[[list], None]:
+        return lambda v: v[6][index].update(c)
 
     return [
         ("generation 0", lambda v: v.__setitem__(0, 0)),
@@ -273,7 +289,16 @@ def row_mutations() -> list[tuple[str, Callable[[list], None]]]:
         ("a ring with write rights only", ring(rights=["blockWrite"])),
         ("a ring with no rights", ring(rights=[])),
         ("ring 1", ring(ring=1)),
-        ("device 1", ring(device=1)),
+        ("a ring on device 0, the NIC", ring(device=0)),
+        ("a ring that names no device, so device 0", lambda v: v[5][0].pop("device")),
+        ("a ring on device 2", ring(device=2)),
+        ("the network driver on device 1", budget(0, device=1)),
+        ("the block driver on device 0", budget(1, device=0)),
+        ("the block driver naming no device, so device 0", lambda v: v[6][1].pop("device")),
+        ("no block driver budget", lambda v: v[6].pop(1)),
+        ("no network driver budget", lambda v: v[6].pop(0)),
+        ("a third budget row", lambda v: v[6].append({"holder": PUBLISHER, "device": 2})),
+        ("the block budget held by the publisher", budget(1, holder=PUBLISHER)),
     ]
 
 
@@ -846,7 +871,7 @@ def receipt_controls(want: Expected) -> tuple[int, int]:
 # The counts the controls produce, pinned so a judge that quietly loses a case is seen: a judge that
 # refuses fewer corruptions, or accepts fewer honest variants, fails the pin before it judges a run.
 PINNED_ACCEPTED = 11
-PINNED_REFUSED = 120
+PINNED_REFUSED = 129
 
 
 def controls() -> tuple[int, int]:
