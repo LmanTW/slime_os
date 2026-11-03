@@ -2,9 +2,10 @@
 schema: work-item/v2
 id: 01a19add-bddf-77a3-ab9c-ca12ecb6512f
 kind: task
-state: active
+state: done
 created: 2026-11-02T14:06:25+08:00
-updated: 2026-11-02T22:27:24+08:00
+updated: 2026-11-03T05:33:51+00:00
+closed: 2026-11-03T05:33:51+00:00
 tags:
   - ros2
 supersedes:
