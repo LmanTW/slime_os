@@ -16,8 +16,9 @@
 --   `zenoh-service-grants-table/v1`, because a longer key could never be sent.
 -- * Every field is 32 bits. The largest value is `maxSampleBytes`, 1048576, and `stackBytes` is bounded by the
 --   same arithmetic that `zenoh-service-grants/v1` states for the rings.
--- * The stack is checked against the rows by `zenoh-service-grants/v1` (`requiredStack`). This record carries the
---   declared number, and the builder evaluates that contract on the rows and the limits together.
+-- * The stack is a declared number. The generation builder checks it against its own bound and does not evaluate
+--   `zenoh-service-grants/v1` (`requiredStack`), so that contract is not a generation input. The service holds its
+--   own storage, and it refuses to start when the declared stack is more than it was built with.
 
 formatVersion :: Int = 1;
 recordMagic :: Int = 21491351925902419; -- `SLIMEZL` and a zero byte, little-endian

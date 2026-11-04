@@ -9,9 +9,9 @@ This module imports the standard library only. The closure identity pins this fi
 module, and an import of another repository file would put that file's bytes outside the pin. The exam refuses any other
 import. The schema is parsed here for the same reason, so the exam's parser and this one are two statements of one rule.
 
-The encoder checks each limit against its own bound. Whether the declared stack covers the rows is the arithmetic of
-`zenoh-service-grants/v1` (`requiredStack`), and the builder evaluates that contract on the rows and the limits
-together. This module does not restate it.
+The encoder checks each limit against its own bound and nothing else. Whether the declared stack covers the rows is the
+arithmetic of `zenoh-service-grants/v1` (`requiredStack`). The builder does not evaluate that contract, so it is not a
+generation input. The service checks the declared stack against the storage it was built with.
 """
 
 from __future__ import annotations
