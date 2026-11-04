@@ -145,9 +145,10 @@ zenoh_service_server_check:
 
 # Judges the Zenoh service limits record, the six limits of the grants record that the generation carries and the root
 # serves, and the places that must carry them. The judge writes each record again with Python's struct from the schema's
-# layout, refuses each corruption of a record, and requires the system spec and manifest fields, the builder, the root's
-# read of the record, the service's use of the limits and the core's acceptance of fewer rows than its ceiling. The
-# expectation is scripts/lib/zenoh_limits_exam.py. The recipe fails until the implementation lands.
+# layout, refuses each corruption of a record, and requires the generated binding to equal the renderer's output. It runs
+# the decoder's test and the core's test, and calls the builder on manifests with undersized stacks. It also requires the
+# system spec and manifest fields, the closure release inputs, the root's read of the record and the service's use of the
+# limits. The expectation is scripts/lib/zenoh_limits_exam.py. The recipe fails until the implementation lands.
 [group('hardware')]
 zenoh_service_limits_check:
     python3 scripts/check/check-zenoh-profile0.py --slice limits
