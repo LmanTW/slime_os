@@ -382,6 +382,11 @@
       kind = "resource";
       size = 4096;
     };
+    {
+      id = "zenoh-limits";
+      kind = "resource";
+      size = 4096;
+    };
   ];
   privateMemoryBudget = [];
   sharedBufferBudget = [
@@ -611,6 +616,14 @@
       subscribe = true;
     };
   ];
+  zenohLimits = {
+    holders = 2;
+    keyBytes = 129;
+    localSubscriptions = 3;
+    ringSlots = 4;
+    sampleBytes = 12;
+    stackBytes = 32768;
+  };
   waitSet = [
     {
       badgeBit = 0;
