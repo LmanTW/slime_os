@@ -168,6 +168,15 @@ layout of `contracts/zenoh-service-grants-table/v1`. The root reads that object 
 reader serves 168-byte rows, at most six for one call, from a row cursor, and only to the instance named `zenoh-service`.
 The root decides no grant. It copies authenticated bytes. The runtime wrapper `zenoh_grants_read` makes the call.
 
+The same read serves a second record at one cursor value, 4294967295. A system spec declares the service's six limits with
+`zenohLimits` and `zenohLimitsObject`, and the builder encodes them as the object `zenoh-limits` in the 48-byte layout of
+`contracts/zenoh-service-limits/v1`. A read at that cursor returns the record and no row, so its count is 48 bytes and not
+a number of rows. `graph_runtime/services.rs` has its own branch for it, because the row branch would slice a count of
+168-byte rows. The caller gate and the record's own checks are the same as for rows, and a record that does not decode is
+not served. The service reads the record before the rows and refuses to start when a limit is above what it was built to
+hold. The builder checks each limit against its bound and does not check the stack against the rows. The service checks the
+declared stack against its own, and `zenoh-service-grants/v1` is not a generation input.
+
 The server half (`components/lib/src/zenoh_service_server.rs`) answers the client protocol of
 `contracts/zenoh-service-client/v1`. It takes one request, the payload that travelled with it and the time, and returns the
 completion the client checks. It makes no runtime call, so a host test drives it. A request must be exactly 32 bytes. It
@@ -192,8 +201,8 @@ The grants-table contract and encoder are release inputs of every closure, so a 
 
 What is shown: one boot of this composition under QEMU, in which `alpha` published four samples, `beta` was delivered all four,
 the service refused `beta`'s publish, and every instance exited with status 0. What is not shown: a second boot, a malformed
-request, a link that stalls, or any sample crossing to a peer that subscribes. The component carries fixed limits of two holders
-and two rows, and it refuses any other table.
+request, a link that stalls, or any sample crossing to a peer that subscribes. The component is built for at most two holders and
+two rows. It refuses a table above that, and it serves a table below it.
 
 ## Link behaviour
 

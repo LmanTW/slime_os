@@ -283,6 +283,17 @@ SystemZenohGrant :: type {
   subscribe : Bool;
 };
 
+-- The Zenoh service's six limits, as `ZenohLimitsEntry` and `contracts/zenoh-service-limits/v1`. Optional at the spec
+-- level so the specs that predate it need none.
+SystemZenohLimits :: type {
+  holders : Int;
+  ringSlots : Int;
+  sampleBytes : Int;
+  keyBytes : Int;
+  localSubscriptions : Int;
+  stackBytes : Int;
+};
+
 -- Application bindings and exact local listener policy, distinct from remote destinations.
 SystemNetworkApplication :: type {
   holder : Text;
@@ -656,6 +667,8 @@ SystemSpec :: type {
   entropyAuthorityObject? : Bool;
   zenohGrants? : List SystemZenohGrant;
   zenohGrantsObject? : Bool;
+  zenohLimits? : SystemZenohLimits;
+  zenohLimitsObject? : Bool;
   blockRingAuthority : List SystemBlockRingAuthority;
   blockRingAuthorityObject : Bool;
   waitSet : List SystemWaitSetSource;
@@ -680,6 +693,7 @@ FromData @SystemNetworkInterface :: derive
 FromData @SystemNetworkApplication :: derive
 FromData @SystemEntropyAuthority :: derive
 FromData @SystemZenohGrant :: derive
+FromData @SystemZenohLimits :: derive
 FromData @SystemBlockRingAuthority :: derive
 FromData @SystemWaitSetSource :: derive
 FromData @SystemSchedulingClassBand :: derive
@@ -787,6 +801,7 @@ decodeSystemSpec :: Data -> Validation DecodeIssue SystemSpec
   SystemNetworkApplication =;
   SystemEntropyAuthority =;
   SystemZenohGrant =;
+  SystemZenohLimits =;
   SystemBlockRingAuthority =;
   SystemWaitSetSource =;
   SystemSchedulingClassBand =;
