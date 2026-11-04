@@ -33,6 +33,12 @@ zenoh_service_grants_gen:
 zenoh_service_client_gen:
     python3 scripts/generate/generate-zenoh-service-client-bindings.py
 
+# Renders the wire record of contracts/zenoh-service-limits/v1 as components/proto/src/zenoh_service_limits_wire.rs.
+# The limits exam requires the committed file to equal this output byte for byte.
+[group('generate')]
+zenoh_service_limits_gen:
+    python3 scripts/generate/generate-zenoh-service-limits.py
+
 # Renders the wire records of contracts/zenoh-service-grants-table/v1 as components/proto/src/zenoh_service_grants_table_wire.rs.
 # The grants table exam requires the committed file to equal this output byte for byte.
 [group('generate')]
