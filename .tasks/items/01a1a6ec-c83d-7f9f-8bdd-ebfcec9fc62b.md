@@ -1,10 +1,10 @@
 ---
 schema: work-item/v2
-id: 01a1a6d2-a9a8-70a5-a9c6-46ae5efdb598
+id: 01a1a6ec-c83d-7f9f-8bdd-ebfcec9fc62b
 kind: task
 state: open
-created: 2026-11-04T13:49:46+00:00
-updated: 2026-11-04T13:50:01+00:00
+created: 2026-11-04T14:18:18+00:00
+updated: 2026-11-04T14:18:31+00:00
 parent: 01a0f5fa-f2c4-71cf-962b-c62cbea2ef68
 depends:
   - 01a1a588-7517-78ad-b7c5-63e900980ddd
@@ -13,8 +13,8 @@ devloop:
   recordSchema: devloop-consumer/v1
   bodyProfile: fenced-zti/v1
   helper: devloop-helpers/v1:93745c5aa610e8859ed5f5d937e47d55d36ac612cc60b3a22141fa6763fe1c23
-  requirementsDigest: bc16d20c8ea122305b9bddad06c65eebd95c5cf84ad69383f3436dd7714155a4
-  admission: slime-zenoh-service-limits-builder-20261104b
+  requirementsDigest: db178ca8955d3f2001d01e76bb3ea0e1e15d942793a1573d440a47aa707d85df
+  admission: slime-zenoh-service-limits-builder-20261104c
   epoch: unstarted
   evidence: []
 ---
@@ -29,9 +29,9 @@ devloop:
     "Add the exam `scripts/lib/zenoh_limits_builder_exam.py` and the checker `scripts/check/check-zenoh-limits-builder.py`, run as `just zenoh_service_limits_builder_check`, with its row in `docs/reference/just-targets.md`.";
     "The exam builds the record from a real manifest with the service and its holders added. It requires the encoder's bytes and the independent struct writer's bytes, and it requires the same bytes whatever order the rows and instances come in.";
     "The builder holds the rows to the record. The distinct holders the rows name are at most the declared holders. The distinct keys that some row subscribes to are at most the declared local subscriptions. Every key is at most the declared key bytes.";
-    "The exam holds each of those limits exactly at the rows, so a builder that refuses at the limit fails. It also holds a key that is published and not subscribed, so a builder that counts every key as a subscription fails.";
-    "The exam refuses 11 manifests. They name too many holders or subscribe keys, or hold a key over the declared length. They declare a limit of zero or above its bound, drop or add a limit, declare no limits, or lack the service instance.";
-    "A composition that has an instance named `zenoh-service` must declare the limits object. The exam refuses 4 specs: limits without their object, the object without limits, the service without the object, and rows above the declared holders.";
+    "The exam holds each of those limits exactly at the rows, so a builder that refuses at the limit fails. It holds a key that is published and not subscribed, so a builder that counts every key fails. It holds two holders that subscribe to one key, so a builder that counts rows fails.";
+    "The exam refuses 12 manifests. They name too many holders or subscribe keys, or hold a key over the declared length, subscribed or only published. They declare a limit of zero or above its bound, drop or add a limit, declare no limits, or lack the service instance.";
+    "A composition that has an instance named `zenoh-service` must declare the limits object. The exam refuses 5 specs. They declare limits without their object, the object without limits, or the service without the object. They also declare the service with no rows and no limits, or rows above the declared holders.";
     "The exam asserts no arithmetic on the stack. The builder does not check it, the service checks it, and `zenoh-service-grants/v1` is not a generation input.";
     "This item changes no product path.";
   ];
@@ -65,7 +65,7 @@ devloop:
     };
     {
       id = "the-builder-refuses-what-the-manifest-forbids";
-      statement = "The exam refuses 11 manifests and 4 specs, and each refusal must come from the boundary that owns it. The refusal names its reason, and a refusal at another boundary fails the exam.";
+      statement = "The exam refuses 12 manifests and 5 specs, and each refusal must come from the boundary that owns it. The refusal names its reason, and a refusal at another boundary fails the exam.";
       acceptance = [
         "controls-refused";
       ];
@@ -92,7 +92,7 @@ devloop:
       observation = "casesObserved";
       expected = {
         kind = "int";
-        intValue = 11;
+        intValue = 12;
         boolValue = false;
         textValue = "";
       };
@@ -103,12 +103,12 @@ devloop:
       members = [];
     };
     {
-      id = "exactly-15-controls";
+      id = "exactly-17-controls";
       kind = "equal";
       observation = "negativeControlsRefused";
       expected = {
         kind = "int";
-        intValue = 15;
+        intValue = 17;
         boolValue = false;
         textValue = "";
       };
@@ -157,7 +157,7 @@ devloop:
   acceptance = [
     {
       id = "cases-observed";
-      rationale = "The checker counts ${CASES} honest checks. Four are the record's bytes, three ways and one reorder. Four hold the rows at a limit, three of them exactly and one with a key that is not subscribed. Three are of the record a spec derives. A builder that emits other bytes or refuses at a limit fails.";
+      rationale = "The checker counts ${CASES} honest checks. Four are the record's bytes, three ways and one reorder. Five hold the rows at a limit: three exactly, one with a key that is not subscribed and one with two holders on one key. Three are of the record a spec derives. A builder that emits other bytes or refuses at a limit fails.";
       gate = "just-observations";
       mode = "automated";
       mandatory = true;
@@ -165,11 +165,11 @@ devloop:
     };
     {
       id = "controls-refused";
-      rationale = "The checker refuses exactly ${CONTROLS} inputs: 11 manifests and 4 specs. Each is applied alone, and the honest input is accepted first. The refusal must name the reason of the boundary that owns it.";
+      rationale = "The checker refuses exactly ${CONTROLS} inputs: 12 manifests and 5 specs. Each is applied alone, and the honest input is accepted first. The refusal must name the reason of the boundary that owns it.";
       gate = "just-observations";
       mode = "automated";
       mandatory = true;
-      predicate = "exactly-15-controls";
+      predicate = "exactly-17-controls";
     };
     {
       id = "recipe-passed";

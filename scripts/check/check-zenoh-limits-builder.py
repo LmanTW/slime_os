@@ -24,8 +24,8 @@ from typing import NoReturn
 import devloop_observations
 import zenoh_limits_builder_exam
 
-CASES = 11
-CONTROLS = 15
+CASES = 12
+CONTROLS = 17
 
 
 def fail(message: str) -> NoReturn:

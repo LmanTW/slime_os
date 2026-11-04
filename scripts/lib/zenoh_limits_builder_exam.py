@@ -38,6 +38,10 @@ ROWS = [
 ]
 # A second key that alpha publishes and nobody subscribes to. It adds no subscription.
 PUBLISH_ONLY = [*ROWS, {"holder": "alpha", "key": "0/slime_service/publish_only", "publish": True, "subscribe": False}]
+# A third holder subscribes to the key beta already subscribes to. Three rows touch the key and two of them subscribe.
+SHARED_SUBSCRIBE = [*ROWS, {"holder": "gamma", "key": KEY, "publish": False, "subscribe": True}]
+# A key that only alpha publishes and nobody subscribes to, longer than any key a subscriber holds.
+LONG_PUBLISH_ONLY = [*ROWS, {"holder": "alpha", "key": KEY + "/publish/only/and/longer", "publish": True, "subscribe": False}]
 LIMITS = {"holders": 2, "ringSlots": 4, "sampleBytes": 12, "keyBytes": 129, "localSubscriptions": 3, "stackBytes": 32768}
 # The record's field names are snake case and the manifest's are camel case.
 FIELDS = {"holders": "holders", "ring_slots": "ringSlots", "sample_bytes": "sampleBytes", "key_bytes": "keyBytes",
@@ -104,8 +108,9 @@ def controls(system=None) -> tuple[int, int]:
         ("a key exactly as long as the declared key bytes", ROWS, dict(LIMITS, keyBytes=len(KEY))),
         ("one subscribe key and one declared subscription", ROWS, dict(LIMITS, localSubscriptions=1)),
         ("a key that is published and not subscribed does not count as a subscription", PUBLISH_ONLY, dict(LIMITS, localSubscriptions=1)),
+        ("two holders subscribing to one key are one subscription", SHARED_SUBSCRIBE, dict(LIMITS, holders=3, localSubscriptions=1)),
     ):
-        built = BUILDER.build_zenoh_limits(_manifest(system, rows=rows, limits=limits))
+        built = BUILDER.build_zenoh_limits(_manifest(system, rows=rows, limits=limits, holders=("alpha", "beta", "gamma")))
         if built != zenoh_limits.encode(_values(limits)):
             fail(f"the builder's bytes for {label} differ from the encoder's")
         positive += 1
@@ -117,6 +122,7 @@ def controls(system=None) -> tuple[int, int]:
         ("two holders named and one declared", lambda: _manifest(system, limits=dict(LIMITS, holders=1)), "name 2 holders"),
         ("three holders named and two declared", lambda: _manifest(system, rows=[*ROWS, *third], holders=("alpha", "beta", *third_names)), "name 3 holders"),
         ("a key one byte over the declared key bytes", lambda: _manifest(system, limits=dict(LIMITS, keyBytes=len(KEY) - 1)), "is longer than"),
+        ("a key only published is held to the declared key bytes", lambda: _manifest(system, rows=LONG_PUBLISH_ONLY, limits=dict(LIMITS, keyBytes=len(KEY))), "is longer than"),
         ("two subscribe keys and one declared subscription", lambda: _manifest(system, rows=two_keys, limits=dict(LIMITS, localSubscriptions=1)), "subscribe to 2 keys"),
         ("a limit of zero", lambda: _manifest(system, limits=dict(LIMITS, holders=0)), "the contract allows"),
         ("a limit above its bound", lambda: _manifest(system, limits=dict(LIMITS, ringSlots=65536)), "the contract allows"),
@@ -165,6 +171,7 @@ def controls(system=None) -> tuple[int, int]:
         ("limits without their object", lambda spec: spec.update(zenohLimitsObject=False), "require their resource object"),
         ("the object without limits", lambda spec: spec.pop("zenohLimits"), "needs its limits"),
         ("the service without the object", lambda spec: spec.update(zenohLimitsObject=False, zenohLimits=None), "must declare it"),
+        ("the service with no grant rows and no limits", lambda spec: spec.update(zenohGrants=[], zenohGrantsObject=False, zenohLimitsObject=False, zenohLimits=None), "must declare it"),
         ("rows above the declared holders", lambda spec: spec["zenohLimits"].update(holders=1), "name 2 holders"),
     ):
         altered = copy.deepcopy(valid)
