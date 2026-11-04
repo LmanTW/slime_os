@@ -217,7 +217,8 @@ def build_zenoh_limits(manifest: dict) -> bytes:
     """Encode the Zenoh service limits record (zenoh-service-limits/v1) from the manifest's `zenohLimits`.
 
     The encoder checks each limit against its own bound. This function adds what only the manifest knows: the limits are
-    declared and the reader instance exists. The stack is not checked against the rows here. The service checks the declared
+    declared, the reader instance exists, and the rows fit the holders, subscriptions and key length the record declares.
+    The stack is not checked against the rows here. The service checks the declared
     stack against the storage it was built with, and zenoh-service-grants/v1 is not a generation input.
     """
     import zenoh_limits
@@ -234,9 +235,22 @@ def build_zenoh_limits(manifest: dict) -> bytes:
         fail(f"zenoh limits: the record holds the fields {sorted(declared)}, the contract names {sorted(names.values())}")
     limits = {field: declared[key] for field, key in names.items()}
     try:
-        return zenoh_limits.encode(limits)
+        encoded = zenoh_limits.encode(limits)
     except zenoh_limits.LimitsError as error:
         fail(str(error))
+    # The rows must fit what the record declares. These are the constraints of zenoh-service-grants/v1 that do not
+    # involve the stack, written as comparisons so that contract is not a generation input.
+    rows = manifest.get("zenohGrants") or []
+    holders = {row["holder"] for row in rows}
+    subscribe_keys = {row["key"] for row in rows if row["subscribe"]}
+    if len(holders) > limits["holders"]:
+        fail(f"zenoh limits: the rows name {len(holders)} holders, the record declares {limits['holders']}")
+    if len(subscribe_keys) > limits["local_subscriptions"]:
+        fail(f"zenoh limits: the rows subscribe to {len(subscribe_keys)} keys, the record declares {limits['local_subscriptions']} subscriptions")
+    for row in rows:
+        if len(row["key"].encode("ascii")) > limits["key_bytes"]:
+            fail(f"zenoh limits: the key of {row['holder']!r} is longer than the {limits['key_bytes']} bytes the record declares")
+    return encoded
 
 
 def holder_identity(name: str) -> bytes:
