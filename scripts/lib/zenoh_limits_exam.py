@@ -1,13 +1,19 @@
 """Judge the Zenoh service limits record, `contracts/zenoh-service-limits/v1`, and the places that must carry it.
 
-Two kinds of fact, and neither reads the encoder's own constants:
+Four kinds of check:
 
 * the encoder `zenoh_limits.encode`. The schema's layout adds up to the record size it states and equals a copy held
   here, and for a set of honest limits the encoder's bytes equal bytes written again here with `struct`. The encoder
   refuses each input the contract forbids, and a decoder written here refuses each corruption of an honest record;
-* declarations the files must hold, read by pattern: the system spec and manifest fields, the builder, the root's read of
-  the record, the service's use of the limits and the host tests. A pattern shows that code exists. What the code does is
-  graded by the host tests it names and by the booted composition.
+* the encoder's imports. It imports the standard library only, so the closure pin covers every file that decides its
+  bytes. The encoder parses its own schema, and this exam parses it with `zenoh_client_exam`. No control compares the
+  two parsers;
+* the generated Rust binding, which must equal the renderer's output byte for byte;
+* declarations the files must hold, read by pattern: the system spec and manifest fields, the builder and its dispatch,
+  the closure release inputs, the root's locate and dispatch, and the service's read of the record.
+
+A pattern shows that code exists and does not show what it does. This exam runs no Rust, no builder and no service. The
+implementation review checks their behaviour against the code, and the booted composition shows the rest.
 
 Like the other judges it is trusted only after it refuses a mutation of an honest input.
 """
