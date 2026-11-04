@@ -1,0 +1,76 @@
+-- One listen() call a process made, as the checker's interposed recorder saw it.
+--
+-- `scripts/lib/listen_log.c` is loaded into a process tree by `scripts/check/check-foxglove-bridge.py`.
+-- Each listen() the tree calls is written, after it returns, as one record of this shape in its own file.
+-- The checker reads every file back through `decodeRecord` and judges whether, and on which ports, the
+-- bridge listened. A record crosses from the recorded process to the checker, so it is a versioned
+-- contract here and not a text format either side parses by hand.
+--
+-- `port` is the socket's bound port, or -1 when the socket has no IPv4 or IPv6 address. `succeeded` is
+-- whether listen() returned 0. A failed call is recorded too: a refused start may not even try to listen.
+
+Record :: type {
+  formatVersion : Int;
+  pid : Int;
+  port : Int;
+  succeeded : Bool;
+};
+
+FromData @Record :: derive
+
+formatVersion :: Int = 1;
+
+-- A process id is positive and fits a signed 32-bit pid_t.
+minPid :: Int = 1;
+maxPid :: Int = 2147483647;
+-- -1 names a socket with no IP address; any other port is a TCP or UDP port.
+noPort :: Int = -1;
+maxPort :: Int = 65535;
+
+d ::= import stdlib.data;
+l ::= import stdlib.list;
+r ::= import stdlib.result;
+
+-- The record is closed. `decode` reads the fields it knows and ignores the rest, so a field the contract
+-- does not name would pass unseen; `onlyFields` refuses it. A value that is not a record is left to
+-- `decode`, which refuses it with its type.
+recordFields :: List Text = { "formatVersion"; "pid"; "port"; "succeeded"; };
+
+named :: d.DataField -> Bool
+  = field => l.any (\name. name == field.name) recordFields;
+
+onlyFields :: Data -> Bool
+  = data => match d.asRecord data {
+    | #ok { value = fields; } => l.all named fields;
+    | #err { error = _; } => true;
+  };
+
+recordOk :: Record -> Bool
+  = rec => rec.formatVersion == formatVersion
+    && rec.pid >= minPid && rec.pid <= maxPid
+    && rec.port >= noPort && rec.port <= maxPort;
+
+unknownField :: DecodeIssue
+  = { path = {;}; error = #custom { message = "a field the contract does not name"; }; };
+
+outOfBounds :: DecodeIssue
+  = { path = {;}; error = #custom { message = "a value outside the bounds the contract declares"; }; };
+
+bounded :: Validation DecodeIssue Record -> Validation DecodeIssue Record
+  = checked => match checked {
+    | #valid { value = rec; } => if recordOk rec then #valid { value = rec; } else r.invalidOne outOfBounds;
+    | #invalid { errors = errs; } => #invalid { errors = errs; };
+  };
+
+decodeRecord :: Data -> Validation DecodeIssue Record
+  = data => if onlyFields data then bounded (decode data) else r.invalidOne unknownField;
+
+{
+  Record =;
+  decodeRecord =;
+  formatVersion =;
+  minPid =;
+  maxPid =;
+  noPort =;
+  maxPort =;
+}
