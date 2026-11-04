@@ -232,6 +232,8 @@ _SPEC_FIELDS = {
     "entropyAuthorityObject",
     "zenohGrants",
     "zenohGrantsObject",
+    "zenohLimits",
+    "zenohLimitsObject",
     "blockRingAuthority",
     "blockRingAuthorityObject",
     "waitSet",
@@ -293,13 +295,14 @@ def _load(path: Path, contract: ModuleType) -> dict:
         _fail(f"{path}: expected a record")
     # `fabricGraph`, `schedulingClass`, `lifecyclePolicy` and
     # `graphArrivalCeiling` are optional; their absence is a legitimate shape.
-    _OPTIONAL_FIELDS = {"fabricGraph", "schedulingClass", "lifecyclePolicy", "graphArrivalCeiling", "privateMemoryPolicy"}
+    _OPTIONAL_FIELDS = {"fabricGraph", "schedulingClass", "lifecyclePolicy", "graphArrivalCeiling", "privateMemoryPolicy", "zenohLimits"}
     # The IO11 interface table postdates every earlier spec; an absent field is
     # the same declaration as an empty one without an object.
     _DEFAULTED_FIELDS = {"networkInterfaces": [], "networkInterfacesObject": False,
                          "networkApplications": [], "networkApplicationsObject": False,
                          "entropyAuthority": [], "entropyAuthorityObject": False,
-                         "zenohGrants": [], "zenohGrantsObject": False}
+                         "zenohGrants": [], "zenohGrantsObject": False,
+                         "zenohLimitsObject": False}
     unexpected = set(value) - _SPEC_FIELDS
     missing = _SPEC_FIELDS - set(value) - _OPTIONAL_FIELDS - set(_DEFAULTED_FIELDS)
     if unexpected or missing:
@@ -1281,6 +1284,7 @@ def derive_manifest(system: CompiledSystem) -> dict:
         ("networkApplicationsObject", "network-application"),
         ("entropyAuthorityObject", "entropy-authority"),
         ("zenohGrantsObject", "zenoh-grants"),
+        ("zenohLimitsObject", "zenoh-limits"),
         ("blockRingAuthorityObject", "block-ring-authority"),
         ("waitSetObject", "wait-set"),
         ("recordingObject", "recording-policy"),
@@ -1393,6 +1397,18 @@ def derive_manifest(system: CompiledSystem) -> dict:
             _fail(f"zenohGrants: {error}")
     elif spec["zenohGrants"]:
         _fail("zenohGrants: populated grants require their resource object")
+    if spec["zenohLimitsObject"]:
+        if spec.get("zenohLimits") is None:
+            _fail("zenohLimits: the resource object needs its limits")
+        manifest["zenohLimits"] = spec["zenohLimits"]
+        # The encoder judges each limit against its bound; running it here refuses a bad record at spec admission
+        # rather than only when an image is built.
+        try:
+            _builder.build_zenoh_limits(manifest)
+        except SystemExit as error:
+            _fail(f"zenohLimits: {error}")
+    elif spec.get("zenohLimits") is not None:
+        _fail("zenohLimits: declared limits require their resource object")
     if spec["blockRingAuthorityObject"]:
         manifest["blockRingAuthority"] = spec["blockRingAuthority"]
     if spec["waitSetObject"]:

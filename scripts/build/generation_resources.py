@@ -213,6 +213,32 @@ def build_zenoh_grants_table(manifest: dict) -> bytes:
         fail(str(error))
 
 
+def build_zenoh_limits(manifest: dict) -> bytes:
+    """Encode the Zenoh service limits record (zenoh-service-limits/v1) from the manifest's `zenohLimits`.
+
+    The encoder checks each limit against its own bound. This function adds what only the manifest knows: the limits are
+    declared and the reader instance exists. The stack is not checked against the rows here. The service checks the declared
+    stack against the storage it was built with, and zenoh-service-grants/v1 is not a generation input.
+    """
+    import zenoh_limits
+
+    declared = manifest.get("zenohLimits")
+    if not isinstance(declared, dict):
+        fail("zenoh limits: the record has no limits")
+    instances = {entry["name"] for entry in manifest["instances"]}
+    if ZENOH_GRANTS_READER_INSTANCE not in instances:
+        fail(f"zenoh limits: no {ZENOH_GRANTS_READER_INSTANCE} instance reads the record")
+    names = {"holders": "holders", "ring_slots": "ringSlots", "sample_bytes": "sampleBytes", "key_bytes": "keyBytes",
+             "local_subscriptions": "localSubscriptions", "stack_bytes": "stackBytes"}
+    if set(declared) != set(names.values()):
+        fail(f"zenoh limits: the record holds the fields {sorted(declared)}, the contract names {sorted(names.values())}")
+    limits = {field: declared[key] for field, key in names.items()}
+    try:
+        return zenoh_limits.encode(limits)
+    except zenoh_limits.LimitsError as error:
+        fail(str(error))
+
+
 def holder_identity(name: str) -> bytes:
     """Stable per-holder identity, matching `boot_contracts::shared_buffer_budget`."""
     encoded = name.encode("utf-8")

@@ -967,6 +967,24 @@ pub(super) fn serve_instance_graph(
             capability_table_labels::ZENOH_GRANTS_READ => {
                 let cursor = words.first().copied().unwrap_or(0) as usize;
                 let response = match words.get(2).copied() {
+                    // The limits cursor returns the limits record. Its reply count is the record's byte length, so it
+                    // does not go through the row arithmetic below, which would slice a count of 168-byte rows.
+                    Some(transfer) if cursor == ipc::ZENOH_LIMITS_CURSOR => {
+                        let mut record = [0u8; ipc::ZENOH_LIMITS_BYTES];
+                        match ipc::read_zenoh_limits(generation, instance, &mut record) {
+                            Some(length) => {
+                                match transfer_window::write_staged_region(
+                                    windows.bound(id, descriptor_thread(transfer)),
+                                    &record[..length],
+                                    scratch,
+                                ) {
+                                    Ok(descriptor) => Response::success(length as i64, descriptor),
+                                    Err(error) => Response::error(error),
+                                }
+                            }
+                            None => Response::error(IpcError::InvalidOperation),
+                        }
+                    }
                     Some(transfer) => {
                         let mut rows =
                             [0u8; ipc::ZENOH_GRANTS_ROWS_PER_CALL * ipc::ZENOH_GRANTS_ROW_BYTES];

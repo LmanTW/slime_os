@@ -1348,6 +1348,10 @@ pub const ZENOH_GRANTS_ROWS_PER_CALL: usize =
     crate::transfer_window::MAX_STAGED_ARRAY_BYTES / ZENOH_GRANTS_ROW_BYTES;
 /// The one instance the grants table is served to.
 pub const ZENOH_GRANTS_READER_INSTANCE: &str = "zenoh-service";
+/// The cursor that asks for the limits record instead of rows. A row index is below `maxRows` of the table contract, so no
+/// row has this cursor.
+pub const ZENOH_LIMITS_CURSOR: usize = slime_proto::zenoh_service_limits_wire::LIMITS_CURSOR;
+pub const ZENOH_LIMITS_BYTES: usize = slime_proto::zenoh_service_limits_wire::RECORD_LEN;
 
 /// Copy authenticated Zenoh grants rows only to the instance named `zenoh-service`, on
 /// `read_entropy_authority`'s exact shape. The root decides no grant and opens no session.
@@ -1362,6 +1366,31 @@ pub fn read_zenoh_grants(
     };
     let caller = generation.instance(instance).ok()?;
     copy_zenoh_grants_rows(&table, caller.name, cursor, out)
+}
+
+/// Copy the authenticated Zenoh limits record, to the instance named `zenoh-service` only. It returns the record's byte
+/// length, which is not a row count.
+pub fn read_zenoh_limits(
+    generation: &boot_contracts::generation::Generation<'_>,
+    instance: usize,
+    out: &mut [u8],
+) -> Option<usize> {
+    let object = crate::generation::zenoh_limits_object(generation)?;
+    let caller = generation.instance(instance).ok()?;
+    copy_zenoh_limits(object, caller.name, out)
+}
+
+/// The caller gate of `read_zenoh_limits`, separated from the generation lookup so it can be exercised on bytes. A record
+/// that does not decode is not served.
+pub fn copy_zenoh_limits(record: &[u8], caller: &str, out: &mut [u8]) -> Option<usize> {
+    if caller != ZENOH_GRANTS_READER_INSTANCE
+        || out.len() < ZENOH_LIMITS_BYTES
+        || slime_proto::zenoh_service_limits::Limits::decode(record).is_err()
+    {
+        return None;
+    }
+    out[..ZENOH_LIMITS_BYTES].copy_from_slice(record);
+    Some(ZENOH_LIMITS_BYTES)
 }
 
 /// The caller gate and paging of `read_zenoh_grants`, separated from the generation lookup so both
@@ -2514,6 +2543,75 @@ mod tests {
             bytes[at..at + wire::ENTRY_BYTES].copy_from_slice(&entry.encode());
         }
         wire::HEADER_BYTES + count * wire::ENTRY_BYTES
+    }
+
+    fn limits_record(holders: u32) -> [u8; ZENOH_LIMITS_BYTES] {
+        use slime_proto::zenoh_service_limits_wire as wire;
+        wire::WireLimitsRecord {
+            magic: wire::RECORD_MAGIC,
+            format_version: wire::FORMAT_VERSION,
+            record_size: wire::RECORD_BYTES as u32,
+            required_flags: 0,
+            holders,
+            ring_slots: 4,
+            sample_bytes: 12,
+            key_bytes: 129,
+            local_subscriptions: 3,
+            stack_bytes: 32768,
+        }
+        .encode()
+    }
+
+    #[test]
+    fn the_limits_cursor_returns_the_record_to_the_zenoh_service_only() {
+        let record = limits_record(2);
+        let mut out = [0u8; ZENOH_GRANTS_ROWS_PER_CALL * ZENOH_GRANTS_ROW_BYTES];
+        for caller in ["ros2-demo-publisher", "zenoh-service2", "zenoh", ""] {
+            assert_eq!(
+                copy_zenoh_limits(&record, caller, &mut out),
+                None,
+                "{caller}"
+            );
+        }
+        assert!(
+            out.iter().all(|byte| *byte == 0),
+            "a refused caller receives no byte"
+        );
+        assert_eq!(
+            copy_zenoh_limits(&record, ZENOH_GRANTS_READER_INSTANCE, &mut out),
+            Some(ZENOH_LIMITS_BYTES),
+            "the count is the record's length and not a count of rows"
+        );
+        assert_eq!(&out[..ZENOH_LIMITS_BYTES], &record[..]);
+        // The staged window holds six rows. A record of 48 bytes is not 48 rows, so the dispatch must not slice by it.
+        assert!(ZENOH_LIMITS_BYTES < ZENOH_GRANTS_ROWS_PER_CALL * ZENOH_GRANTS_ROW_BYTES);
+        assert!(ZENOH_LIMITS_BYTES > ZENOH_GRANTS_ROWS_PER_CALL);
+    }
+
+    #[test]
+    fn a_limits_record_that_does_not_decode_is_not_served() {
+        let service = ZENOH_GRANTS_READER_INSTANCE;
+        let mut out = [0u8; ZENOH_LIMITS_BYTES];
+        let mut corrupt = limits_record(2);
+        corrupt[0] = b'X';
+        assert_eq!(copy_zenoh_limits(&corrupt, service, &mut out), None);
+        assert_eq!(
+            copy_zenoh_limits(&limits_record(0), service, &mut out),
+            None,
+            "holders of zero"
+        );
+        assert_eq!(
+            copy_zenoh_limits(&limits_record(2)[..47], service, &mut out),
+            None,
+            "a short record"
+        );
+        let mut small = [0u8; ZENOH_LIMITS_BYTES - 1];
+        assert_eq!(
+            copy_zenoh_limits(&limits_record(2), service, &mut small),
+            None,
+            "a buffer too small"
+        );
+        assert!(out.iter().all(|byte| *byte == 0));
     }
 
     #[test]

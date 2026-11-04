@@ -204,3 +204,30 @@ fn a_local_publication_carries_the_subscription_of_the_key_and_the_timestamp_it_
         "b subscribes to the same key, so the same subscription"
     );
 }
+
+#[test]
+fn a_table_with_fewer_rows_than_the_ceiling_is_served() {
+    // The core is built for five rows. A table of three is served, and the two slots it does not use belong to no holder.
+    let three = &rows()[..3];
+    let core = Exam::new(three, GID, &params()).expect("a table below the ceiling");
+    assert_eq!(core.row_count(0), 2);
+    assert_eq!(core.row_count(1), 1);
+    assert_eq!(core.row_count(2), 0, "a holder with no row has none");
+    assert!(core.row_key(0, 1).is_some());
+    assert!(
+        core.row_key(0, 2).is_none(),
+        "an empty slot is not a row of holder 0"
+    );
+    assert!(core.row_key(1, 1).is_none());
+    // More rows than the ceiling are still refused, and so are none.
+    let mut six = rows().to_vec();
+    six.push(rows()[0]);
+    assert_eq!(
+        Exam::new(&six, GID, &params()).err(),
+        Some(ServiceError::InvalidGrants)
+    );
+    assert_eq!(
+        Exam::new(&[], GID, &params()).err(),
+        Some(ServiceError::InvalidGrants)
+    );
+}
