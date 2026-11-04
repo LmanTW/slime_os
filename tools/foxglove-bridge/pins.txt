@@ -1,0 +1,5 @@
+# The wheels tools/foxglove-bridge/bridge.py installs, one per package and host, by registry SHA-256.
+eclipse-zenoh==1.0.0 ; sys_platform == "linux" and platform_machine == "x86_64" --hash=sha256:1763912951ecd2a3706f668faf0541245387096b37a4fefb73af7848dadd46ff
+eclipse-zenoh==1.0.0 ; sys_platform == "darwin" and platform_machine == "arm64" --hash=sha256:08b0871119786a1432864af8aa0cf42019a4b7bc8cfe725588cbc15f7d007f90
+foxglove-sdk==0.30.3 ; sys_platform == "linux" and platform_machine == "x86_64" --hash=sha256:063c5331549d6f8987f0d1cb060b494383c11247bb853b44519aa83bd84ef1fd
+foxglove-sdk==0.30.3 ; sys_platform == "darwin" and platform_machine == "arm64" --hash=sha256:f4934a2f0012cfd2bbcf20c52d72549c514df135f002a89f1291e1582e08e643

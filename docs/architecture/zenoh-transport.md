@@ -82,6 +82,12 @@ announced in its `INIT`. Nothing in these modules allocates.
 bytes including the stream length, one network-service data operation. It admits a
 payload of 512 KiB, so a 494,889-byte PointCloud2 frame crosses as 121 fragments.
 
+`tools/foxglove-bridge/bridge.py` is the host side of that topic. It listens as a stock eclipse-zenoh
+peer on `127.0.0.1`, forwards each sample on a frame store's data key unchanged to one channel of a
+foxglove-sdk server (`foxglove.sdk.v1`), and drops every other key under domain 0. A sample's log time
+is its rmw_zenoh attachment timestamp. Both dependencies are hash-pinned wheels it reinstalls on every
+start; it refuses a host with no pin, a pin pip refuses, and an invalid store before it listens.
+
 ## Layers
 
 | Layer | What it owns | What it does not own |
