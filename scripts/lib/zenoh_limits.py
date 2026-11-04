@@ -5,6 +5,10 @@ object. The layout comes from the contract's schema text, so no offset is writte
 `scripts/lib/zenoh_limits_exam.py` writes the same bytes again with `struct` and compares them, and refuses the same
 inputs.
 
+This module imports the standard library only. The closure identity pins this file, the schema and the builder's helper
+module, and an import of another repository file would put that file's bytes outside the pin. The exam refuses any other
+import. The schema is parsed here for the same reason, so the exam's parser and this one are two statements of one rule.
+
 The encoder checks each limit against its own bound. Whether the declared stack covers the rows is the arithmetic of
 `zenoh-service-grants/v1` (`requiredStack`), and the builder evaluates that contract on the rows and the limits
 together. This module does not restate it.
@@ -12,12 +16,11 @@ together. This module does not restate it.
 
 from __future__ import annotations
 
+import re
 import struct
+from pathlib import Path
 
-import zenoh_client_exam as client
-from harness import ROOT
-
-SCHEMA = ROOT / "contracts" / "zenoh-service-limits" / "v1" / "schema.zt"
+SCHEMA = Path(__file__).resolve().parents[2] / "contracts" / "zenoh-service-limits" / "v1" / "schema.zt"
 
 # The fields of `Limits` in `zenoh-service-grants/v1`, in the order the record holds them.
 LIMIT_FIELDS = ("holders", "ring_slots", "sample_bytes", "key_bytes", "local_subscriptions", "stack_bytes")
@@ -32,9 +35,31 @@ def _need(condition: bool, message: str) -> None:
         raise LimitsError(message)
 
 
+def constants(text: str) -> dict[str, int]:
+    """Every `name :: Int = n;` at the start of a line. A name stated twice is refused."""
+    found: dict[str, int] = {}
+    for match in re.finditer(r"^(\w+) :: Int = (-?\d+);", text, re.M):
+        name = match.group(1)
+        _need(name not in found, f"limits: {name} is stated twice")
+        found[name] = int(match.group(2))
+    return found
+
+
+def layout(text: str, name: str) -> list[tuple[str, int, bool, bool]]:
+    """The fields of the list `name`: (field, width in bytes, signed, byte array). A line that is not a field is refused."""
+    block = re.search(rf"^{name} :: List WireField = \{{\n(.*?)^\}};", text, re.M | re.S)
+    _need(block is not None, f"limits: the schema does not state {name}")
+    fields = []
+    for line in block.group(1).splitlines():
+        entry = re.fullmatch(r'\s*\{ name = "(\w+)"; width = (\d+); signed = (true|false); byteArray = (true|false); \};', line)
+        _need(entry is not None, f"limits: {name} has a line that is not a field: {line.strip()!r}")
+        fields.append((entry.group(1), int(entry.group(2)), entry.group(3) == "true", entry.group(4) == "true"))
+    return fields
+
+
 def read_schema(text: str | None = None) -> tuple[dict[str, int], list[tuple[str, int, bool, bool]]]:
     text = SCHEMA.read_text(encoding="utf-8") if text is None else text
-    return client.constants(text), client.layout(text, "recordLayout")
+    return constants(text), layout(text, "recordLayout")
 
 
 def bounds(found: dict[str, int]) -> dict[str, tuple[int, int]]:
@@ -76,9 +101,9 @@ def validate(limits: dict[str, object], found: dict[str, int]) -> None:
 
 def encode(limits: dict[str, object], text: str | None = None) -> bytes:
     """The record for `limits`, each of the six fields of `LIMIT_FIELDS`."""
-    found, layout = read_schema(text)
+    found, fields = read_schema(text)
     validate(limits, found)
-    out = _pack(layout, {
+    out = _pack(fields, {
         "magic": int(found["recordMagic"]).to_bytes(8, "little"), "format_version": found["formatVersion"],
         "record_size": found["recordBytes"], "required_flags": 0, **{name: limits[name] for name in LIMIT_FIELDS},
     })

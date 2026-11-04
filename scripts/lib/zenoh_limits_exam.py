@@ -442,9 +442,9 @@ FACTS: tuple[facts.Fact, ...] = (
     ("builder-import", GENERATION_BUILDER, r"^\s*build_zenoh_limits,$", "    build_zenoh_limits,"),
     ("builder-payload", GENERATION_BUILDER, r'payloads\["zenoh-limits"\] = build_zenoh_limits\(manifest\)', '        payloads["zenoh-limits"] = build_zenoh_limits(manifest)'),
     ("object-id", SYSTEM_SPEC, r'\("zenohLimitsObject", "zenoh-limits"\),', '        ("zenohLimitsObject", "zenoh-limits"),'),
-    ("release-input-schema", CLOSURES, r'^\s*\("[\w-]+", "contracts/zenoh-service-limits/v1", "tree"\),$', '    ("zenoh-limits-contract", "contracts/zenoh-service-limits/v1", "tree"),'),
-    ("release-input-encoder", CLOSURES, r'^\s*\("[\w-]+", "scripts/lib/zenoh_limits\.py", "file"\),$', '    ("zenoh-limits-encoder", "scripts/lib/zenoh_limits.py", "file"),'),
-    ("release-input-builder", CLOSURES, r'^\s*\("[\w-]+", "scripts/build/generation_resources\.py", "file"\),$', '    ("generation-resources", "scripts/build/generation_resources.py", "file"),'),
+    ("release-input-schema", CLOSURES, r'^\s*\("zenoh-limits-contract", "contracts/zenoh-service-limits/v1", "tree"\),$', '    ("zenoh-limits-contract", "contracts/zenoh-service-limits/v1", "tree"),'),
+    ("release-input-encoder", CLOSURES, r'^\s*\("zenoh-limits-encoder", "scripts/lib/zenoh_limits\.py", "file"\),$', '    ("zenoh-limits-encoder", "scripts/lib/zenoh_limits.py", "file"),'),
+    ("release-input-builder", CLOSURES, r'^\s*\("generation-resources", "scripts/build/generation_resources\.py", "file"\),$', '    ("generation-resources", "scripts/build/generation_resources.py", "file"),'),
     ("closure-schema-limits", CLOSURE_SCHEMA, r'"zenoh-limits-contract",\n\s*"zenoh-limits-encoder",\n\s*"generation-resources",', '        "zenoh-limits-contract",\n        "zenoh-limits-encoder",\n        "generation-resources",'),
     ("spec-admits-limits", SYSTEM_SPEC, r'^\s*"zenohLimits",$', '    "zenohLimits",'),
     ("spec-admits-flag", SYSTEM_SPEC, r'^\s*"zenohLimitsObject",$', '    "zenohLimitsObject",'),
@@ -460,6 +460,65 @@ FACTS: tuple[facts.Fact, ...] = (
 )
 
 
+STDLIB_ONLY = {"__future__", "re", "struct", "pathlib"}
+
+
+def import_names(text: str) -> set[str]:
+    """The top-level modules a file imports, from its import statements."""
+    import ast
+
+    found: set[str] = set()
+    for node in ast.walk(ast.parse(text)):
+        if isinstance(node, ast.Import):
+            found |= {alias.name.split(".")[0] for alias in node.names}
+        elif isinstance(node, ast.ImportFrom):
+            _need(node.level == 0, "limits: the encoder uses a relative import")
+            found.add((node.module or "").split(".")[0])
+    return found
+
+
+def check_encoder_imports(text: str | None = None) -> int:
+    """The encoder imports only the modules it is allowed. Any other import is a file the closure does not pin."""
+    text = (ROOT / "scripts" / "lib" / "zenoh_limits.py").read_text(encoding="utf-8") if text is None else text
+    extra = import_names(text) - STDLIB_ONLY
+    _need(not extra, f"limits: the encoder imports {sorted(extra)}, which the closure does not pin")
+    _need("importlib" not in text and "__import__" not in text and "exec(" not in text, "limits: the encoder loads a module by a path the import check cannot see")
+    return len(STDLIB_ONLY)
+
+
+IMPORT_EDITS = (
+    ("a repository module imported", "import zenoh_client_exam as client\n"),
+    ("harness imported", "from harness import ROOT\n"),
+    ("a module imported from a package", "from slime_tools.paths import ROOT\n"),
+    ("a second import on one line", "import os, zenoh_client_exam\n"),
+    ("an import inside a function", "def helper():\n    import zenoh_client_exam\n"),
+    ("a relative import", "from . import zenoh_client_exam\n"),
+    ("a module loaded by a path", "import importlib.util\n"),
+    ("a module loaded by __import__", "x = __import__('harness')\n"),
+)
+
+
+def import_controls() -> int:
+    text = (ROOT / "scripts" / "lib" / "zenoh_limits.py").read_text(encoding="utf-8")
+    check_encoder_imports(text)
+    refused = 0
+    for label, line in IMPORT_EDITS:
+        mutated = text.replace("import struct\n", "import struct\n" + line, 1)
+        _need(mutated != text, f"control: {label} did not change the file")
+        try:
+            check_encoder_imports(mutated)
+        except LimitsExamError:
+            refused += 1
+            continue
+        raise LimitsExamError(f"control: the import check accepted {label}")
+    return refused
+
+
+# The release-input names the closure validator requires, written here from `system_image_closure.py`. A tuple with a
+# name the validator does not list is an extra release input, and `resolve_closure` refuses every closure that has one.
+CANONICAL_RELEASE_NAMES = ("zenoh-limits-contract", "zenoh-limits-encoder", "generation-resources")
+
+
 def check_facts() -> int:
     def read(path: str) -> str:
         try:
@@ -467,6 +526,7 @@ def check_facts() -> int:
         except OSError as error:
             raise LimitsExamError(f"{path} cannot be read: {error}") from error
     try:
+        check_encoder_imports()
         return facts.check(FACTS, read)
     except facts.FactsError as error:
         raise LimitsExamError(str(error)) from error
@@ -480,4 +540,4 @@ def fact_controls() -> int:
 
 
 def all_controls() -> int:
-    return encoder_all_controls() + generated_controls() + fact_controls()
+    return encoder_all_controls() + generated_controls() + import_controls() + fact_controls()
