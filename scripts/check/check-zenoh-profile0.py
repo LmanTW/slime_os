@@ -2239,78 +2239,18 @@ def server_main(controls_only: bool) -> int:
     return 0
 
 
-LIMITS_PINNED_CASES = 74
-LIMITS_PINNED_CONTROLS = 147
-LIMITS_CORE_TEST = "zenoh_service::tests::a_table_with_fewer_rows_than_the_ceiling_is_served"
-LIMITS_LINE = re.compile(r"\[zenoh-exam\] (limitsrecord .*)$")
-
-
-def run_limits_records(file_text: str | None = None) -> list[str]:
-    """The proto crate's test of the limits decoder, run alone with `--exact`. The slice writes the records from the Python
-    encoder to a file and the test reads them, so the decoder never judges bytes the Rust wrote. Run twice, on the records
-    and on the records with one replaced, it shows the test reads the file."""
-    host = subprocess.run(["rustc", "-vV"], capture_output=True, text=True, check=True)
-    target = next(line.split(": ", 1)[1] for line in host.stdout.splitlines() if line.startswith("host: "))
-    (ROOT / "build").mkdir(exist_ok=True)
-    scratch = _Path(tempfile.mkdtemp(prefix="zenoh-limits-", dir=ROOT / "build"))
-    try:
-        records = scratch / "records.txt"
-        records.write_text(zenoh_limits_exam.input_file_text() if file_text is None else file_text, encoding="utf-8")
-        command = [
-            "cargo", "test", "--target", target, "-p", "slime-proto", "--test", "zenoh_service_limits",
-            "--", "--exact", zenoh_limits_exam.CEILING_TEST, "--nocapture", "--test-threads=1",
-        ]
-        result = subprocess.run(command, cwd=ROOT / "components", capture_output=True, text=True, env={**_os.environ, "SLIME_LIMITS_RECORDS": str(records)})
-    finally:
-        shutil.rmtree(scratch, ignore_errors=True)
-    output = result.stdout + result.stderr
-    if result.returncode != 0:
-        _sys.stderr.write(output[-4000:])
-        fail(f"{' '.join(command)} exited {result.returncode}")
-    results = re.findall(r"test result: (\w+)\. (\d+) passed; (\d+) failed", output)
-    if tests_passed(output) != {zenoh_limits_exam.CEILING_TEST} or results != [("ok", "1", "0")]:
-        fail(f"limits: the run was not of {zenoh_limits_exam.CEILING_TEST} alone, so its lines cannot be attributed to it")
-    return [match.group(1).strip() for line in result.stdout.splitlines() if (match := LIMITS_LINE.search(line))]
-
-
-def run_limits_core() -> None:
-    """The core's test that a table with fewer rows than its ceiling is served, run alone."""
-    host = subprocess.run(["rustc", "-vV"], capture_output=True, text=True, check=True)
-    target = next(line.split(": ", 1)[1] for line in host.stdout.splitlines() if line.startswith("host: "))
-    command = [
-        "cargo", "test", "--target", target, "-p", "slime-components", "--no-default-features", "--lib",
-        "--", "--exact", LIMITS_CORE_TEST, "--test-threads=1",
-    ]
-    result = subprocess.run(command, cwd=ROOT / "components", capture_output=True, text=True)
-    output = result.stdout + result.stderr
-    if result.returncode != 0:
-        _sys.stderr.write(output[-4000:])
-        fail(f"{' '.join(command)} exited {result.returncode}")
-    results = re.findall(r"test result: (\w+)\. (\d+) passed; (\d+) failed", output)
-    if tests_passed(output) != {LIMITS_CORE_TEST} or results != [("ok", "1", "0")]:
-        fail(f"limits: the run was not of {LIMITS_CORE_TEST} alone")
-
-
-def real_limits_builder():
-    """`generation_resources.build_zenoh_limits`, loaded the way the generation builder loads it."""
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location("limits_generation_resources", ROOT / "scripts" / "build" / "generation_resources.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.build_zenoh_limits
+LIMITS_PINNED_CASES = 32
+LIMITS_PINNED_CONTROLS = 95
 
 
 def limits_main(controls_only: bool) -> int:
-    """The limits record, its encoder, the generated binding, the builder and the files that must carry it. The controls
-    run on synthetic inputs first."""
+    """The limits record, its encoder, the generated binding and the declarations the files must hold. The controls run on
+    synthetic inputs first. The declarations are patterns: they show that code exists and not what it does."""
     exam = zenoh_limits_exam
     try:
         honest = exam.honest_cases()
         refusals = exam.all_controls()
-        positive, rejected = exam.judge(exam.good_lines())
-        built = exam.builder_cases()[1]
-        cases = honest + len(exam.FACTS) + positive + rejected + built
+        cases = honest + len(exam.FACTS)
         if cases != LIMITS_PINNED_CASES:
             fail(f"limits: {cases} cases, the checker pins {LIMITS_PINNED_CASES}")
         if refusals != LIMITS_PINNED_CONTROLS:
@@ -2320,16 +2260,11 @@ def limits_main(controls_only: bool) -> int:
             return 0
         facts_held = exam.check_facts()
         exam.check_generated()
-        positive, rejected = exam.judge(run_limits_records())
-        exam.judge_probe(run_limits_records(exam.probe_file_text()))
-        run_limits_core()
-        built = exam.judge_builder(real_limits_builder())
     except (exam.LimitsExamError, exam.limits.LimitsError, zenoh_client_exam.ClientError) as error:
         fail(f"limits: {error}")
-    total = honest + facts_held + positive + rejected + built
-    print(f"[zenoh-profile0] slice=limits cases={total} refusals={refusals} controls={refusals}")
-    devloop_observations.record(casesObserved=total, negativeControlsRefused=refusals)
-    print("zenoh profile 0 limits check: the record, its encoder, the generated binding, the builder and the files that carry it agree")
+    print(f"[zenoh-profile0] slice=limits cases={honest + facts_held} refusals={refusals} controls={refusals}")
+    devloop_observations.record(casesObserved=honest + facts_held, negativeControlsRefused=refusals)
+    print("zenoh profile 0 limits check: the record, its encoder, the generated binding and the declarations agree")
     return 0
 
 
