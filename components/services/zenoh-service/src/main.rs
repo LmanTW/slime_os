@@ -27,6 +27,8 @@ use slime_components::zenoh_service_server::Server;
 use slime_proto::network_service as net;
 use slime_proto::zenoh_service_grants_table::Table;
 use slime_proto::zenoh_service_grants_table_wire as grants;
+use slime_proto::zenoh_service_limits::{Ceilings, Limits};
+use slime_proto::zenoh_service_limits_wire as limits_wire;
 use slime_rt::console_line::Line;
 use slime_rt::{
     exit, monotonic_frequency, monotonic_read, resolve_binding, yield_now, zenoh_grants_read,
@@ -34,12 +36,24 @@ use slime_rt::{
 
 slime_rt::entry!(main);
 
-/// The service's declared limits. `Core` is sized by them, so the generation's grants must hold exactly `ROWS` rows
-/// for at most `HOLDERS` holders, and a table that does not is refused at start.
+/// What the service was built to hold. `Core` is sized by them, so the generation's grants may hold at most `ROWS` rows
+/// for at most `HOLDERS` holders. The generation declares its own limits, and a declaration above any of these is refused
+/// at start.
 pub const HOLDERS: usize = 2;
 pub const ROWS: usize = 2;
 pub const SLOTS: usize = 4;
 pub const PAYLOAD: usize = 12;
+const STACK_BYTES: u32 = 32768;
+/// The cursor of the grants read that returns the limits record and no row.
+const ZENOH_LIMITS_CURSOR: usize = limits_wire::LIMITS_CURSOR;
+const CEILINGS: Ceilings = Ceilings {
+    holders: HOLDERS as u32,
+    ring_slots: SLOTS as u32,
+    sample_bytes: PAYLOAD as u32,
+    key_bytes: grants::MAX_KEY_BYTES as u32,
+    local_subscriptions: 3,
+    stack_bytes: STACK_BYTES,
+};
 const PAGE_ROWS: usize = 6;
 const TABLE_BYTES: usize = grants::HEADER_BYTES + ROWS * grants::ENTRY_BYTES;
 const RING_BASE: u64 = 0x0000_001c_0000_0000;
@@ -89,6 +103,18 @@ fn reply_of(reply: &slime_components::network_io::NetworkReply) -> node::Reply {
 }
 
 fn main(_startup_arg: u32) {
+    // The limits come first. A generation that declares more than the service was built to hold is refused before any
+    // storage is sized by the rows.
+    let mut record = [0u8; limits_wire::RECORD_LEN];
+    let read = zenoh_grants_read(ZENOH_LIMITS_CURSOR, &mut record)
+        .unwrap_or_else(|_| fail(b"limits read"));
+    if read != limits_wire::RECORD_LEN {
+        fail(b"limits length");
+    }
+    let limits = Limits::decode(&record).unwrap_or_else(|_| fail(b"limits decode"));
+    if !limits.within(&CEILINGS) {
+        fail(b"limits above ceilings");
+    }
     let mut object = [0u8; TABLE_BYTES];
     let len = read_grants(&mut object);
     let table = Table::decode(&object[..len]).unwrap_or_else(|_| fail(b"grants decode"));
@@ -124,10 +150,8 @@ fn main(_startup_arg: u32) {
         publish: stored[index].1,
         subscribe: stored[index].2,
     });
-    if table.row_count() != ROWS {
-        fail(b"grants rows");
-    }
-    let live = &rows[..];
+    // The core accepts a table of at most `ROWS` rows, and the rows past the table's own are not passed to it.
+    let live = &rows[..table.row_count()];
     Line::<128>::new()
         .bytes(b"[zenoh-service] grants rows=")
         .decimal(table.row_count() as u64)

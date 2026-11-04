@@ -245,6 +245,8 @@ pub struct Sizes {
 #[derive(Debug)]
 pub struct Core<'k, const H: usize, const N: usize, const P: usize, const R: usize> {
     rows: [Stored<'k>; R],
+    /// How many of the `R` slots hold a granted row. The rest are empty and belong to no holder.
+    used: usize,
     rings: [Ring<N, P>; H],
     params: Params,
     gid: [u8; GID_BYTES],
@@ -308,7 +310,7 @@ impl<'k, const H: usize, const N: usize, const P: usize, const R: usize> Core<'k
     /// A core declared with `rows`, for a session declared with `params`. `gid` is the 16-byte identity the
     /// core writes into the attachment of what it publishes.
     ///
-    /// The grants are refused as [`ServiceError::InvalidGrants`] when there are no rows or not `R`, a row
+    /// The grants are refused as [`ServiceError::InvalidGrants`] when there are no rows or more than `R`, a row
     /// names a holder beyond `H`, a key is empty or longer than the session's key bound, two rows name the
     /// same holder and key, a row grants no right, the rows name more subscribe keys than the session may
     /// declare, a ring slot is not the session's payload bound, or the session reassembles fragments.
@@ -318,7 +320,7 @@ impl<'k, const H: usize, const N: usize, const P: usize, const R: usize> Core<'k
         params: &Params,
     ) -> Result<Self, ServiceError> {
         let () = Self::FITS;
-        if rows.is_empty() || rows.len() != R || P != params.bounds.payload || params.fragments {
+        if rows.is_empty() || rows.len() > R || P != params.bounds.payload || params.fragments {
             return Err(ServiceError::InvalidGrants);
         }
         let mut stored = [Stored::EMPTY; R];
@@ -363,6 +365,7 @@ impl<'k, const H: usize, const N: usize, const P: usize, const R: usize> Core<'k
         }
         Ok(Self {
             rows: stored,
+            used: rows.len(),
             rings: [Ring::EMPTY; H],
             params: *params,
             gid,
@@ -506,7 +509,7 @@ impl<'k, const H: usize, const N: usize, const P: usize, const R: usize> Core<'k
     /// The index of `holder`'s own row that a sample of `subscription` belongs to, counted among that holder's
     /// rows in grant order. A holder sees its rows by this index and never by key.
     pub fn row_of(&self, holder: usize, subscription: u16) -> Option<usize> {
-        self.rows
+        self.rows[..self.used]
             .iter()
             .filter(|row| usize::from(row.holder) == holder)
             .position(|row| row.subscribe && row.subscription == subscription)
@@ -514,7 +517,7 @@ impl<'k, const H: usize, const N: usize, const P: usize, const R: usize> Core<'k
 
     /// How many rows `holder` has.
     pub fn row_count(&self, holder: usize) -> usize {
-        self.rows
+        self.rows[..self.used]
             .iter()
             .filter(|row| usize::from(row.holder) == holder)
             .count()
@@ -522,7 +525,7 @@ impl<'k, const H: usize, const N: usize, const P: usize, const R: usize> Core<'k
 
     /// The key of `holder`'s row `index`, and whether the row grants publish.
     pub fn row_key(&self, holder: usize, index: usize) -> Option<(&'k str, bool)> {
-        self.rows
+        self.rows[..self.used]
             .iter()
             .filter(|row| usize::from(row.holder) == holder)
             .nth(index)
@@ -548,7 +551,7 @@ impl<'k, const H: usize, const N: usize, const P: usize, const R: usize> Core<'k
 
     fn deliver_key(&mut self, key: &str, sequence: i64, timestamp: i64, payload: &[u8]) -> usize {
         let mut reached = 0;
-        for index in 0..R {
+        for index in 0..self.used {
             let Some(row) = self.rows.get(index).copied() else {
                 continue;
             };
@@ -566,7 +569,7 @@ impl<'k, const H: usize, const N: usize, const P: usize, const R: usize> Core<'k
         timestamp: i64,
         payload: &[u8],
     ) {
-        for index in 0..R {
+        for index in 0..self.used {
             let Some(row) = self.rows.get(index).copied() else {
                 continue;
             };

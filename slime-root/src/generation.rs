@@ -786,6 +786,21 @@ pub(crate) fn zenoh_grants_object<'a>(
     }
     None
 }
+/// Locate the authenticated Zenoh limits record and return its bytes. They are decoded by the reader that serves them, so
+/// a record that does not decode is not served. What the limits mean belongs to the Zenoh service.
+pub(crate) fn zenoh_limits_object<'a>(generation: &Generation<'a>) -> Option<&'a [u8]> {
+    for index in 0..generation.object_count() {
+        let object = generation.object(index).ok()?;
+        if object.kind == KIND_RESOURCE
+            && object
+                .bytes
+                .starts_with(&slime_proto::zenoh_service_limits_wire::RECORD_MAGIC)
+        {
+            return Some(object.bytes);
+        }
+    }
+    None
+}
 /// Locate authenticated application rows without interpreting userspace policy.
 pub(crate) fn network_application_object<'a>(
     generation: &Generation<'a>,
