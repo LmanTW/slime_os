@@ -143,6 +143,15 @@ zenoh_service_grants_reader_check:
 zenoh_service_server_check:
     python3 scripts/check/check-zenoh-profile0.py --slice server
 
+# Judges the Zenoh service limits record, the six limits of the grants record that the generation carries and the root
+# serves, and the places that must carry them. The judge writes each record again with Python's struct from the schema's
+# layout, refuses each corruption of a record, and requires the system spec and manifest fields, the builder, the root's
+# read of the record, the service's use of the limits and the core's acceptance of fewer rows than its ceiling. The
+# expectation is scripts/lib/zenoh_limits_exam.py. The recipe fails until the implementation lands.
+[group('hardware')]
+zenoh_service_limits_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice limits
+
 # Judges that the Zenoh service component exists and is registered. The judge requires the crate and its manifest, the
 # release profile, the component spec, the library export of the server half, and the calls that read the grants,
 # decode them, own the link and use the server half. The expectation is scripts/lib/zenoh_service_component_exam.py.

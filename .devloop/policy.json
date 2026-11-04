@@ -258,6 +258,8 @@
     "scripts/lib/zenoh_grants_reader_exam.py",
     "scripts/lib/zenoh_grants_table.py",
     "scripts/lib/zenoh_grants_table_exam.py",
+    "scripts/lib/zenoh_limits.py",
+    "scripts/lib/zenoh_limits_exam.py",
     "scripts/lib/zenoh_links_exam.py",
     "scripts/lib/zenoh_listener_peer.py",
     "scripts/lib/zenoh_server_exam.py",

@@ -125,6 +125,7 @@ import zenoh_server_exam
 import zenoh_service_arm
 import zenoh_service_component_exam
 import zenoh_grants_table_exam
+import zenoh_limits_exam
 import zenoh_service_exam
 import zenoh_service_link_exam
 import zenoh_stock_peer
@@ -2238,6 +2239,32 @@ def server_main(controls_only: bool) -> int:
     return 0
 
 
+LIMITS_PINNED_CASES = 24
+LIMITS_PINNED_CONTROLS = 76
+
+
+def limits_main(controls_only: bool) -> int:
+    """The limits record, its encoder and the files that must carry it. The controls run on synthetic inputs first."""
+    exam = zenoh_limits_exam
+    try:
+        honest = exam.honest_cases()
+        refusals = exam.encoder_all_controls() + exam.fact_controls()
+        if honest + len(exam.FACTS) != LIMITS_PINNED_CASES:
+            fail(f"limits: {honest + len(exam.FACTS)} cases, the checker pins {LIMITS_PINNED_CASES}")
+        if refusals != LIMITS_PINNED_CONTROLS:
+            fail(f"limits: {refusals} controls, the checker pins {LIMITS_PINNED_CONTROLS}")
+        if controls_only:
+            print(f"zenoh profile 0 limits judge: refused {refusals} corrupted inputs")
+            return 0
+        facts_held = exam.check_facts()
+    except exam.LimitsExamError as error:
+        fail(f"limits: {error}")
+    print(f"[zenoh-profile0] slice=limits cases={honest + facts_held} refusals={refusals} controls={refusals}")
+    devloop_observations.record(casesObserved=honest + facts_held, negativeControlsRefused=refusals)
+    print("zenoh profile 0 limits check: the record, its encoder and the files that carry it agree")
+    return 0
+
+
 def service_component_main(controls_only: bool) -> int:
     """The component crate and its registration: declarations the files must hold. The controls run on synthetic files."""
     exam = zenoh_service_component_exam
@@ -2506,7 +2533,7 @@ def composition_main(controls_only: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "subscribers", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "service-component", "service-booted", "service", "service-link"), required=True)
+    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "subscribers", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "limits", "service-component", "service-booted", "service", "service-link"), required=True)
     parser.add_argument("--controls-only", action="store_true")
     arguments = parser.parse_args()
     if arguments.slice == "composition":
@@ -2537,6 +2564,8 @@ def main() -> int:
         return grants_reader_main(arguments.controls_only)
     if arguments.slice == "server":
         return server_main(arguments.controls_only)
+    if arguments.slice == "limits":
+        return limits_main(arguments.controls_only)
     if arguments.slice == "service-component":
         return service_component_main(arguments.controls_only)
     if arguments.slice == "service-booted":

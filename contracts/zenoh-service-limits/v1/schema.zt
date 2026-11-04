@@ -1,0 +1,61 @@
+-- Slime OS Zenoh service limits, version 1.
+--
+-- The limits are the form of `Limits` in `zenoh-service-grants/v1` that the generation carries and the root serves.
+-- The Zenoh service reads them before it reads the grants table, and it refuses to start when a limit exceeds what
+-- it was built to hold. The table of `zenoh-service-grants-table/v1` is unchanged and holds only rows.
+--
+-- The record is a second resource object because the table's header is closed: a nonzero `required_flags` is
+-- refused, and the table exam pins its layout. The root serves this record through the same read as the table, at
+-- the one cursor value `limitsCursor`. A row index is at most `maxRows` - 1 of the table contract, so no row can
+-- have that cursor.
+--
+-- Each bound has a source:
+--
+-- * A count is at most 65535 and a sample is at most 1048576 bytes, the bounds of `zenoh-service-grants/v1`
+--   (`maxCount` and `maxSampleBytes`). A key is at most 129 bytes, the profile's `maxKeyBytes`, as in
+--   `zenoh-service-grants-table/v1`, because a longer key could never be sent.
+-- * Every field is 32 bits. The largest value is `maxSampleBytes`, 1048576, and `stackBytes` is bounded by the
+--   same arithmetic that `zenoh-service-grants/v1` states for the rings.
+-- * The stack is checked against the rows by `zenoh-service-grants/v1` (`requiredStack`). This record carries the
+--   declared number, and the builder evaluates that contract on the rows and the limits together.
+
+formatVersion :: Int = 1;
+recordMagic :: Int = 21491351925902419; -- `SLIMEZL` and a zero byte, little-endian
+recordBytes :: Int = 48;
+maxCount :: Int = 65535;
+maxSampleBytes :: Int = 1048576;
+maxKeyBytes :: Int = 129;
+maxStackBytes :: Int = 4294967295;
+
+-- The cursor of the read that returns this record. The read returns one record of `recordBytes` bytes.
+limitsCursor :: Int = 4294967295;
+
+WireField :: type { name : Text; width : Int; signed : Bool; byteArray : Bool; };
+
+-- `required_flags` is zero in this version and a nonzero value is refused. `reserved` is not present: every byte of
+-- the record belongs to a named field.
+LimitsRecord :: type {
+  magic : Int;
+  format_version : Int;
+  record_size : Int;
+  required_flags : Int;
+  holders : Int;
+  ring_slots : Int;
+  sample_bytes : Int;
+  key_bytes : Int;
+  local_subscriptions : Int;
+  stack_bytes : Int;
+};
+
+recordLayout :: List WireField = {
+  { name = "magic"; width = 8; signed = false; byteArray = true; };
+  { name = "format_version"; width = 4; signed = false; byteArray = false; };
+  { name = "record_size"; width = 4; signed = false; byteArray = false; };
+  { name = "required_flags"; width = 8; signed = false; byteArray = false; };
+  { name = "holders"; width = 4; signed = false; byteArray = false; };
+  { name = "ring_slots"; width = 4; signed = false; byteArray = false; };
+  { name = "sample_bytes"; width = 4; signed = false; byteArray = false; };
+  { name = "key_bytes"; width = 4; signed = false; byteArray = false; };
+  { name = "local_subscriptions"; width = 4; signed = false; byteArray = false; };
+  { name = "stack_bytes"; width = 4; signed = false; byteArray = false; };
+};
