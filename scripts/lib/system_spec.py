@@ -1409,6 +1409,9 @@ def derive_manifest(system: CompiledSystem) -> dict:
             _fail(f"zenohLimits: {error}")
     elif spec.get("zenohLimits") is not None:
         _fail("zenohLimits: declared limits require their resource object")
+    # The service reads its limits at start and has no other path, so a composition that runs it declares them.
+    if "zenoh-service" in instance_names(spec) and not spec["zenohLimitsObject"]:
+        _fail("zenohLimits: an instance named zenoh-service reads the limits record, so the composition must declare it")
     if spec["blockRingAuthorityObject"]:
         manifest["blockRingAuthority"] = spec["blockRingAuthority"]
     if spec["waitSetObject"]:
