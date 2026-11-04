@@ -143,6 +143,14 @@ zenoh_service_grants_reader_check:
 zenoh_service_server_check:
     python3 scripts/check/check-zenoh-profile0.py --slice server
 
+# Judges the generation builder's Zenoh limits record and the system spec admission that runs it. The judge builds the
+# record from a manifest and from a spec, requires the encoder's bytes and the independent struct writer's bytes, holds the
+# rows to the holders, subscriptions and key length the record declares, and refuses each input the contract and the
+# manifest forbid. The expectation is scripts/lib/zenoh_limits_builder_exam.py. The recipe fails until the implementation lands.
+[group('hardware')]
+zenoh_service_limits_builder_check:
+    python3 scripts/check/check-zenoh-limits-builder.py
+
 # Judges the Zenoh service limits record, the six limits of the grants record that the generation carries and the root
 # serves, and the places that must carry them. The judge writes each record again with Python's struct from the schema's
 # layout, refuses each corruption of a record, and requires the generated binding to equal the renderer's output. It also
