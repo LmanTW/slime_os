@@ -6,7 +6,7 @@
 The builder must emit the encoder's bytes and the independent struct writer's bytes. It must hold the rows to what the
 record declares: the holders they name, the keys they subscribe to and the longest key. It must refuse each input the
 contract and the manifest forbid, at the boundary that owns the refusal. The spec must refuse a composition that runs the
-service without declaring its limits, and limits without their object or an object without limits.
+service without declaring its limits, and limits on an instance that is not the service.
 
 The builder does not check the stack against the rows. The service checks the declared stack against the storage it was
 built with, and `zenoh-service-grants/v1` is not a generation input, so this module asserts no stack arithmetic.
@@ -69,10 +69,14 @@ def _manifest(system, rows=ROWS, limits=LIMITS, holders=("alpha", "beta")) -> di
     # The service runs an executable of its own, with the stack its limits declare, as a composition that runs it does.
     manifest["executables"] = [*manifest["executables"], {"name": BUILDER.ZENOH_GRANTS_READER_INSTANCE, "role": "service", "stackBytes": LIMITS["stackBytes"]}]
     manifest["zenohGrants"] = copy.deepcopy(rows)
-    if limits is None:
-        manifest.pop("zenohLimits", None)
-    else:
-        manifest["zenohLimits"] = copy.deepcopy(limits)
+    # The limits ride on the service's own instance, not on the manifest. The manifest schema check costs memory in step with
+    # the optional fields of GenerationManifest, and the limits are read only by that instance.
+    for entry in manifest["instances"]:
+        if entry["name"] == BUILDER.ZENOH_GRANTS_READER_INSTANCE:
+            if limits is None:
+                entry.pop("zenohLimits", None)
+            else:
+                entry["zenohLimits"] = copy.deepcopy(limits)
     return manifest
 
 
@@ -160,14 +164,13 @@ def controls(system=None) -> tuple[int, int]:
     valid.spec["placements"] = [dict(entry, stackBytes=LIMITS["stackBytes"]) if entry["component"] == "init" else entry for entry in valid.spec["placements"]]
     valid.spec["zenohGrants"] = [dict(ROWS[0], holder="ros2-demo-publisher"), dict(ROWS[1], holder="ros2-demo-subscriber")]
     valid.spec["zenohGrantsObject"] = True
-    valid.spec["zenohLimits"] = copy.deepcopy(LIMITS)
-    valid.spec["zenohLimitsObject"] = True
+    _service(valid.spec)["zenohLimits"] = copy.deepcopy(LIMITS)
     try:
         validate_authority_sections(valid.spec, _names(valid))
         derived = derive_manifest(valid)
     except SystemSpecError as error:
         fail(f"the system spec refused a valid spec with limits: {error}")
-    if derived.get("zenohLimits") != LIMITS:
+    if next(entry for entry in derived["instances"] if entry["name"] == BUILDER.ZENOH_GRANTS_READER_INSTANCE).get("zenohLimits") != LIMITS:
         fail("a valid spec's limits did not reach the derived manifest as declared")
     positive += 1
     if BUILDER.build_zenoh_limits(derived) != zenoh_limits.encode(_values(LIMITS)):
@@ -179,11 +182,11 @@ def controls(system=None) -> tuple[int, int]:
 
     # Spec admission: the spec's own checks run first, and then the builder.
     for label, mutate, reason in (
-        ("limits without their object", lambda spec: spec.update(zenohLimitsObject=False), "require their resource object"),
-        ("the object without limits", lambda spec: spec.pop("zenohLimits"), "needs its limits"),
-        ("the service without the object", lambda spec: spec.update(zenohLimitsObject=False, zenohLimits=None), "must declare it"),
-        ("the service with no grant rows and no limits", lambda spec: spec.update(zenohGrants=[], zenohGrantsObject=False, zenohLimitsObject=False, zenohLimits=None), "must declare it"),
-        ("rows above the declared holders", lambda spec: spec["zenohLimits"].update(holders=1), "name 2 holders"),
+        ("limits on an instance that is not the service", lambda spec: spec["instances"][0].update(zenohLimits=copy.deepcopy(LIMITS)), "only the zenoh-service instance"),
+        ("limits on the service and on another instance", lambda spec: spec["instances"][0].update(zenohLimits=copy.deepcopy(LIMITS)), "only the zenoh-service instance"),
+        ("the service without limits", lambda spec: _service(spec).pop("zenohLimits"), "must declare it"),
+        ("the service with no grant rows and no limits", lambda spec: (spec.update(zenohGrants=[], zenohGrantsObject=False), _service(spec).pop("zenohLimits")), "must declare it"),
+        ("rows above the declared holders", lambda spec: _service(spec)["zenohLimits"].update(holders=1), "name 2 holders"),
     ):
         altered = copy.deepcopy(valid)
         mutate(altered.spec)
@@ -197,6 +200,10 @@ def controls(system=None) -> tuple[int, int]:
             fail(f"the system spec admitted {label}")
         refused += 1
     return positive, refused
+
+
+def _service(spec: dict) -> dict:
+    return next(entry for entry in spec["instances"] if entry["name"] == BUILDER.ZENOH_GRANTS_READER_INSTANCE)
 
 
 def _renamed_executable(manifest: dict, stack: int) -> dict:
