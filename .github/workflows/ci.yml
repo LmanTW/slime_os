@@ -414,6 +414,17 @@ jobs:
           build-partition: image
           build-save: 'false'
       - run: nix develop --command just sel4_qemu_image_check
+      # Samples memory every 30 seconds so a job that the runner ends without a
+      # failing assertion leaves the figures it held at that time.
+      - name: Sample memory
+        run: |
+          cat > "$RUNNER_TEMP/sample-memory.sh" <<'SCRIPT'
+          while :; do
+            echo "$(date -u +%T) $(free -m | awk '/Mem:/{print "used=" $3 "MB avail=" $7 "MB"}') top: $(ps -eo rss=,comm= --sort=-rss | head -3 | tr -s ' ' | tr '\n' ';')"
+            sleep 30
+          done
+          SCRIPT
+          nohup sh "$RUNNER_TEMP/sample-memory.sh" > "$RUNNER_TEMP/memory.log" 2>&1 &
       # Split from `sel4_system_image_builder` so the two chains run
       # concurrently. Together the two jobs run exactly the recipes the single
       # job ran; `component_spec_validation_check` (seconds) runs in both
@@ -421,6 +432,13 @@ jobs:
       - run: >-
           nix develop --command just
           contracts_source_check component_spec_validation_check
+      - name: Report memory
+        if: always()
+        run: |
+          echo "Last memory samples, rss in KB:"
+          tail -n 60 "$RUNNER_TEMP/memory.log" || true
+          echo "Kernel lines about memory kills:"
+          (sudo dmesg 2>/dev/null || true) | grep -i -E 'out of memory|oom|killed process' | tail -n 20 || true
       - uses: ./.github/actions/slime-zutai-store-save
         if: always()
         with:
@@ -442,10 +460,28 @@ jobs:
         with:
           build-partition: image
       - run: nix develop --command just sel4_qemu_image_check
+      # Samples memory every 30 seconds so a job that the runner ends without a
+      # failing assertion leaves the figures it held at that time.
+      - name: Sample memory
+        run: |
+          cat > "$RUNNER_TEMP/sample-memory.sh" <<'SCRIPT'
+          while :; do
+            echo "$(date -u +%T) $(free -m | awk '/Mem:/{print "used=" $3 "MB avail=" $7 "MB"}') top: $(ps -eo rss=,comm= --sort=-rss | head -3 | tr -s ' ' | tr '\n' ';')"
+            sleep 30
+          done
+          SCRIPT
+          nohup sh "$RUNNER_TEMP/sample-memory.sh" > "$RUNNER_TEMP/memory.log" 2>&1 &
       # Closures are digests of source trees; a merge that touches one without
       # regenerating them makes every plane gate refuse to resolve. Fail here,
       # on the clean checkout, rather than in whichever QEMU job runs first.
       - run: nix develop --command just system_image_builder_check
+      - name: Report memory
+        if: always()
+        run: |
+          echo "Last memory samples, rss in KB:"
+          tail -n 60 "$RUNNER_TEMP/memory.log" || true
+          echo "Kernel lines about memory kills:"
+          (sudo dmesg 2>/dev/null || true) | grep -i -E 'out of memory|oom|killed process' | tail -n 20 || true
       - uses: ./.github/actions/slime-zutai-store-save
         if: always()
         with:
