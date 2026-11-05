@@ -174,7 +174,8 @@ The same read serves a second record at one cursor value, 4294967295. A system s
 a number of rows. `graph_runtime/services.rs` has its own branch for it, because the row branch would slice a count of
 168-byte rows. The caller gate and the record's own checks are the same as for rows, and a record that does not decode is
 not served. The service reads the record before the rows and refuses to start when a limit is above what it was built to
-hold. The builder checks each limit against its bound and does not check the stack against the rows. The service checks the
+hold, or when the ring depth or the sample size is below it, because the core fixes both in its types and cannot enforce a
+smaller declaration. The builder checks each limit against its bound and does not check the stack against the rows. The service checks the
 declared stack against its own, and `zenoh-service-grants/v1` is not a generation input.
 
 The server half (`components/lib/src/zenoh_service_server.rs`) answers the client protocol of

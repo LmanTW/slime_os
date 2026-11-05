@@ -75,6 +75,16 @@ impl Limits {
         })
     }
 
+    /// Whether the service built with `ceilings` honors these limits. Every limit is at most its ceiling. The ring depth and
+    /// the sample size are equal to it, because the core fixes both in its types and cannot enforce a smaller declaration.
+    /// The holders, subscriptions and key length are held by the rows, which the builder compares with the record, so a
+    /// declaration below the ceiling is honored for them.
+    pub fn honored_by(&self, ceilings: &Ceilings) -> bool {
+        self.within(ceilings)
+            && self.ring_slots == ceilings.ring_slots
+            && self.sample_bytes == ceilings.sample_bytes
+    }
+
     /// Whether every limit is at most the matching ceiling.
     pub fn within(&self, ceilings: &Ceilings) -> bool {
         self.holders <= ceilings.holders
@@ -135,6 +145,39 @@ mod tests {
                 limits.within(&CEILINGS),
                 "limit {index} one below its ceiling"
             );
+        }
+    }
+
+    #[test]
+    fn a_declaration_the_fixed_core_cannot_honor_is_refused() {
+        let at = [2, 4, 12, 64, 3, 32768];
+        let honored = |values: [u32; 6]| {
+            Limits::decode(&record(values))
+                .unwrap()
+                .honored_by(&CEILINGS)
+        };
+        assert!(honored(at), "a record equal to the ceilings is honored");
+        // The core's types fix the ring depth and the sample size, so a smaller declaration cannot be enforced.
+        let mut ring = at;
+        ring[1] = 1;
+        assert!(!honored(ring), "a ring of one slot under a core of four");
+        let mut sample = at;
+        sample[2] = 1;
+        assert!(
+            !honored(sample),
+            "a sample of one byte under a core of twelve"
+        );
+        // The rows hold these, so a declaration below the ceiling is honored.
+        for index in [0, 3, 4] {
+            let mut below = at;
+            below[index] -= 1;
+            assert!(honored(below), "limit {index} one below its ceiling");
+        }
+        // Above a ceiling is refused for every limit, as before.
+        for index in 0..6 {
+            let mut over = at;
+            over[index] += 1;
+            assert!(!honored(over), "limit {index} one over its ceiling");
         }
     }
 
