@@ -217,9 +217,10 @@ def build_zenoh_limits(manifest: dict) -> bytes:
     """Encode the Zenoh service limits record (zenoh-service-limits/v1) from the manifest's `zenohLimits`.
 
     The encoder checks each limit against its own bound. This function adds what only the manifest knows: the limits are
-    declared, the reader instance exists, and the rows fit the holders, subscriptions and key length the record declares.
-    The stack is not checked against the rows here. The service checks the declared
-    stack against the storage it was built with, and zenoh-service-grants/v1 is not a generation input.
+    declared, the reader instance exists, the declared stack is at most the stack the image gives the service, and the rows
+    fit the holders, subscriptions and key length the record declares. The stack is not checked against the rows here. The
+    service checks the declared stack against the storage it was built with, and zenoh-service-grants/v1 is not a
+    generation input.
     """
     import zenoh_limits
 
@@ -243,6 +244,16 @@ def build_zenoh_limits(manifest: dict) -> bytes:
     rows = manifest.get("zenohGrants") or []
     holders = {row["holder"] for row in rows}
     subscribe_keys = {row["key"] for row in rows if row["subscribe"]}
+    # The declared stack must be one the image gives the service. The manifest leaves an executable's stack out when it is
+    # the default. A record that declares less than the executable has is honored. A manifest with no record of the
+    # executable has no stack to compare, and the other checks of the manifest refuse it.
+    instance = next(entry for entry in manifest["instances"] if entry["name"] == ZENOH_GRANTS_READER_INSTANCE)
+    executable = instance.get("executable", ZENOH_GRANTS_READER_INSTANCE)
+    for entry in manifest.get("executables") or []:
+        if entry["name"] == executable:
+            stack = entry.get("stackBytes", wire_contracts.COMPONENT_DEFAULT_STACK_BYTES)
+            if limits["stack_bytes"] > stack:
+                fail(f"zenoh limits: the record declares a stack of {limits['stack_bytes']} bytes, the {executable} executable has {stack}")
     if len(holders) > limits["holders"]:
         fail(f"zenoh limits: the rows name {len(holders)} holders, the record declares {limits['holders']}")
     if len(subscribe_keys) > limits["local_subscriptions"]:
