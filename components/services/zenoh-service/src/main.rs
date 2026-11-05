@@ -37,8 +37,8 @@ use slime_rt::{
 slime_rt::entry!(main);
 
 /// What the service was built to hold. `Core` is sized by them, so the generation's grants may hold at most `ROWS` rows
-/// for at most `HOLDERS` holders. The generation declares its own limits, and a declaration above any of these is refused
-/// at start.
+/// for at most `HOLDERS` holders. The generation declares its own limits. A declaration above any of these is refused at
+/// start, and so is one below `SLOTS` or `PAYLOAD`, which the core cannot enforce.
 pub const HOLDERS: usize = 2;
 pub const ROWS: usize = 2;
 pub const SLOTS: usize = 4;
@@ -112,8 +112,10 @@ fn main(_startup_arg: u32) {
         fail(b"limits length");
     }
     let limits = Limits::decode(&record).unwrap_or_else(|_| fail(b"limits decode"));
-    if !limits.within(&CEILINGS) {
-        fail(b"limits above ceilings");
+    // The core's ring depth and sample size are fixed in its types, so a record that declares less than they are cannot be
+    // enforced. It is refused, as one that declares more is.
+    if !limits.honored_by(&CEILINGS) {
+        fail(b"limits the service cannot honor");
     }
     let mut object = [0u8; TABLE_BYTES];
     let len = read_grants(&mut object);
