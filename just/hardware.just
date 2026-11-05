@@ -278,9 +278,11 @@ lidar_foxglove_bridge_check:
 # tcp/127.0.0.1:17447, the host peer sel4-lidar-external grants, and an independent Foxglove client subscribes
 # its channel before the guest boots with the frame store on a read-only disk. The guest's transcript and NIC
 # capture are judged by scripts/lib/lidar_publish_exam.py, the client's session and the bridge's lines by
-# scripts/lib/foxglove_bridge_exam.py. Needs the bag and a registry, so it is explicit and in no aggregate.
+# scripts/lib/foxglove_bridge_exam.py. It runs lidar_foxglove_bridge_check first, so one run answers both
+# acceptances of item 01a1a8cb-a7a0-7dc1-bb24-951d0db30d1e under one execution context. Needs the bag and a
+# registry, so it is explicit and in no aggregate.
 [group('hardware')]
-lidar_foxglove_demo_check: sel4_pin_check
+lidar_foxglove_demo_check: sel4_pin_check lidar_foxglove_bridge_check
     python3 scripts/check/check-lidar-foxglove-demo.py
 
 # A person's view of the LiDAR chain: the bridge on ws://127.0.0.1:{{ port }}, then, after Enter, the guest's
