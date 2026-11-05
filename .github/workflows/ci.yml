@@ -429,9 +429,9 @@ jobs:
       # concurrently. Together the two jobs run exactly the recipes the single
       # job ran; `component_spec_validation_check` (seconds) runs in both
       # because `system_image_builder_check` depends on it.
-      - run: >-
-          nix develop --command just
-          contracts_source_check component_spec_validation_check
+      - run: |
+          (while :; do echo "MEM $(date -u +%T) $(free -m | awk '/Mem:/{print "used=" $3 "MB avail=" $7 "MB"}') top: $(ps -eo rss=,comm= --sort=-rss | head -3 | tr -s ' ' | tr '\n' ';')"; sleep 15; done) &
+          nix develop --command just contracts_source_check component_spec_validation_check
       - name: Report memory
         if: always()
         run: |
@@ -474,7 +474,9 @@ jobs:
       # Closures are digests of source trees; a merge that touches one without
       # regenerating them makes every plane gate refuse to resolve. Fail here,
       # on the clean checkout, rather than in whichever QEMU job runs first.
-      - run: nix develop --command just system_image_builder_check
+      - run: |
+          (while :; do echo "MEM $(date -u +%T) $(free -m | awk '/Mem:/{print "used=" $3 "MB avail=" $7 "MB"}') top: $(ps -eo rss=,comm= --sort=-rss | head -3 | tr -s ' ' | tr '\n' ';')"; sleep 15; done) &
+          nix develop --command just system_image_builder_check
       - name: Report memory
         if: always()
         run: |
