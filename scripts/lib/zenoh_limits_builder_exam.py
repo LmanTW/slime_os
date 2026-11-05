@@ -182,7 +182,7 @@ def controls(system=None) -> tuple[int, int]:
 
     # Spec admission: the spec's own checks run first, and then the builder.
     for label, mutate, reason in (
-        ("limits on an instance that is not the service", lambda spec: spec["instances"][0].update(zenohLimits=copy.deepcopy(LIMITS)), "only the zenoh-service instance"),
+        ("limits on an instance that is not the service", lambda spec: (_service(spec).pop("zenohLimits"), spec["instances"][0].update(zenohLimits=copy.deepcopy(LIMITS))), "only the zenoh-service instance"),
         ("limits on the service and on another instance", lambda spec: spec["instances"][0].update(zenohLimits=copy.deepcopy(LIMITS)), "only the zenoh-service instance"),
         ("the service without limits", lambda spec: _service(spec).pop("zenohLimits"), "must declare it"),
         ("the service with no grant rows and no limits", lambda spec: (spec.update(zenohGrants=[], zenohGrantsObject=False), _service(spec).pop("zenohLimits")), "must declare it"),

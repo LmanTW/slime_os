@@ -437,12 +437,22 @@ def _record_example(name: str) -> str:
     return f"{name} :: type {{" + "".join(f"\n  {field} : Int;" for field in _LIMIT_NAMES) + "\n};"
 
 
+def _nested(record: str, entry: str) -> str:
+    """A pattern that matches the field only inside `record`. A field of the same name on another record does not match, because
+    the body of the record may hold no closing brace before the field."""
+    return rf"^{record} :: type \{{[^}}]*\n  zenohLimits\? : {entry};\n[^}}]*\}};$"
+
+
+def _nested_example(record: str, entry: str) -> str:
+    return f"{record} :: type {{\n  name : Text;\n  zenohLimits? : {entry};\n}};"
+
+
 FACTS: tuple[facts.Fact, ...] = (
     ("spec-record", SPEC, _record("SystemZenohLimits"), _record_example("SystemZenohLimits")),
-    ("spec-field", SPEC, r"^\s*zenohLimits\? : SystemZenohLimits;$", "  zenohLimits? : SystemZenohLimits;"),
+    ("spec-field", SPEC, _nested("SystemInstance", "SystemZenohLimits"), _nested_example("SystemInstance", "SystemZenohLimits")),
     ("spec-derives-flag", SYSTEM_SPEC, r'"zenohLimitsObject": any\(', '    flags = {**spec, "zenohLimitsObject": any(entry.get("zenohLimits") is not None for entry in resolved_instances(spec))}'),
     ("manifest-record", MANIFEST, _record("ZenohLimitsEntry"), _record_example("ZenohLimitsEntry")),
-    ("manifest-field", MANIFEST, r"^\s*zenohLimits\? : ZenohLimitsEntry;$", "  zenohLimits? : ZenohLimitsEntry;"),
+    ("manifest-field", MANIFEST, _nested("Instance", "ZenohLimitsEntry"), _nested_example("Instance", "ZenohLimitsEntry")),
     ("builder-function", BUILDER, r"^def build_zenoh_limits\(", "def build_zenoh_limits(manifest: dict) -> bytes:"),
     ("builder-encoder", BUILDER, r"\bzenoh_limits\.encode\(", "        return zenoh_limits.encode(limits)"),
     ("builder-import", GENERATION_BUILDER, r"^\s*build_zenoh_limits,$", "    build_zenoh_limits,"),
