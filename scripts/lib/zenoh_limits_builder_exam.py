@@ -63,7 +63,11 @@ def _values(limits: dict[str, int]) -> dict[str, int]:
 def _manifest(system, rows=ROWS, limits=LIMITS, holders=("alpha", "beta")) -> dict:
     """A real manifest with the service and its holders added as instances and the rows and limits set."""
     manifest = derive_manifest(system)
-    manifest["instances"] = [*manifest["instances"], *({"name": name} for name in (BUILDER.ZENOH_GRANTS_READER_INSTANCE, *holders))]
+    # The manifest schema requires each instance to name its executable. The service runs the executable named for it, and a
+    # holder runs `init`, which any holder may.
+    manifest["instances"] = [*manifest["instances"], {"name": BUILDER.ZENOH_GRANTS_READER_INSTANCE, "executable": BUILDER.ZENOH_GRANTS_READER_INSTANCE}, *({"name": name, "executable": "init"} for name in holders)]
+    # The service runs an executable of its own, with the stack its limits declare, as a composition that runs it does.
+    manifest["executables"] = [*manifest["executables"], {"name": BUILDER.ZENOH_GRANTS_READER_INSTANCE, "role": "service", "stackBytes": LIMITS["stackBytes"]}]
     manifest["zenohGrants"] = copy.deepcopy(rows)
     if limits is None:
         manifest.pop("zenohLimits", None)
@@ -109,6 +113,7 @@ def controls(system=None) -> tuple[int, int]:
         ("one subscribe key and one declared subscription", ROWS, dict(LIMITS, localSubscriptions=1)),
         ("a key that is published and not subscribed does not count as a subscription", PUBLISH_ONLY, dict(LIMITS, localSubscriptions=1)),
         ("two holders subscribing to one key are one subscription", SHARED_SUBSCRIBE, dict(LIMITS, holders=3, localSubscriptions=1)),
+        ("a stack below what the executable has is honored", ROWS, dict(LIMITS, stackBytes=LIMITS["stackBytes"] // 2)),
     ):
         built = BUILDER.build_zenoh_limits(_manifest(system, rows=rows, limits=limits, holders=("alpha", "beta", "gamma")))
         if built != zenoh_limits.encode(_values(limits)):
@@ -126,6 +131,9 @@ def controls(system=None) -> tuple[int, int]:
         ("two subscribe keys and one declared subscription", lambda: _manifest(system, rows=two_keys, limits=dict(LIMITS, localSubscriptions=1)), "subscribe to 2 keys"),
         ("a limit of zero", lambda: _manifest(system, limits=dict(LIMITS, holders=0)), "the contract allows"),
         ("a limit above its bound", lambda: _manifest(system, limits=dict(LIMITS, ringSlots=65536)), "the contract allows"),
+        ("a stack above the executable's", lambda: _manifest(system, limits=dict(LIMITS, stackBytes=LIMITS["stackBytes"] + 4096)), "the zenoh-service executable has"),
+        ("a stack above the executable the instance runs, when another named for it has enough", lambda: _renamed_executable(_manifest(system), LIMITS["stackBytes"] // 2), "the zenoh-service-image executable has"),
+        ("a stack above the default of an executable that states none", lambda: _executable_without_stack(_manifest(system)), "the zenoh-service executable has"),
         ("a limit missing", lambda: _manifest(system, limits={k: v for k, v in LIMITS.items() if k != "stackBytes"}), "the contract names"),
         ("an extra limit", lambda: _manifest(system, limits=dict(LIMITS, extra=1)), "the contract names"),
         ("no limits", lambda: _manifest(system, limits=None), "has no limits"),
@@ -147,6 +155,9 @@ def controls(system=None) -> tuple[int, int]:
     # would pass, because every case above hands the builder a manifest of its own.
     valid = copy.deepcopy(system)
     valid.spec["instances"] = [*valid.spec["instances"], {"name": BUILDER.ZENOH_GRANTS_READER_INSTANCE, "executable": "init"}]
+    # A real composition gives the service its own placement with the stack its limits declare. The fixture runs `init`, so
+    # the placement of `init` carries that stack.
+    valid.spec["placements"] = [dict(entry, stackBytes=LIMITS["stackBytes"]) if entry["component"] == "init" else entry for entry in valid.spec["placements"]]
     valid.spec["zenohGrants"] = [dict(ROWS[0], holder="ros2-demo-publisher"), dict(ROWS[1], holder="ros2-demo-subscriber")]
     valid.spec["zenohGrantsObject"] = True
     valid.spec["zenohLimits"] = copy.deepcopy(LIMITS)
@@ -186,6 +197,24 @@ def controls(system=None) -> tuple[int, int]:
             fail(f"the system spec admitted {label}")
         refused += 1
     return positive, refused
+
+
+def _renamed_executable(manifest: dict, stack: int) -> dict:
+    """The service's instance runs an executable of another name with `stack`. An executable named for the instance is left
+    in the manifest with the stack its limits declare, so a lookup by the instance's name finds the wrong one."""
+    for entry in manifest["instances"]:
+        if entry["name"] == BUILDER.ZENOH_GRANTS_READER_INSTANCE:
+            entry["executable"] = "zenoh-service-image"
+    manifest["executables"] = [*manifest["executables"], {"name": "zenoh-service-image", "role": "service", "stackBytes": stack}]
+    return manifest
+
+
+def _executable_without_stack(manifest: dict) -> dict:
+    """The service's executable states no stack, as the manifest leaves it out when it is the default."""
+    for entry in manifest["executables"]:
+        if entry["name"] == BUILDER.ZENOH_GRANTS_READER_INSTANCE:
+            entry.pop("stackBytes")
+    return manifest
 
 
 def _without_reader(manifest: dict) -> dict:

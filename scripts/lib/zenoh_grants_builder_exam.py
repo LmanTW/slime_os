@@ -107,6 +107,9 @@ def controls(system=None) -> tuple[int, int]:
     valid.spec["instances"] = [*valid.spec["instances"], {"name": BUILDER.ZENOH_GRANTS_READER_INSTANCE, "executable": "init"}]
     valid.spec["zenohGrants"] = copy.deepcopy(rows)
     valid.spec["zenohGrantsObject"] = True
+    # A composition with the service declares its limits, and the spec refuses one that does not.
+    valid.spec["zenohLimits"] = {"holders": 3, "ringSlots": 4, "sampleBytes": 12, "keyBytes": 129, "localSubscriptions": 3, "stackBytes": 16384}
+    valid.spec["zenohLimitsObject"] = True
     valid_names = set(instance_names(valid.spec))
     try:
         validate_authority_sections(valid.spec, valid_names)
