@@ -21,7 +21,8 @@ Steps:
 3. The frame store is encoded by the exam from the bag `SLIME_LIDAR_BAG` names, pinned by size and SHA-256.
    The bridge starts on it. A client connects and subscribes the channel the bridge advertises.
 4. A stock eclipse-zenoh 1.0.0 peer, from the external Zenoh checks' pinned wheel, puts one sample on
-   another key under domain 0 and every frame on the store's key.
+   another key under domain 0 and every frame on the store's key. The bridge subscribes the store's key
+   alone, so the other sample reaches neither the client nor a line of the bridge's.
 5. The session the client saw and the bridge's own lines are judged against the store, and the shim must
    have recorded the bridge listening on both ports, so the refusal's empty record is an observation.
 
@@ -313,7 +314,7 @@ def step_run(store_path: Path, want: exam.Store, shim: Shim) -> int:
         exam.judge_listeners(records(log), zenoh_port, websocket_port)
     except exam.ExamError as error:
         fail(f"bridge lines: {error}")
-    print(f"[foxglove-bridge] messages={len(after)} bytes={sum(len(p) for _, p in want.frames)} channel={channel} dropped=1")
+    print(f"[foxglove-bridge] messages={len(after)} bytes={sum(len(p) for _, p in want.frames)} channel={channel} other-key-messages=0")
     return len(after)
 
 
@@ -343,7 +344,7 @@ def main() -> None:
         step_refusal(directory, store, shim)
         messages = step_run(store, want, shim)
     devloop_observations.record(casesObserved=messages, bytesObserved=sum(len(p) for _, p in want.frames), negativeControlsRefused=refused)
-    print("foxglove bridge check: a stock Zenoh replayer's every frame reached an independent Foxglove client through the bridge, byte for byte and in order, and the bridge refused a changed pin and a sample on another key")
+    print("foxglove bridge check: a stock Zenoh replayer's every frame reached an independent Foxglove client through the bridge, byte for byte and in order, the replayer's sample on another key reached neither the client nor the bridge's output, and the bridge refused a changed pin")
 
 
 if __name__ == "__main__":

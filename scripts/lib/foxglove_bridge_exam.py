@@ -1,13 +1,15 @@
 """The Foxglove bridge exam: what `tools/foxglove-bridge/bridge.py` must show an independent client.
 
-Work item 01a1a43b-cb66-7d19-8b91-12240b7e1e74. Nothing here imports the bridge, the Foxglove SDK or a
+Work items 01a1a43b-cb66-7d19-8b91-12240b7e1e74, and 01a1a8cb-a7a0-7dc1-bb24-951d0db30d1e, which has the
+bridge subscribe the store's exact data key so the guest's Profile 0 session accepts it. Nothing here imports the bridge, the Foxglove SDK or a
 WebSocket library; the client is `foxglove_ws`. The exam owns five judgements:
 
 * the pins: the bridge's committed pin file names exactly the wheels below, one line per host;
 * the session: the handshake, server info, one channel advertisement equal to the store's, and after the
   client subscribes, exactly one Message Data per frame, in order, with the frame's payload and log time;
-* the bridge's lines: one ready line naming both endpoints, one drop line for the replayer's other-key
-  sample, and one stop line with the counts;
+* the bridge's lines: one ready line naming both endpoints and one stop line with the forwarded count, and
+  nothing between them, so the replayer's other-key sample reached the bridge as no line and no client
+  as no message;
 * the refusal: started with one wheel's hash changed, the bridge exits nonzero with its refusal line and
   calls listen() on no socket, as the checker's `listen_log` shim records over its whole process tree in
   `contracts/listen-record/v1` records, read only through that contract's decoder;
@@ -20,8 +22,7 @@ Each judgement is trusted only after it accepts the honest synthetic evidence in
 every corruption of it. The bridge's lines are exactly, each on stdout:
 
     foxglove-bridge: ready zenoh=tcp/127.0.0.1:P websocket=ws://127.0.0.1:Q
-    foxglove-bridge: dropped key=K total=N
-    foxglove-bridge: stopped forwarded=F dropped=D
+    foxglove-bridge: stopped forwarded=F
 
 and a refused start's last stderr line is `foxglove-bridge: refused dependency`.
 """
@@ -64,8 +65,7 @@ WHEELS = (
 )
 PIN_LINE = re.compile(r"^([a-z0-9-]+)==([0-9.]+) ; (.+?) --hash=sha256:([0-9a-f]{64})$")
 READY = re.compile(r"foxglove-bridge: ready zenoh=tcp/127\.0\.0\.1:(\d+) websocket=ws://127\.0\.0\.1:(\d+)")
-DROPPED = re.compile(r"foxglove-bridge: dropped key=(\S+) total=(\d+)")
-STOPPED = re.compile(r"foxglove-bridge: stopped forwarded=(\d+) dropped=(\d+)")
+STOPPED = re.compile(r"foxglove-bridge: stopped forwarded=(\d+)")
 REFUSED = "foxglove-bridge: refused dependency"
 LINE_PREFIX = "foxglove-bridge: "
 SUBSCRIPTION = 1
@@ -244,20 +244,18 @@ def session_mutations(want: Store) -> list[tuple[str, Callable[[list, list], tup
 
 
 def judge_lines(stdout: str, returncode: int, zenoh_port: int, websocket_port: int, forwarded: int) -> None:
-    """The bridge's own lines: ready first, one drop line for the other key, stopped last, exit 0."""
+    """The bridge's own lines: exactly ready, then stopped with the forwarded count, and exit 0.
+
+    The replayer also puts one sample on another key. A bridge subscribed to the store's key alone never
+    receives it, so any line between ready and stopped, a drop line included, refuses the run."""
     lines = [line.strip() for line in stdout.splitlines() if line.strip().startswith(LINE_PREFIX)]
-    _need(len(lines) >= 2, f"the bridge printed {len(lines)} lines, it prints at least ready and stopped")
+    _need(len(lines) == 2, f"the bridge printed {len(lines)} lines, it prints exactly ready and stopped")
     ready = READY.fullmatch(lines[0])
     _need(ready is not None, f"the bridge's first line is not its ready line: {lines[0][:120]!r}")
     _need((int(ready.group(1)), int(ready.group(2))) == (zenoh_port, websocket_port), f"the ready line names ports {ready.groups()}, the exam gave {zenoh_port} and {websocket_port}")
-    stopped = STOPPED.fullmatch(lines[-1])
-    _need(stopped is not None, f"the bridge's last line is not its stop line: {lines[-1][:120]!r}")
-    _need((int(stopped.group(1)), int(stopped.group(2))) == (forwarded, 1), f"the stop line counts {stopped.groups()}, the run forwarded {forwarded} and dropped 1")
-    middle = lines[1:-1]
-    _need(len(middle) == 1, f"{len(middle)} lines between ready and stopped, the run drops one sample")
-    dropped = DROPPED.fullmatch(middle[0])
-    _need(dropped is not None, f"a line the exam does not name: {middle[0][:120]!r}")
-    _need(dropped.groups() == (OTHER_KEY, "1"), f"the drop line names {dropped.groups()}, the replayer sent one sample on {OTHER_KEY}")
+    stopped = STOPPED.fullmatch(lines[1])
+    _need(stopped is not None, f"the bridge's last line is not its stop line: {lines[1][:120]!r}")
+    _need(int(stopped.group(1)) == forwarded, f"the stop line counts {stopped.group(1)} forwarded, the run forwarded {forwarded}")
     _need(returncode == 0, f"the bridge exited {returncode} after SIGTERM, not 0")
 
 
@@ -265,28 +263,24 @@ def honest_stdout(zenoh_port: int, websocket_port: int, forwarded: int) -> str:
     return (
         f"{LINE_PREFIX}ready zenoh=tcp/127.0.0.1:{zenoh_port} websocket=ws://127.0.0.1:{websocket_port}\n"
         "zenoh: an unrelated library line\n"
-        f"{LINE_PREFIX}dropped key={OTHER_KEY} total=1\n"
-        f"{LINE_PREFIX}stopped forwarded={forwarded} dropped=1\n"
+        f"{LINE_PREFIX}stopped forwarded={forwarded}\n"
     )
 
 
 def line_mutations(z: int, w: int, n: int) -> list[tuple[str, Callable[[str], str]]]:
     ready = f"{LINE_PREFIX}ready zenoh=tcp/127.0.0.1:{z} websocket=ws://127.0.0.1:{w}"
+    stop = f"{LINE_PREFIX}stopped forwarded={n}"
     drop = f"{LINE_PREFIX}dropped key={OTHER_KEY} total=1"
-    stop = f"{LINE_PREFIX}stopped forwarded={n} dropped=1"
     return [
         ("no ready line", lambda s: s.replace(ready + "\n", "")),
         ("another zenoh port", lambda s: s.replace(f":{z} ", f":{z + 1} ")),
         ("another websocket port", lambda s: s.replace(f"127.0.0.1:{w}\n", f"127.0.0.1:{w + 1}\n")),
         ("a wildcard zenoh address", lambda s: s.replace("tcp/127.0.0.1", "tcp/0.0.0.0")),
-        ("no drop line", lambda s: s.replace(drop + "\n", "")),
-        ("two drop lines", lambda s: s.replace(drop + "\n", drop + "\n" + drop.replace("total=1", "total=2") + "\n")),
-        ("a drop of the store's key", lambda s: s.replace(OTHER_KEY, "0/velodyne_points")),
-        ("a drop total of 2", lambda s: s.replace("total=1", "total=2")),
+        ("a drop line for the other key", lambda s: s.replace(stop, drop + "\n" + stop)),
+        ("a stop line that counts a drop", lambda s: s.replace(stop, stop + " dropped=1")),
         ("no stop line", lambda s: s.replace(stop + "\n", "")),
         ("one frame fewer forwarded", lambda s: s.replace(f"forwarded={n}", f"forwarded={n - 1}")),
-        ("none dropped in the stop line", lambda s: s.replace("dropped=1", "dropped=0")),
-        ("the stop line before the drop line", lambda s: s.replace(drop + "\n" + stop, stop + "\n" + drop)),
+        ("the stop line before the ready line", lambda s: s.replace(ready + "\n", "").replace(stop, stop + "\n" + ready)),
         ("an extra bridge line", lambda s: s.replace(stop, f"{LINE_PREFIX}forwarded one\n" + stop)),
     ]
 
@@ -462,8 +456,10 @@ def _response(key: str) -> str:
     )
 
 
-def stand_in(body: bytes, handshake: Callable[[str], str] = lambda r: r) -> tuple[int, threading.Thread]:
-    """A one-connection server on the loopback that answers the handshake and then sends `body`."""
+def stand_in(body: bytes, handshake: Callable[[str], str] = lambda r: r,
+             later: tuple[tuple[float, bytes], ...] = ()) -> tuple[int, threading.Thread]:
+    """A one-connection server on the loopback that answers the handshake and then sends `body`, then each
+    of `later`'s bytes after its delay in seconds."""
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
     listener.listen(1)
@@ -477,6 +473,9 @@ def stand_in(body: bytes, handshake: Callable[[str], str] = lambda r: r) -> tupl
                 data += connection.recv(4096)
             key = re.search(rb"Sec-WebSocket-Key: (\S+)\r\n", data).group(1).decode()
             connection.sendall(handshake(_response(key)).encode() + body)
+            for delay, data in later:
+                time.sleep(delay)
+                connection.sendall(data)
             time.sleep(0.3)
         listener.close()
 
@@ -509,7 +508,7 @@ def control_store() -> Store:
 
 # The counts the controls produce, pinned so a judge that quietly loses a case is seen.
 PINNED_ACCEPTED = 12
-PINNED_REFUSED = 84
+PINNED_REFUSED = 81
 
 
 def controls() -> tuple[int, int]:

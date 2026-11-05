@@ -266,13 +266,22 @@ lidar_publish_check: sel4_pin_check
 
 # 01a1a43b-cb66-7d19-8b91-12240b7e1e74: tools/foxglove-bridge/bridge.py forwards the LiDAR Zenoh topic to a
 # Foxglove client over the SDK's foxglove.sdk.v1 WebSocket protocol, entirely on the host. A stock Zenoh
-# replayer publishes the frame store the exam encodes from the bag SLIME_LIDAR_BAG names; an independent client
+# replayer publishes the frame store the exam encodes from the bag SLIME_LIDAR_BAG names, and one sample on another
+# key, which the bridge, subscribed to the store's key alone, never receives; an independent client
 # (scripts/lib/foxglove_ws.py) judges the channel and every frame. The expectation is
 # scripts/lib/foxglove_bridge_exam.py. Needs the bag and a registry, so it is explicit and in no aggregate.
-# Fails until the bridge lands.
 [group('hardware')]
 lidar_foxglove_bridge_check:
     python3 scripts/check/check-foxglove-bridge.py
+
+# 01a1a8cb-a7a0-7dc1-bb24-951d0db30d1e: the whole LiDAR chain. tools/foxglove-bridge/bridge.py listens on
+# tcp/127.0.0.1:17447, the host peer sel4-lidar-external grants, and an independent Foxglove client subscribes
+# its channel before the guest boots with the frame store on a read-only disk. The guest's transcript and NIC
+# capture are judged by scripts/lib/lidar_publish_exam.py, the client's session and the bridge's lines by
+# scripts/lib/foxglove_bridge_exam.py. Needs the bag and a registry, so it is explicit and in no aggregate.
+[group('hardware')]
+lidar_foxglove_demo_check: sel4_pin_check
+    python3 scripts/check/check-lidar-foxglove-demo.py
 
 [group('hardware')]
 rpi5_artifact_check: architecture_contract_check rpi5_ros2_demo_contract_v2_check
