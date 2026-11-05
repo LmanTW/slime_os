@@ -18,7 +18,7 @@
   instances = [
     { name = "init"; executable = "init"; };
     { name = "network-service"; executable = "network-service"; dependencies = []; bufferBytePages = 4; bufferCount = 4; mappingCount = 4; loanCount = 4; };
-    { name = "zenoh-service"; executable = "zenoh-service"; dependencies = []; bufferBytePages = 4; bufferCount = 4; mappingCount = 6; loanCount = 4; };
+    { name = "zenoh-service"; executable = "zenoh-service"; dependencies = []; bufferBytePages = 4; bufferCount = 4; mappingCount = 6; loanCount = 4; zenohLimits = { holders = 2; ringSlots = 4; sampleBytes = 12; keyBytes = 129; localSubscriptions = 3; stackBytes = 32768; }; };
     { name = "zenoh-peer"; executable = "zenoh-peer"; dependencies = []; mappingCount = 2; loanCount = 2; };
     { name = "alpha"; executable = "zenoh-holder-publisher"; dependencies = []; mappingCount = 2; loanCount = 2; };
     { name = "beta"; executable = "zenoh-holder-subscriber"; dependencies = []; mappingCount = 2; loanCount = 2; };
@@ -91,8 +91,6 @@
   networkInterfacesObject = false;
   blockRingAuthority = [];
   blockRingAuthorityObject = false;
-  zenohLimitsObject = true;
-  zenohLimits = { holders = 2; ringSlots = 4; sampleBytes = 12; keyBytes = 129; localSubscriptions = 3; stackBytes = 32768; };
   zenohGrantsObject = true;
   zenohGrants = [
     { holder = "alpha"; key = "0/slime_service/exchange"; publish = true; subscribe = false; };

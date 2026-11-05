@@ -283,8 +283,8 @@ SystemZenohGrant :: type {
   subscribe : Bool;
 };
 
--- The Zenoh service's six limits, as `ZenohLimitsEntry` and `contracts/zenoh-service-limits/v1`. Optional at the spec
--- level so the specs that predate it need none.
+-- The Zenoh service's six limits, as `ZenohLimitsEntry` and `contracts/zenoh-service-limits/v1`. Only the instance named
+-- `zenoh-service` may declare them, and a composition that runs it must. The resource object follows from the declaration.
 SystemZenohLimits :: type {
   holders : Int;
   ringSlots : Int;
@@ -533,6 +533,7 @@ SystemInstance :: type {
   autostart? : Bool;
   health? : Text;
   lifetime? : Text;
+  zenohLimits? : SystemZenohLimits;
   dependencies? : List Text;
   bufferBytePages? : Int;
   bufferCount? : Int;
@@ -667,8 +668,6 @@ SystemSpec :: type {
   entropyAuthorityObject? : Bool;
   zenohGrants? : List SystemZenohGrant;
   zenohGrantsObject? : Bool;
-  zenohLimits? : SystemZenohLimits;
-  zenohLimitsObject? : Bool;
   blockRingAuthority : List SystemBlockRingAuthority;
   blockRingAuthorityObject : Bool;
   waitSet : List SystemWaitSetSource;
