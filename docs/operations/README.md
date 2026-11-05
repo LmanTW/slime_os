@@ -9,6 +9,8 @@ the resulting evidence does and does not claim.
   removable medium, cold-boot the named machine twice without touching
   internal storage, and record the observation `just framework_cpu_boot_check`
   judges.
+- [LiDAR point cloud in Foxglove](lidar-foxglove-demo.md) — run the guest's recorded
+  cloud through the bridge into Foxglove, and see it update on `/velodyne_points`.
 
 Runbooks describe the current procedure only. Requirements for what is not yet
 qualified live in [`../plans/`](../plans/README.md); the claim boundary each

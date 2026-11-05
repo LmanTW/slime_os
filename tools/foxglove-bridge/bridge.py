@@ -13,17 +13,18 @@ with a final stderr line `foxglove-bridge: refused CLASS`, CLASS one of host, de
 
 It then runs, in that environment:
 
-* an eclipse-zenoh peer listening on tcp/127.0.0.1:P, subscribed to every key under ROS 2 domain 0;
+* an eclipse-zenoh peer listening on tcp/127.0.0.1:P, subscribed to the store's ROS 2 data key alone;
 * a foxglove-sdk WebSocket server on 127.0.0.1:Q, with one channel: the store's topic, message encoding
   `cdr`, schema name the store's type, schema encoding `ros2msg` and the store's schema text.
 
 A sample on the store's ROS 2 data key is logged on the channel with its payload unchanged. Its log time
-is the timestamp of its 33-byte rmw_zenoh attachment, or the host receive time if it carries none. A
-sample on any other key is dropped. The bridge prints each of these lines on stdout:
+is the timestamp of its 33-byte rmw_zenoh attachment, or the host receive time if it carries none. The
+subscription names the key in full: the guest's Zenoh Profile 0 session refuses a wildcard key declaration,
+so a bridge subscribed to a pattern ends the publisher's session. A sample on any other key is never
+delivered to the bridge. It prints each of these lines on stdout:
 
     foxglove-bridge: ready zenoh=tcp/127.0.0.1:P websocket=ws://127.0.0.1:Q
-    foxglove-bridge: dropped key=K total=N
-    foxglove-bridge: stopped forwarded=F dropped=D
+    foxglove-bridge: stopped forwarded=F
 
 The ready line follows once both servers listen; the stopped line follows SIGINT or SIGTERM, and the
 bridge then exits 0.
@@ -57,7 +58,6 @@ DEFAULT_PINS = HERE / "pins.txt"
 # The hosts the committed pins name wheels for. pip skips a pin whose marker does not match, so a host
 # outside this set would install nothing and is refused rather than started without its dependencies.
 HOSTS = {("linux", "x86_64"), ("darwin", "arm64")}
-DOMAIN_KEYS = "0/**"
 # The rmw_zenoh attachment: sequence (i64), source timestamp (i64), GID length (u8, 16), GID.
 ATTACHMENT = struct.Struct("<qqB16s")
 GID_BYTES = 16
@@ -148,23 +148,19 @@ def serve(store: Store, zenoh_port: int, websocket_port: int) -> int:
     config.insert_json5("scouting/multicast/enabled", "false")
     config.insert_json5("scouting/gossip/enabled", "false")
     session = zenoh.open(config)
-    counts = {"forwarded": 0, "dropped": 0}
-    # Zenoh delivers on its own threads; one lock keeps each count and its drop line in step.
+    forwarded = 0
+    # Zenoh delivers on its own threads; one lock keeps the count and the channel's order in step.
     lock = threading.Lock()
 
     def on_sample(sample: zenoh.Sample) -> None:
+        nonlocal forwarded
         received = time.time_ns()
-        key = str(sample.key_expr)
         attachment = None if sample.attachment is None else bytes(sample.attachment)
         with lock:
-            if key == store.key:
-                channel.log(bytes(sample.payload), log_time=log_time_of(attachment, received))
-                counts["forwarded"] += 1
-            else:
-                counts["dropped"] += 1
-                print(f"{PREFIX}dropped key={key} total={counts['dropped']}", flush=True)
+            channel.log(bytes(sample.payload), log_time=log_time_of(attachment, received))
+            forwarded += 1
 
-    subscriber = session.declare_subscriber(DOMAIN_KEYS, on_sample)
+    subscriber = session.declare_subscriber(store.key, on_sample)
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
@@ -174,7 +170,7 @@ def serve(store: Store, zenoh_port: int, websocket_port: int) -> int:
     session.close()
     server.stop()
     with lock:
-        print(f"{PREFIX}stopped forwarded={counts['forwarded']} dropped={counts['dropped']}", flush=True)
+        print(f"{PREFIX}stopped forwarded={forwarded}", flush=True)
     return 0
 
 

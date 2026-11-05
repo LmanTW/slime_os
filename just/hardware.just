@@ -283,6 +283,13 @@ lidar_foxglove_bridge_check:
 lidar_foxglove_demo_check: sel4_pin_check
     python3 scripts/check/check-lidar-foxglove-demo.py
 
+# A person's view of the LiDAR chain: the bridge on ws://127.0.0.1:{{ port }}, then, after Enter, the guest's
+# frames into whatever Foxglove has connected. Judged by no gate; lidar_foxglove_demo_check judges the chain.
+# Needs SLIME_LIDAR_BAG and a registry. See docs/operations/lidar-foxglove-demo.md.
+[group('hardware')]
+lidar_foxglove_demo port="8765":
+    python3 tools/foxglove-bridge/demo.py --websocket-port {{ port }}
+
 [group('hardware')]
 rpi5_artifact_check: architecture_contract_check rpi5_ros2_demo_contract_v2_check
     python3 scripts/check/check-rpi5-artifacts.py
