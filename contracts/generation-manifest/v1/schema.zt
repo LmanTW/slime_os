@@ -705,8 +705,8 @@ GenerationManifest :: type {
   -- any Zenoh right; readable only by the instance named `zenoh-service`.
   zenohGrants? : List ZenohGrantEntry;
 
-  -- Optional Zenoh service limits. Absent means the service keeps the limits it was built with; readable only by the
-  -- instance named `zenoh-service`.
+  -- Optional Zenoh service limits, readable only by the instance named `zenoh-service`. A composition that has that
+  -- instance declares them, and the system spec refuses one that does not. A composition without the instance has none.
   zenohLimits? : ZenohLimitsEntry;
   -- Optional B83 exact per-ring block authority table. Absent and empty both
   -- grant no ring any block right, so a userspace block driver refuses every
