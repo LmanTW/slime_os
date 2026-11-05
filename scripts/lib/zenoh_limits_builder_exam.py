@@ -63,7 +63,9 @@ def _values(limits: dict[str, int]) -> dict[str, int]:
 def _manifest(system, rows=ROWS, limits=LIMITS, holders=("alpha", "beta")) -> dict:
     """A real manifest with the service and its holders added as instances and the rows and limits set."""
     manifest = derive_manifest(system)
-    manifest["instances"] = [*manifest["instances"], *({"name": name} for name in (BUILDER.ZENOH_GRANTS_READER_INSTANCE, *holders))]
+    # The manifest schema requires each instance to name its executable. The service runs the executable named for it, and a
+    # holder runs `init`, which any holder may.
+    manifest["instances"] = [*manifest["instances"], {"name": BUILDER.ZENOH_GRANTS_READER_INSTANCE, "executable": BUILDER.ZENOH_GRANTS_READER_INSTANCE}, *({"name": name, "executable": "init"} for name in holders)]
     # The service runs an executable of its own, with the stack its limits declare, as a composition that runs it does.
     manifest["executables"] = [*manifest["executables"], {"name": BUILDER.ZENOH_GRANTS_READER_INSTANCE, "role": "service", "stackBytes": LIMITS["stackBytes"]}]
     manifest["zenohGrants"] = copy.deepcopy(rows)
