@@ -91,6 +91,8 @@
   networkInterfacesObject = false;
   blockRingAuthority = [];
   blockRingAuthorityObject = false;
+  zenohLimitsObject = true;
+  zenohLimits = { holders = 2; ringSlots = 4; sampleBytes = 12; keyBytes = 129; localSubscriptions = 3; stackBytes = 32768; };
   zenohGrantsObject = true;
   zenohGrants = [
     { holder = "alpha"; key = "0/slime_service/exchange"; publish = true; subscribe = false; };

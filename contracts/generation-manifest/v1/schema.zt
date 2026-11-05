@@ -294,6 +294,16 @@ EntropyAuthorityEntry :: type {
   seed? : Text;
 };
 
+-- The Zenoh service's six limits. Encoded as `contracts/zenoh-service-limits/v1`.
+ZenohLimitsEntry :: type {
+  holders : Int;
+  ringSlots : Int;
+  sampleBytes : Int;
+  keyBytes : Int;
+  localSubscriptions : Int;
+  stackBytes : Int;
+};
+
 -- Zenoh service grant row: one holder, one exact Zenoh key, and the rights to
 -- publish and to subscribe on it. Encoded as `contracts/zenoh-service-grants-table/v1`.
 ZenohGrantEntry :: type {
@@ -694,6 +704,10 @@ GenerationManifest :: type {
   -- Optional Zenoh service grants table. Absent and empty both grant no holder
   -- any Zenoh right; readable only by the instance named `zenoh-service`.
   zenohGrants? : List ZenohGrantEntry;
+
+  -- Optional Zenoh service limits. Absent means the service keeps the limits it was built with; readable only by the
+  -- instance named `zenoh-service`.
+  zenohLimits? : ZenohLimitsEntry;
   -- Optional B83 exact per-ring block authority table. Absent and empty both
   -- grant no ring any block right, so a userspace block driver refuses every
   -- submission rather than defaulting open. Readable only by the declared
@@ -764,6 +778,7 @@ FromData @NetworkInterfaceEntry :: derive
 FromData @NetworkApplicationEntry :: derive
 FromData @EntropyAuthorityEntry :: derive
 FromData @ZenohGrantEntry :: derive
+FromData @ZenohLimitsEntry :: derive
 FromData @BlockRingAuthorityEntry :: derive
 FromData @FabricProfileInterposition :: derive
 FromData @FabricProfile :: derive
@@ -802,6 +817,7 @@ decodeManifest :: Data -> Validation DecodeIssue GenerationManifest
   NetworkApplicationEntry =;
   EntropyAuthorityEntry =;
   ZenohGrantEntry =;
+  ZenohLimitsEntry =;
   BlockRingAuthorityEntry =;
   ClockAuthorityEntry =;
   SchedulingClassBand =;
