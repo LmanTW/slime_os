@@ -13,6 +13,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  SLIME_ZUTAI_JOBS: '2'
 
 jobs:
   # Cheap, always-run scope detection. A change confined to `.tasks/` (the
