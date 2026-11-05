@@ -447,12 +447,22 @@ def _nested_example(record: str, entry: str) -> str:
     return f"{record} :: type {{\n  name : Text;\n  zenohLimits? : {entry};\n}};"
 
 
+def _only_nested(top: str, record: str, entry: str) -> str:
+    """`_nested`, and the top-level record `top` holds no field whose name starts with `zenohLimits`. That covers the limits field
+    and the object flag, each of which the schema check pays for in memory when it sits on the top-level record."""
+    return rf"\A(?![\s\S]*^{top} :: type \{{[^}}]*zenohLimits)[\s\S]*{_nested(record, entry)[0:]}"
+
+
+def _only_nested_example(top: str, record: str, entry: str) -> str:
+    return f"{top} :: type {{\n  name : Text;\n}};\n" + _nested_example(record, entry)
+
+
 FACTS: tuple[facts.Fact, ...] = (
     ("spec-record", SPEC, _record("SystemZenohLimits"), _record_example("SystemZenohLimits")),
-    ("spec-field", SPEC, _nested("SystemInstance", "SystemZenohLimits"), _nested_example("SystemInstance", "SystemZenohLimits")),
+    ("spec-field", SPEC, _only_nested("SystemSpec", "SystemInstance", "SystemZenohLimits"), _only_nested_example("SystemSpec", "SystemInstance", "SystemZenohLimits")),
     ("spec-derives-flag", SYSTEM_SPEC, r'"zenohLimitsObject": any\(', '    flags = {**spec, "zenohLimitsObject": any(entry.get("zenohLimits") is not None for entry in resolved_instances(spec))}'),
     ("manifest-record", MANIFEST, _record("ZenohLimitsEntry"), _record_example("ZenohLimitsEntry")),
-    ("manifest-field", MANIFEST, _nested("Instance", "ZenohLimitsEntry"), _nested_example("Instance", "ZenohLimitsEntry")),
+    ("manifest-field", MANIFEST, _only_nested("GenerationManifest", "Instance", "ZenohLimitsEntry"), _only_nested_example("GenerationManifest", "Instance", "ZenohLimitsEntry")),
     ("builder-function", BUILDER, r"^def build_zenoh_limits\(", "def build_zenoh_limits(manifest: dict) -> bytes:"),
     ("builder-encoder", BUILDER, r"\bzenoh_limits\.encode\(", "        return zenoh_limits.encode(limits)"),
     ("builder-import", GENERATION_BUILDER, r"^\s*build_zenoh_limits,$", "    build_zenoh_limits,"),
