@@ -3132,7 +3132,7 @@ def build_sel4_generation(
         fail("zenohGrants declared without a zenoh-grants resource object")
     if "zenoh-limits" in object_ids:
         payloads["zenoh-limits"] = build_zenoh_limits(manifest)
-    elif manifest.get("zenohLimits") is not None:
+    elif any(entry.get("zenohLimits") is not None for entry in manifest["instances"]):
         fail("zenohLimits declared without a zenoh-limits resource object")
     declared_block_rings = manifest.get("blockRingAuthority") or []
     if "block-ring-authority" in object_ids:

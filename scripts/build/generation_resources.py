@@ -214,7 +214,7 @@ def build_zenoh_grants_table(manifest: dict) -> bytes:
 
 
 def build_zenoh_limits(manifest: dict) -> bytes:
-    """Encode the Zenoh service limits record (zenoh-service-limits/v1) from the manifest's `zenohLimits`.
+    """Encode the Zenoh service limits record (zenoh-service-limits/v1) from the `zenohLimits` of the service's instance.
 
     The encoder checks each limit against its own bound. This function adds what only the manifest knows: the limits are
     declared, the reader instance exists, the declared stack is at most the stack the image gives the service, and the rows
@@ -224,12 +224,12 @@ def build_zenoh_limits(manifest: dict) -> bytes:
     """
     import zenoh_limits
 
-    declared = manifest.get("zenohLimits")
+    instance = next((entry for entry in manifest["instances"] if entry["name"] == ZENOH_GRANTS_READER_INSTANCE), None)
+    if instance is None:
+        fail(f"zenoh limits: no {ZENOH_GRANTS_READER_INSTANCE} instance reads the record")
+    declared = instance.get("zenohLimits")
     if not isinstance(declared, dict):
         fail("zenoh limits: the record has no limits")
-    instances = {entry["name"] for entry in manifest["instances"]}
-    if ZENOH_GRANTS_READER_INSTANCE not in instances:
-        fail(f"zenoh limits: no {ZENOH_GRANTS_READER_INSTANCE} instance reads the record")
     names = {"holders": "holders", "ring_slots": "ringSlots", "sample_bytes": "sampleBytes", "key_bytes": "keyBytes",
              "local_subscriptions": "localSubscriptions", "stack_bytes": "stackBytes"}
     if set(declared) != set(names.values()):
@@ -247,7 +247,6 @@ def build_zenoh_limits(manifest: dict) -> bytes:
     # The declared stack must be one the image gives the service. The manifest leaves an executable's stack out when it is
     # the default. A record that declares less than the executable has is honored. A manifest with no record of the
     # executable has no stack to compare, and the other checks of the manifest refuse it.
-    instance = next(entry for entry in manifest["instances"] if entry["name"] == ZENOH_GRANTS_READER_INSTANCE)
     executable = instance.get("executable", ZENOH_GRANTS_READER_INSTANCE)
     for entry in manifest.get("executables") or []:
         if entry["name"] == executable:
