@@ -489,7 +489,8 @@ FACTS: tuple[facts.Fact, ...] = (
 # The schema check of a record needs memory in step with the record's optional fields. It used 2.4 GB with 17 optional fields on
 # GenerationManifest, 4.5 GB with 18 and 9.0 GB with 19, and a 9 GB cap killed it with 20. The CI runner has 16 GB. The limits
 # ride on the two instance records so the two top-level records keep the counts they had before the limits. A bound holds a
-# record to its count, so a limits field, an author flag or any other optional field added to one of them fails here.
+# record to its count, so a limits field, an author flag or any other optional field added to one of them fails here. The count
+# must equal the bound, so a bound raised to make room fails on the real schema.
 OPTIONAL_BOUNDS = (
     ("manifest-optional-fields", MANIFEST, "GenerationManifest", 19),
     ("manifest-instance-optional-fields", MANIFEST, "Instance", 5),
@@ -508,7 +509,7 @@ def optional_fields(text: str, record: str) -> int:
 def check_bounds(read) -> int:
     for name, path, record, bound in OPTIONAL_BOUNDS:
         count = optional_fields(read(path), record)
-        _need(count <= bound, f"{name}: {record} declares {count} optional fields, the bound is {bound}. The schema check needs memory in step with them")
+        _need(count == bound, f"{name}: {record} declares {count} optional fields, the layout holds {bound}. The schema check needs memory in step with them")
     return len(OPTIONAL_BOUNDS)
 
 
