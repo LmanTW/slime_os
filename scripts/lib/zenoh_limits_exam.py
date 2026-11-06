@@ -437,12 +437,32 @@ def _record_example(name: str) -> str:
     return f"{name} :: type {{" + "".join(f"\n  {field} : Int;" for field in _LIMIT_NAMES) + "\n};"
 
 
+def _nested(record: str, entry: str) -> str:
+    """A pattern that matches the field only inside `record`. A field of the same name on another record does not match, because
+    the body of the record may hold no closing brace before the field."""
+    return rf"^{record} :: type \{{[^}}]*\n  zenohLimits\? : {entry};\n[^}}]*\}};$"
+
+
+def _nested_example(record: str, entry: str) -> str:
+    return f"{record} :: type {{\n  name : Text;\n  zenohLimits? : {entry};\n}};"
+
+
+def _only_nested(top: str, record: str, entry: str) -> str:
+    """`_nested`, and the top-level record `top` holds no field whose name starts with `zenohLimits`. That covers the limits field
+    and the object flag, each of which the schema check pays for in memory when it sits on the top-level record."""
+    return rf"\A(?![\s\S]*^{top} :: type \{{[^}}]*zenohLimits)[\s\S]*{_nested(record, entry)[0:]}"
+
+
+def _only_nested_example(top: str, record: str, entry: str) -> str:
+    return f"{top} :: type {{\n  name : Text;\n}};\n" + _nested_example(record, entry)
+
+
 FACTS: tuple[facts.Fact, ...] = (
     ("spec-record", SPEC, _record("SystemZenohLimits"), _record_example("SystemZenohLimits")),
-    ("spec-field", SPEC, r"^\s*zenohLimits\? : SystemZenohLimits;$", "  zenohLimits? : SystemZenohLimits;"),
-    ("spec-object-flag", SPEC, r"^\s*zenohLimitsObject\? : Bool;$", "  zenohLimitsObject? : Bool;"),
+    ("spec-field", SPEC, _only_nested("SystemSpec", "SystemInstance", "SystemZenohLimits"), _only_nested_example("SystemSpec", "SystemInstance", "SystemZenohLimits")),
+    ("spec-derives-flag", SYSTEM_SPEC, r'"zenohLimitsObject": any\(', '    flags = {**spec, "zenohLimitsObject": any(entry.get("zenohLimits") is not None for entry in resolved_instances(spec))}'),
     ("manifest-record", MANIFEST, _record("ZenohLimitsEntry"), _record_example("ZenohLimitsEntry")),
-    ("manifest-field", MANIFEST, r"^\s*zenohLimits\? : ZenohLimitsEntry;$", "  zenohLimits? : ZenohLimitsEntry;"),
+    ("manifest-field", MANIFEST, _only_nested("GenerationManifest", "Instance", "ZenohLimitsEntry"), _only_nested_example("GenerationManifest", "Instance", "ZenohLimitsEntry")),
     ("builder-function", BUILDER, r"^def build_zenoh_limits\(", "def build_zenoh_limits(manifest: dict) -> bytes:"),
     ("builder-encoder", BUILDER, r"\bzenoh_limits\.encode\(", "        return zenoh_limits.encode(limits)"),
     ("builder-import", GENERATION_BUILDER, r"^\s*build_zenoh_limits,$", "    build_zenoh_limits,"),
@@ -452,9 +472,9 @@ FACTS: tuple[facts.Fact, ...] = (
     ("release-input-encoder", CLOSURES, r'^\s*\("zenoh-limits-encoder", "scripts/lib/zenoh_limits\.py", "file"\),$', '    ("zenoh-limits-encoder", "scripts/lib/zenoh_limits.py", "file"),'),
     ("release-input-builder", CLOSURES, r'^\s*\("generation-resources", "scripts/build/generation_resources\.py", "file"\),$', '    ("generation-resources", "scripts/build/generation_resources.py", "file"),'),
     ("closure-schema-limits", CLOSURE_SCHEMA, r'"zenoh-limits-contract",\n\s*"zenoh-limits-encoder",\n\s*"generation-resources",', '        "zenoh-limits-contract",\n        "zenoh-limits-encoder",\n        "generation-resources",'),
-    ("spec-admits-limits", SYSTEM_SPEC, r'^\s*"zenohLimits",$', '    "zenohLimits",'),
-    ("spec-admits-flag", SYSTEM_SPEC, r'^\s*"zenohLimitsObject",$', '    "zenohLimitsObject",'),
-    ("spec-copies-limits", SYSTEM_SPEC, r'manifest\["zenohLimits"\] = spec\["zenohLimits"\]', '        manifest["zenohLimits"] = spec["zenohLimits"]'),
+    ("spec-refuses-stray-limits", SYSTEM_SPEC, r"only the zenoh-service instance reads the limits record", '        _fail("zenohLimits: only the zenoh-service instance reads the limits record")'),
+    ("spec-requires-limits", SYSTEM_SPEC, r"an instance named zenoh-service reads the limits record", '        _fail("zenohLimits: an instance named zenoh-service reads the limits record, so the composition must declare it")'),
+    ("spec-carries-limits", SYSTEM_SPEC, r'"workerPriority", "zenohLimits"\):', '        for field in ("priority", "extraThreads", "workerPriority", "zenohLimits"):'),
     ("root-dispatch", ROOT_DISPATCH, r"\bZENOH_LIMITS_CURSOR\b", "                    if cursor == ipc::ZENOH_LIMITS_CURSOR {"),
     ("proto-export", PROTO_LIB, r"^pub mod zenoh_service_limits_wire;$", "pub mod zenoh_service_limits_wire;"),
     ("proto-decoder", PROTO_LIMITS, r"\bWireLimitsRecord::decode\(", "        let record = WireLimitsRecord::decode(bytes).ok_or(DecodeError::Short)?;"),
@@ -464,6 +484,91 @@ FACTS: tuple[facts.Fact, ...] = (
     ("recipe", "just/hardware.just", r"^zenoh_service_limits_check:$", "zenoh_service_limits_check:"),
     ("generate-recipe", "just/generate.just", r"^zenoh_service_limits_gen:$", "zenoh_service_limits_gen:"),
 )
+
+
+# The schema check of a record needs memory in step with the record's optional fields. It used 2.4 GB with 17 optional fields on
+# GenerationManifest, 4.5 GB with 18 and 9.0 GB with 19, and a 9 GB cap killed it with 20. The CI runner has 16 GB. The limits
+# ride on the two instance records so the two top-level records keep the counts they had before the limits. A bound holds a
+# record to its count, so a limits field, an author flag or any other optional field added to one of them fails here. The count
+# must equal the bound, so a bound raised to make room fails on the real schema.
+OPTIONAL_BOUNDS = (
+    ("manifest-optional-fields", MANIFEST, "GenerationManifest", 19),
+    ("manifest-instance-optional-fields", MANIFEST, "Instance", 5),
+    ("spec-optional-fields", SPEC, "SystemSpec", 13),
+    ("spec-instance-optional-fields", SPEC, "SystemInstance", 14),
+)
+
+
+def optional_fields(text: str, record: str) -> int:
+    """How many optional fields the record type `record` declares. A declaration ends at a semicolon, so a line may hold several. Comments are removed first. A declaration is optional when its name is followed by `?` and `:`."""
+    found = re.search(rf"^{record} :: type \{{\n(.*?)\n\}};$", text, re.MULTILINE | re.DOTALL)
+    _need(found is not None, f"limits: {record} is not a record type in the schema text")
+    body = re.sub(r"--[^\n]*", "", found.group(1))
+    return sum(1 for declaration in body.split(";") if re.match(r"\s*[A-Za-z_]\w*\s*\?\s*:", declaration))
+
+
+def declared_names(text: str, record: str) -> set[str]:
+    """The names the record type `record` declares, optional or required, one per declaration."""
+    found = re.search(rf"^{record} :: type \{{\n(.*?)\n\}};$", text, re.MULTILINE | re.DOTALL)
+    _need(found is not None, f"limits: {record} is not a record type in the schema text")
+    body = re.sub(r"--[^\n]*", "", found.group(1))
+    return {match.group(1) for declaration in body.split(";") if (match := re.match(r"\s*([A-Za-z_]\w*)\s*\??\s*:", declaration))}
+
+
+def check_bounds(read) -> int:
+    for name, path, record, bound in OPTIONAL_BOUNDS:
+        _need("zenohLimitsObject" not in declared_names(read(path), record), f"{name}: {record} declares zenohLimitsObject. The spec derives the limits object, so no author flag exists")
+        count = optional_fields(read(path), record)
+        _need(count == bound, f"{name}: {record} declares {count} optional fields, the layout holds {bound}. The schema check needs memory in step with them")
+    return len(OPTIONAL_BOUNDS)
+
+
+# Each case adds optional fields to a record of the real schema, as many as it takes to pass that record's bound with the line
+# given as the last one. The bound has to refuse it by name.
+BOUND_MUTATIONS = (
+    ("a limits field kept on the system spec", "spec-optional-fields", SPEC, "SystemSpec", "  zenohLimits? : SystemZenohLimits;"),
+    ("a limits flag kept on the system spec", "spec-optional-fields", SPEC, "SystemSpec", "  zenohLimitsObject? : Bool;"),
+    ("a required limits flag on the system spec", "spec-optional-fields", SPEC, "SystemSpec", "  zenohLimitsObject : Bool;"),
+    ("a limits field kept on the manifest", "manifest-optional-fields", MANIFEST, "GenerationManifest", "  zenohLimits? : ZenohLimitsEntry;"),
+    ("an unrelated optional field on the manifest", "manifest-optional-fields", MANIFEST, "GenerationManifest", "    anotherField? : Int;"),
+    ("a field written after another on the same line", "manifest-optional-fields", MANIFEST, "GenerationManifest", "+ sameLine? : Int;"),
+    ("an unrelated optional field on the system instance", "spec-instance-optional-fields", SPEC, "SystemInstance", "  anotherField? : Int;"),
+    ("an unrelated optional field on the manifest instance", "manifest-instance-optional-fields", MANIFEST, "Instance", "  anotherField? : Int;"),
+    ("a required flag beside the limits on the system instance", "spec-instance-optional-fields", SPEC, "SystemInstance", "  zenohLimitsObject : Bool;"),
+    ("a required flag beside the limits on the manifest instance", "manifest-instance-optional-fields", MANIFEST, "Instance", "  zenohLimitsObject : Bool;"),
+)
+
+
+def bound_controls() -> int:
+    def read_real(path: str) -> str:
+        return (ROOT / path).read_text(encoding="utf-8")
+    check_bounds(read_real)
+    refused = 0
+    for label, name, path, record, line in BOUND_MUTATIONS:
+        header = f"{record} :: type {{\n"
+        text = read_real(path)
+        _need(text.count(header) == 1, f"control: {record} found {text.count(header)} times, expected 1")
+        bound = next(limit for bound_name, _p, _r, limit in OPTIONAL_BOUNDS if bound_name == name)
+        padding = "".join(f"  padding{index}? : Int;\n" for index in range(max(0, bound - optional_fields(text, record))))
+        if line.startswith("+"):
+            # Only the second field on a line is new. The record is padded to its bound first, so a counter that reads lines
+            # sees no change and a counter that reads declarations sees one more.
+            padded = text.replace(header, header + padding, 1)
+            start = padded.index(header) + len(header)
+            first = re.search(r"^  [A-Za-z_]\w*\? :[^\n]*;$", padded[start:], re.MULTILINE)
+            _need(first is not None, f"control: {record} holds no optional field to append to")
+            at = start + first.end()
+            altered = {path: padded[:at] + line[1:] + padded[at:]}
+        else:
+            altered = {path: text.replace(header, header + padding + line + "\n", 1)}
+        try:
+            check_bounds(lambda p, altered=altered: altered.get(p) or read_real(p))
+        except LimitsExamError as error:
+            _need(str(error).startswith(f"{name}:"), f"control: {label} was refused at the wrong bound: {error}")
+            refused += 1
+            continue
+        raise LimitsExamError(f"control: the optional-field bounds accepted {label}")
+    return refused
 
 
 STDLIB_ONLY = {"__future__", "re", "struct", "pathlib"}
@@ -533,7 +638,7 @@ def check_facts() -> int:
             raise LimitsExamError(f"{path} cannot be read: {error}") from error
     try:
         check_encoder_imports()
-        return facts.check(FACTS, read)
+        return facts.check(FACTS, read) + check_bounds(read)
     except facts.FactsError as error:
         raise LimitsExamError(str(error)) from error
 
@@ -546,4 +651,4 @@ def fact_controls() -> int:
 
 
 def all_controls() -> int:
-    return encoder_all_controls() + generated_controls() + import_controls() + fact_controls()
+    return encoder_all_controls() + generated_controls() + import_controls() + fact_controls() + bound_controls()
