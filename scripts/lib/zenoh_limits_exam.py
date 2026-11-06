@@ -532,8 +532,8 @@ BOUND_MUTATIONS = (
     ("a limits field kept on the manifest", "manifest-optional-fields", MANIFEST, "GenerationManifest", "  zenohLimits? : ZenohLimitsEntry;"),
     ("an unrelated optional field on the manifest", "manifest-optional-fields", MANIFEST, "GenerationManifest", "    anotherField? : Int;"),
     ("a field written after another on the same line", "manifest-optional-fields", MANIFEST, "GenerationManifest", "+ sameLine? : Int;"),
-    ("a flag beside the limits on the system instance", "spec-instance-optional-fields", SPEC, "SystemInstance", "  zenohLimitsObject? : Bool;"),
-    ("a flag beside the limits on the manifest instance", "manifest-instance-optional-fields", MANIFEST, "Instance", "  zenohLimitsObject? : Bool;"),
+    ("an unrelated optional field on the system instance", "spec-instance-optional-fields", SPEC, "SystemInstance", "  anotherField? : Int;"),
+    ("an unrelated optional field on the manifest instance", "manifest-instance-optional-fields", MANIFEST, "Instance", "  anotherField? : Int;"),
     ("a required flag beside the limits on the system instance", "spec-instance-optional-fields", SPEC, "SystemInstance", "  zenohLimitsObject : Bool;"),
     ("a required flag beside the limits on the manifest instance", "manifest-instance-optional-fields", MANIFEST, "Instance", "  zenohLimitsObject : Bool;"),
 )
