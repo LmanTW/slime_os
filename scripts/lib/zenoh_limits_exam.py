@@ -507,8 +507,17 @@ def optional_fields(text: str, record: str) -> int:
     return sum(1 for declaration in body.split(";") if re.match(r"\s*[A-Za-z_]\w*\s*\?\s*:", declaration))
 
 
+def declared_names(text: str, record: str) -> set[str]:
+    """The names the record type `record` declares, optional or required, one per declaration."""
+    found = re.search(rf"^{record} :: type \{{\n(.*?)\n\}};$", text, re.MULTILINE | re.DOTALL)
+    _need(found is not None, f"limits: {record} is not a record type in the schema text")
+    body = re.sub(r"--[^\n]*", "", found.group(1))
+    return {match.group(1) for declaration in body.split(";") if (match := re.match(r"\s*([A-Za-z_]\w*)\s*\??\s*:", declaration))}
+
+
 def check_bounds(read) -> int:
     for name, path, record, bound in OPTIONAL_BOUNDS:
+        _need("zenohLimitsObject" not in declared_names(read(path), record), f"{name}: {record} declares zenohLimitsObject. The spec derives the limits object, so no author flag exists")
         count = optional_fields(read(path), record)
         _need(count == bound, f"{name}: {record} declares {count} optional fields, the layout holds {bound}. The schema check needs memory in step with them")
     return len(OPTIONAL_BOUNDS)
@@ -519,10 +528,14 @@ def check_bounds(read) -> int:
 BOUND_MUTATIONS = (
     ("a limits field kept on the system spec", "spec-optional-fields", SPEC, "SystemSpec", "  zenohLimits? : SystemZenohLimits;"),
     ("a limits flag kept on the system spec", "spec-optional-fields", SPEC, "SystemSpec", "  zenohLimitsObject? : Bool;"),
+    ("a required limits flag on the system spec", "spec-optional-fields", SPEC, "SystemSpec", "  zenohLimitsObject : Bool;"),
     ("a limits field kept on the manifest", "manifest-optional-fields", MANIFEST, "GenerationManifest", "  zenohLimits? : ZenohLimitsEntry;"),
-    ("an unrelated optional field on the manifest", "manifest-optional-fields", MANIFEST, "GenerationManifest", "    anotherField? : Int; sameLine? : Int;"),
+    ("an unrelated optional field on the manifest", "manifest-optional-fields", MANIFEST, "GenerationManifest", "    anotherField? : Int;"),
+    ("a field written after another on the same line", "manifest-optional-fields", MANIFEST, "GenerationManifest", "+ sameLine? : Int;"),
     ("a flag beside the limits on the system instance", "spec-instance-optional-fields", SPEC, "SystemInstance", "  zenohLimitsObject? : Bool;"),
     ("a flag beside the limits on the manifest instance", "manifest-instance-optional-fields", MANIFEST, "Instance", "  zenohLimitsObject? : Bool;"),
+    ("a required flag beside the limits on the system instance", "spec-instance-optional-fields", SPEC, "SystemInstance", "  zenohLimitsObject : Bool;"),
+    ("a required flag beside the limits on the manifest instance", "manifest-instance-optional-fields", MANIFEST, "Instance", "  zenohLimitsObject : Bool;"),
 )
 
 
@@ -537,7 +550,17 @@ def bound_controls() -> int:
         _need(text.count(header) == 1, f"control: {record} found {text.count(header)} times, expected 1")
         bound = next(limit for bound_name, _p, _r, limit in OPTIONAL_BOUNDS if bound_name == name)
         padding = "".join(f"  padding{index}? : Int;\n" for index in range(max(0, bound - optional_fields(text, record))))
-        altered = {path: text.replace(header, header + padding + line + "\n", 1)}
+        if line.startswith("+"):
+            # Only the second field on a line is new. The record is padded to its bound first, so a counter that reads lines
+            # sees no change and a counter that reads declarations sees one more.
+            padded = text.replace(header, header + padding, 1)
+            start = padded.index(header) + len(header)
+            first = re.search(r"^  [A-Za-z_]\w*\? :[^\n]*;$", padded[start:], re.MULTILINE)
+            _need(first is not None, f"control: {record} holds no optional field to append to")
+            at = start + first.end()
+            altered = {path: padded[:at] + line[1:] + padded[at:]}
+        else:
+            altered = {path: text.replace(header, header + padding + line + "\n", 1)}
         try:
             check_bounds(lambda p, altered=altered: altered.get(p) or read_real(p))
         except LimitsExamError as error:

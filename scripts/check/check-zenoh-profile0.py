@@ -2240,7 +2240,7 @@ def server_main(controls_only: bool) -> int:
 
 
 LIMITS_PINNED_CASES = 36
-LIMITS_PINNED_CONTROLS = 109
+LIMITS_PINNED_CONTROLS = 113
 
 
 def limits_main(controls_only: bool) -> int:
