@@ -500,10 +500,11 @@ OPTIONAL_BOUNDS = (
 
 
 def optional_fields(text: str, record: str) -> int:
-    """How many optional fields the record type `record` declares. A field is a line that starts, after any indentation, with a name and `?` and `:`."""
+    """How many optional fields the record type `record` declares. A declaration ends at a semicolon, so a line may hold several. Comments are removed first. A declaration is optional when its name is followed by `?` and `:`."""
     found = re.search(rf"^{record} :: type \{{\n(.*?)\n\}};$", text, re.MULTILINE | re.DOTALL)
     _need(found is not None, f"limits: {record} is not a record type in the schema text")
-    return len(re.findall(r"^[ \t]*[A-Za-z_]\w*[ \t]*\?[ \t]*:", found.group(1), re.MULTILINE))
+    body = re.sub(r"--[^\n]*", "", found.group(1))
+    return sum(1 for declaration in body.split(";") if re.match(r"\s*[A-Za-z_]\w*\s*\?\s*:", declaration))
 
 
 def check_bounds(read) -> int:
@@ -519,7 +520,7 @@ BOUND_MUTATIONS = (
     ("a limits field kept on the system spec", "spec-optional-fields", SPEC, "SystemSpec", "  zenohLimits? : SystemZenohLimits;"),
     ("a limits flag kept on the system spec", "spec-optional-fields", SPEC, "SystemSpec", "  zenohLimitsObject? : Bool;"),
     ("a limits field kept on the manifest", "manifest-optional-fields", MANIFEST, "GenerationManifest", "  zenohLimits? : ZenohLimitsEntry;"),
-    ("an unrelated optional field on the manifest", "manifest-optional-fields", MANIFEST, "GenerationManifest", "    anotherField? : Int;"),
+    ("an unrelated optional field on the manifest", "manifest-optional-fields", MANIFEST, "GenerationManifest", "    anotherField? : Int; sameLine? : Int;"),
     ("a flag beside the limits on the system instance", "spec-instance-optional-fields", SPEC, "SystemInstance", "  zenohLimitsObject? : Bool;"),
     ("a flag beside the limits on the manifest instance", "manifest-instance-optional-fields", MANIFEST, "Instance", "  zenohLimitsObject? : Bool;"),
 )
