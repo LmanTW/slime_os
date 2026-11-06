@@ -168,8 +168,9 @@ layout of `contracts/zenoh-service-grants-table/v1`. The root reads that object 
 reader serves 168-byte rows, at most six for one call, from a row cursor, and only to the instance named `zenoh-service`.
 The root decides no grant. It copies authenticated bytes. The runtime wrapper `zenoh_grants_read` makes the call.
 
-The same read serves a second record at one cursor value, 4294967295. A system spec declares the service's six limits with
-`zenohLimits` and `zenohLimitsObject`, and the builder encodes them as the object `zenoh-limits` in the 48-byte layout of
+The same read serves a second record at one cursor value, 4294967295. A system spec declares the service's six limits as
+`zenohLimits` on the instance named `zenoh-service`, and the spec refuses them on any other instance. The spec derives the
+object `zenoh-limits` from that declaration, so it has no flag. The builder encodes the object in the 48-byte layout of
 `contracts/zenoh-service-limits/v1`. A read at that cursor returns the record and no row, so its count is 48 bytes and not
 a number of rows. `graph_runtime/services.rs` has its own branch for it, because the row branch would slice a count of
 168-byte rows. The caller gate and the record's own checks are the same as for rows, and a record that does not decode is
