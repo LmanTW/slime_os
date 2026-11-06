@@ -2239,8 +2239,8 @@ def server_main(controls_only: bool) -> int:
     return 0
 
 
-LIMITS_PINNED_CASES = 32
-LIMITS_PINNED_CONTROLS = 103
+LIMITS_PINNED_CASES = 36
+LIMITS_PINNED_CONTROLS = 109
 
 
 def limits_main(controls_only: bool) -> int:
@@ -2250,7 +2250,7 @@ def limits_main(controls_only: bool) -> int:
     try:
         honest = exam.honest_cases()
         refusals = exam.all_controls()
-        cases = honest + len(exam.FACTS)
+        cases = honest + len(exam.FACTS) + len(exam.OPTIONAL_BOUNDS)
         if cases != LIMITS_PINNED_CASES:
             fail(f"limits: {cases} cases, the checker pins {LIMITS_PINNED_CASES}")
         if refusals != LIMITS_PINNED_CONTROLS:

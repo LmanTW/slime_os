@@ -486,6 +486,66 @@ FACTS: tuple[facts.Fact, ...] = (
 )
 
 
+# The schema check of a record needs memory in step with the record's optional fields. It used 2.4 GB with 17 optional fields on
+# GenerationManifest, 4.5 GB with 18 and 9.0 GB with 19, and a 9 GB cap killed it with 20. The CI runner has 16 GB. The limits
+# ride on the two instance records so the two top-level records keep the counts they had before the limits. A bound holds a
+# record to its count, so a limits field, an author flag or any other optional field added to one of them fails here.
+OPTIONAL_BOUNDS = (
+    ("manifest-optional-fields", MANIFEST, "GenerationManifest", 19),
+    ("manifest-instance-optional-fields", MANIFEST, "Instance", 5),
+    ("spec-optional-fields", SPEC, "SystemSpec", 13),
+    ("spec-instance-optional-fields", SPEC, "SystemInstance", 14),
+)
+
+
+def optional_fields(text: str, record: str) -> int:
+    """How many optional fields the record type `record` declares. A field is a line of two spaces, a name and `? :`."""
+    found = re.search(rf"^{record} :: type \{{\n(.*?)\n\}};$", text, re.MULTILINE | re.DOTALL)
+    _need(found is not None, f"limits: {record} is not a record type in the schema text")
+    return len(re.findall(r"^  [A-Za-z_]\w*\? :", found.group(1), re.MULTILINE))
+
+
+def check_bounds(read) -> int:
+    for name, path, record, bound in OPTIONAL_BOUNDS:
+        count = optional_fields(read(path), record)
+        _need(count <= bound, f"{name}: {record} declares {count} optional fields, the bound is {bound}. The schema check needs memory in step with them")
+    return len(OPTIONAL_BOUNDS)
+
+
+# Each case adds optional fields to a record of the real schema, as many as it takes to pass that record's bound with the line
+# given as the last one. The bound has to refuse it by name.
+BOUND_MUTATIONS = (
+    ("a limits field kept on the system spec", "spec-optional-fields", SPEC, "SystemSpec", "  zenohLimits? : SystemZenohLimits;"),
+    ("a limits flag kept on the system spec", "spec-optional-fields", SPEC, "SystemSpec", "  zenohLimitsObject? : Bool;"),
+    ("a limits field kept on the manifest", "manifest-optional-fields", MANIFEST, "GenerationManifest", "  zenohLimits? : ZenohLimitsEntry;"),
+    ("an unrelated optional field on the manifest", "manifest-optional-fields", MANIFEST, "GenerationManifest", "  anotherField? : Int;"),
+    ("a flag beside the limits on the system instance", "spec-instance-optional-fields", SPEC, "SystemInstance", "  zenohLimitsObject? : Bool;"),
+    ("a flag beside the limits on the manifest instance", "manifest-instance-optional-fields", MANIFEST, "Instance", "  zenohLimitsObject? : Bool;"),
+)
+
+
+def bound_controls() -> int:
+    def read_real(path: str) -> str:
+        return (ROOT / path).read_text(encoding="utf-8")
+    check_bounds(read_real)
+    refused = 0
+    for label, name, path, record, line in BOUND_MUTATIONS:
+        header = f"{record} :: type {{\n"
+        text = read_real(path)
+        _need(text.count(header) == 1, f"control: {record} found {text.count(header)} times, expected 1")
+        bound = next(limit for bound_name, _p, _r, limit in OPTIONAL_BOUNDS if bound_name == name)
+        padding = "".join(f"  padding{index}? : Int;\n" for index in range(max(0, bound - optional_fields(text, record))))
+        altered = {path: text.replace(header, header + padding + line + "\n", 1)}
+        try:
+            check_bounds(lambda p, altered=altered: altered.get(p) or read_real(p))
+        except LimitsExamError as error:
+            _need(str(error).startswith(f"{name}:"), f"control: {label} was refused at the wrong bound: {error}")
+            refused += 1
+            continue
+        raise LimitsExamError(f"control: the optional-field bounds accepted {label}")
+    return refused
+
+
 STDLIB_ONLY = {"__future__", "re", "struct", "pathlib"}
 
 
@@ -553,7 +613,7 @@ def check_facts() -> int:
             raise LimitsExamError(f"{path} cannot be read: {error}") from error
     try:
         check_encoder_imports()
-        return facts.check(FACTS, read)
+        return facts.check(FACTS, read) + check_bounds(read)
     except facts.FactsError as error:
         raise LimitsExamError(str(error)) from error
 
@@ -566,4 +626,4 @@ def fact_controls() -> int:
 
 
 def all_controls() -> int:
-    return encoder_all_controls() + generated_controls() + import_controls() + fact_controls()
+    return encoder_all_controls() + generated_controls() + import_controls() + fact_controls() + bound_controls()
