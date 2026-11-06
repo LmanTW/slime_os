@@ -186,6 +186,13 @@
       };
     };
     {
+      name = "generation-resources";
+      artifact = {
+        path = "scripts/build/generation_resources.py";
+        kind = "file";
+      };
+    };
+    {
       name = "image-builder";
       artifact = {
         path = "scripts/build/build-sel4.py";
@@ -238,6 +245,20 @@
       name = "zenoh-grants-table-encoder";
       artifact = {
         path = "scripts/lib/zenoh_grants_table.py";
+        kind = "file";
+      };
+    };
+    {
+      name = "zenoh-limits-contract";
+      artifact = {
+        path = "contracts/zenoh-service-limits/v1";
+        kind = "tree";
+      };
+    };
+    {
+      name = "zenoh-limits-encoder";
+      artifact = {
+        path = "scripts/lib/zenoh_limits.py";
         kind = "file";
       };
     };

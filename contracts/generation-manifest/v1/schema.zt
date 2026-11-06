@@ -107,6 +107,11 @@ Instance :: type {
   -- `instance-lifetime` object naming the resident instances exactly when one
   -- is declared, and the root treats a resident instance's exit as a failure.
   lifetime? : Text;
+  -- The limits the Zenoh service reads at start, `contracts/zenoh-service-limits/v1`. Only the instance named
+  -- `zenoh-service` carries them. The system spec refuses a composition that runs that instance without them, and one
+  -- that declares them without it. They sit here because each optional field of `GenerationManifest` multiplies the memory
+  -- the schema check needs.
+  zenohLimits? : ZenohLimitsEntry;
   bindings : List InstanceBinding;
   -- Scheduling priority for this instance's initial thread.
   --
@@ -292,6 +297,16 @@ EntropyAuthorityEntry :: type {
   source : Text;
   byteBudget : Int;
   seed? : Text;
+};
+
+-- The Zenoh service's six limits. Encoded as `contracts/zenoh-service-limits/v1`.
+ZenohLimitsEntry :: type {
+  holders : Int;
+  ringSlots : Int;
+  sampleBytes : Int;
+  keyBytes : Int;
+  localSubscriptions : Int;
+  stackBytes : Int;
 };
 
 -- Zenoh service grant row: one holder, one exact Zenoh key, and the rights to
@@ -764,6 +779,7 @@ FromData @NetworkInterfaceEntry :: derive
 FromData @NetworkApplicationEntry :: derive
 FromData @EntropyAuthorityEntry :: derive
 FromData @ZenohGrantEntry :: derive
+FromData @ZenohLimitsEntry :: derive
 FromData @BlockRingAuthorityEntry :: derive
 FromData @FabricProfileInterposition :: derive
 FromData @FabricProfile :: derive
@@ -802,6 +818,7 @@ decodeManifest :: Data -> Validation DecodeIssue GenerationManifest
   NetworkApplicationEntry =;
   EntropyAuthorityEntry =;
   ZenohGrantEntry =;
+  ZenohLimitsEntry =;
   BlockRingAuthorityEntry =;
   ClockAuthorityEntry =;
   SchedulingClassBand =;

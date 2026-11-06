@@ -853,6 +853,9 @@ def resolve_closure(
         "workspace-manifest",
         "zenoh-grants-table-contract",
         "zenoh-grants-table-encoder",
+        "zenoh-limits-contract",
+        "zenoh-limits-encoder",
+        "generation-resources",
     }
     if set(release_names) != required_release_inputs:
         _fail(

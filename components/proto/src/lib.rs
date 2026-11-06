@@ -50,6 +50,8 @@ pub mod zenoh_service_client_wire;
 pub mod zenoh_service_grants;
 pub mod zenoh_service_grants_table;
 pub mod zenoh_service_grants_table_wire;
+pub mod zenoh_service_limits;
+pub mod zenoh_service_limits_wire;
 
 pub fn valid_fs_request(request: &fs::WireFsRequest) -> bool {
     let name_len = request.name_len as usize;

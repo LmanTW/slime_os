@@ -128,6 +128,7 @@ from generation_resources import (
     build_entropy_authority,
     build_graph_arrival_ceiling,
     build_zenoh_grants_table,
+    build_zenoh_limits,
     build_instance_lifetime,
     instance_lifetime_identity,  # noqa: F401 -- read by check-system-spec.py through this module
     build_io_resource_budget,
@@ -3129,6 +3130,10 @@ def build_sel4_generation(
         payloads["zenoh-grants"] = build_zenoh_grants_table(manifest)
     elif declared_zenoh_grants:
         fail("zenohGrants declared without a zenoh-grants resource object")
+    if "zenoh-limits" in object_ids:
+        payloads["zenoh-limits"] = build_zenoh_limits(manifest)
+    elif any(entry.get("zenohLimits") is not None for entry in manifest["instances"]):
+        fail("zenohLimits declared without a zenoh-limits resource object")
     declared_block_rings = manifest.get("blockRingAuthority") or []
     if "block-ring-authority" in object_ids:
         payloads["block-ring-authority"] = build_block_ring_authority(declared_block_rings)

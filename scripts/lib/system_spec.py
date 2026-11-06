@@ -1175,7 +1175,7 @@ def derive_manifest(system: CompiledSystem) -> dict:
             "name": name,
             "owner": declared.get("owner", component["owner"]),
         }
-        for field in ("priority", "extraThreads", "workerPriority"):
+        for field in ("priority", "extraThreads", "workerPriority", "zenohLimits"):
             if field in declared:
                 instance[field] = declared[field]
         instances.append(instance)
@@ -1273,6 +1273,8 @@ def derive_manifest(system: CompiledSystem) -> dict:
     # The remaining eight sections follow `sharedBufferBudgetObject`'s pattern
     # exactly: object presence is a declared fact, independent of whether the
     # accompanying list happens to be empty.
+    # The limits object is present exactly when an instance declares limits, so the spec carries no flag for it.
+    flags = {**spec, "zenohLimitsObject": any(entry.get("zenohLimits") is not None for entry in resolved_instances(spec))}
     for field, object_id in (
         ("clockAuthorityObject", "clock-authority"),
         ("ioResourceBudgetObject", "io-resource-budget"),
@@ -1281,11 +1283,12 @@ def derive_manifest(system: CompiledSystem) -> dict:
         ("networkApplicationsObject", "network-application"),
         ("entropyAuthorityObject", "entropy-authority"),
         ("zenohGrantsObject", "zenoh-grants"),
+        ("zenohLimitsObject", "zenoh-limits"),
         ("blockRingAuthorityObject", "block-ring-authority"),
         ("waitSetObject", "wait-set"),
         ("recordingObject", "recording-policy"),
     ):
-        if spec[field]:
+        if flags[field]:
             objects.append({"id": object_id, "kind": "resource", "size": 4096})
     # `schedulingClass`/`lifecyclePolicy` are optional records rather than
     # declared/derived pairs: presence of the record is presence of the object,
@@ -1393,6 +1396,19 @@ def derive_manifest(system: CompiledSystem) -> dict:
             _fail(f"zenohGrants: {error}")
     elif spec["zenohGrants"]:
         _fail("zenohGrants: populated grants require their resource object")
+    limited = [entry["name"] for entry in resolved_instances(spec) if entry.get("zenohLimits") is not None]
+    if any(name != "zenoh-service" for name in limited):
+        _fail("zenohLimits: only the zenoh-service instance reads the limits record")
+    if limited:
+        # The encoder judges each limit against its bound; running it here refuses a bad record at spec admission
+        # rather than only when an image is built.
+        try:
+            _builder.build_zenoh_limits(manifest)
+        except SystemExit as error:
+            _fail(f"zenohLimits: {error}")
+    # The service reads its limits at start and has no other path, so a composition that runs it declares them.
+    if "zenoh-service" in instance_names(spec) and not limited:
+        _fail("zenohLimits: an instance named zenoh-service reads the limits record, so the composition must declare it")
     if spec["blockRingAuthorityObject"]:
         manifest["blockRingAuthority"] = spec["blockRingAuthority"]
     if spec["waitSetObject"]:

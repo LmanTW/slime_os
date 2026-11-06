@@ -283,6 +283,17 @@ SystemZenohGrant :: type {
   subscribe : Bool;
 };
 
+-- The Zenoh service's six limits, as `ZenohLimitsEntry` and `contracts/zenoh-service-limits/v1`. Only the instance named
+-- `zenoh-service` may declare them, and a composition that runs it must. The resource object follows from the declaration.
+SystemZenohLimits :: type {
+  holders : Int;
+  ringSlots : Int;
+  sampleBytes : Int;
+  keyBytes : Int;
+  localSubscriptions : Int;
+  stackBytes : Int;
+};
+
 -- Application bindings and exact local listener policy, distinct from remote destinations.
 SystemNetworkApplication :: type {
   holder : Text;
@@ -522,6 +533,7 @@ SystemInstance :: type {
   autostart? : Bool;
   health? : Text;
   lifetime? : Text;
+  zenohLimits? : SystemZenohLimits;
   dependencies? : List Text;
   bufferBytePages? : Int;
   bufferCount? : Int;
@@ -680,6 +692,7 @@ FromData @SystemNetworkInterface :: derive
 FromData @SystemNetworkApplication :: derive
 FromData @SystemEntropyAuthority :: derive
 FromData @SystemZenohGrant :: derive
+FromData @SystemZenohLimits :: derive
 FromData @SystemBlockRingAuthority :: derive
 FromData @SystemWaitSetSource :: derive
 FromData @SystemSchedulingClassBand :: derive
@@ -787,6 +800,7 @@ decodeSystemSpec :: Data -> Validation DecodeIssue SystemSpec
   SystemNetworkApplication =;
   SystemEntropyAuthority =;
   SystemZenohGrant =;
+  SystemZenohLimits =;
   SystemBlockRingAuthority =;
   SystemWaitSetSource =;
   SystemSchedulingClassBand =;

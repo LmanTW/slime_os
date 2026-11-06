@@ -213,6 +213,56 @@ def build_zenoh_grants_table(manifest: dict) -> bytes:
         fail(str(error))
 
 
+def build_zenoh_limits(manifest: dict) -> bytes:
+    """Encode the Zenoh service limits record (zenoh-service-limits/v1) from the `zenohLimits` of the service's instance.
+
+    The encoder checks each limit against its own bound. This function adds what only the manifest knows: the limits are
+    declared, the reader instance exists, the declared stack is at most the stack the image gives the service, and the rows
+    fit the holders, subscriptions and key length the record declares. The stack is not checked against the rows here. The
+    service checks the declared stack against the storage it was built with, and zenoh-service-grants/v1 is not a
+    generation input.
+    """
+    import zenoh_limits
+
+    instance = next((entry for entry in manifest["instances"] if entry["name"] == ZENOH_GRANTS_READER_INSTANCE), None)
+    if instance is None:
+        fail(f"zenoh limits: no {ZENOH_GRANTS_READER_INSTANCE} instance reads the record")
+    declared = instance.get("zenohLimits")
+    if not isinstance(declared, dict):
+        fail("zenoh limits: the record has no limits")
+    names = {"holders": "holders", "ring_slots": "ringSlots", "sample_bytes": "sampleBytes", "key_bytes": "keyBytes",
+             "local_subscriptions": "localSubscriptions", "stack_bytes": "stackBytes"}
+    if set(declared) != set(names.values()):
+        fail(f"zenoh limits: the record holds the fields {sorted(declared)}, the contract names {sorted(names.values())}")
+    limits = {field: declared[key] for field, key in names.items()}
+    try:
+        encoded = zenoh_limits.encode(limits)
+    except zenoh_limits.LimitsError as error:
+        fail(str(error))
+    # The rows must fit what the record declares. These are the constraints of zenoh-service-grants/v1 that do not
+    # involve the stack, written as comparisons so that contract is not a generation input.
+    rows = manifest.get("zenohGrants") or []
+    holders = {row["holder"] for row in rows}
+    subscribe_keys = {row["key"] for row in rows if row["subscribe"]}
+    # The declared stack must be one the image gives the service. The manifest leaves an executable's stack out when it is
+    # the default. A record that declares less than the executable has is honored. A manifest with no record of the
+    # executable has no stack to compare, and the other checks of the manifest refuse it.
+    executable = instance.get("executable", ZENOH_GRANTS_READER_INSTANCE)
+    for entry in manifest.get("executables") or []:
+        if entry["name"] == executable:
+            stack = entry.get("stackBytes", wire_contracts.COMPONENT_DEFAULT_STACK_BYTES)
+            if limits["stack_bytes"] > stack:
+                fail(f"zenoh limits: the record declares a stack of {limits['stack_bytes']} bytes, the {executable} executable has {stack}")
+    if len(holders) > limits["holders"]:
+        fail(f"zenoh limits: the rows name {len(holders)} holders, the record declares {limits['holders']}")
+    if len(subscribe_keys) > limits["local_subscriptions"]:
+        fail(f"zenoh limits: the rows subscribe to {len(subscribe_keys)} keys, the record declares {limits['local_subscriptions']} subscriptions")
+    for row in rows:
+        if len(row["key"].encode("ascii")) > limits["key_bytes"]:
+            fail(f"zenoh limits: the key of {row['holder']!r} is longer than the {limits['key_bytes']} bytes the record declares")
+    return encoded
+
+
 def holder_identity(name: str) -> bytes:
     """Stable per-holder identity, matching `boot_contracts::shared_buffer_budget`."""
     encoded = name.encode("utf-8")

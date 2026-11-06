@@ -307,6 +307,14 @@
       lifetime = "bounded";
       name = "zenoh-service";
       owner = "root";
+      zenohLimits = {
+        holders = 2;
+        keyBytes = 129;
+        localSubscriptions = 3;
+        ringSlots = 4;
+        sampleBytes = 12;
+        stackBytes = 32768;
+      };
     };
   ];
   mintedBindings = [];
@@ -379,6 +387,11 @@
     };
     {
       id = "zenoh-grants";
+      kind = "resource";
+      size = 4096;
+    };
+    {
+      id = "zenoh-limits";
       kind = "resource";
       size = 4096;
     };
