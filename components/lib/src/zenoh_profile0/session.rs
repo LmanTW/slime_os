@@ -61,6 +61,9 @@ pub struct Params {
     pub aliases: usize,
     /// The samples the owner may hold unread; the link queues two notices for each.
     pub samples: usize,
+    /// Whether this is the configuration of a [`graph::GraphSessionOf`]. A plain session refuses it: the
+    /// declarations and extensions of an rmw_zenoh peer are taken by the graph session and nowhere else.
+    pub graph: bool,
 }
 
 impl Params {
@@ -76,6 +79,7 @@ impl Params {
         events: MAX_EVENTS,
         aliases: 1,
         samples: MAX_EVENTS,
+        graph: false,
     };
 
     /// The parameters a limits declaration describes.
@@ -96,6 +100,7 @@ impl Params {
             events: limits.events_per_batch(),
             aliases: limits.max_keys,
             samples: limits.outstanding_samples,
+            graph: false,
         }
     }
 }
@@ -439,7 +444,8 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize> SessionOf<K
         // and the peer's, the key length and the events a batch yields. Smaller refuses what the limits
         // promise and larger leaves a bound that only the array enforces. A side that may declare none
         // cannot be a subscriber, so `local` is at least 1.
-        if params.bounds.key != B
+        if params.graph
+            || params.bounds.key != B
             || params.events != E
             || params.aliases != K
             || params.local < 1
@@ -489,6 +495,26 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize> SessionOf<K
             local_n: 0,
             remote_n: 0,
         })
+    }
+
+    /// A graph session's check before it applies a FRAME: the session is open and `sn` is the next
+    /// sequence number. The frame itself is applied by the graph session, which owns its tables.
+    pub(super) fn graph_frame_expected(&self, sn: u32) -> Result<(), SessionError> {
+        if self.state != State::Open {
+            return Err(SessionError::UnexpectedMessage);
+        }
+        if sn != self.rx_sn {
+            return Err(SessionError::SequenceMismatch);
+        }
+        Ok(())
+    }
+
+    /// A graph session's commit after it applied a FRAME whole: the sequence number advances and the
+    /// frame renews the lease, exactly as a plain session's accepted FRAME does.
+    pub(super) fn graph_frame_accepted(&mut self, now_ms: u64) {
+        self.rx_sn = self.rx_sn.wrapping_add(1);
+        self.last_rx_ms = now_ms;
+        self.now_ms = now_ms;
     }
 
     pub const fn role(&self) -> Role {

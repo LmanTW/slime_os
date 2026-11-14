@@ -5,6 +5,7 @@ item :: s.Item = (h.task "01a1cb73-ab5b-7711-8c1a-2a033f84b417" "zenoh-rmw-sessi
   "Zenoh Profile 0 holds a session with an rmw_zenoh peer: aliases, queryables and liveliness tokens"
   "A ROS 2 Kilted node that uses rmw_zenoh_cpp 0.6.10 (zenoh 1.10.1) opens a Zenoh session and declares its graph before it publishes: up to 22 key-expression aliases, 9 queryables, one subscriber on its own admin space, and 12 liveliness tokens under `@ros2_lv`. Profile 0 refuses each of those declarations, and refuses the INIT extensions the peer sends, so no rmw_zenoh peer can hold a session with a Slime node. Three sessions of that peer were captured once against a Profile 0 listener with no router, and they show that a direct link without a router or gossip is enough for the peer's `ros2 topic list` to see the node.")
   with {
+    intent = #active;
     owns = {
       "components/lib/src/zenoh_profile0*";
       "components/lib/src/zenoh_rmw*";

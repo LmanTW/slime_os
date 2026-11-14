@@ -21,6 +21,7 @@ mod tests;
 
 pub mod encode;
 pub mod fragment;
+pub mod graph;
 pub mod limits;
 pub mod reassembly;
 pub mod session;
@@ -389,7 +390,7 @@ fn cookie<'a>(reader: &mut Reader<'a>) -> Result<&'a [u8], Refusal> {
     reader.take(length)
 }
 
-fn init<'a>(mut reader: Reader<'a>, header: u8) -> Result<Message<'a>, Refusal> {
+fn init<'a>(mut reader: Reader<'a>, header: u8, graph: bool) -> Result<Message<'a>, Refusal> {
     // An extension is refused before anything else is read, as it always was, except the QoS unit
     // extension a stock peer puts on an INIT_SYN that states its resolution and batch size.
     if header & FLAG_Z != 0 && (header & FLAG_BIT5 != 0 || header & FLAG_BIT6 == 0) {
@@ -438,7 +439,11 @@ fn init<'a>(mut reader: Reader<'a>, header: u8) -> Result<Message<'a>, Refusal> 
         })
     } else {
         if header & FLAG_Z != 0 {
-            init_qos_extension(&mut reader)?;
+            if graph {
+                graph::init_extensions(&mut reader)?;
+            } else {
+                init_qos_extension(&mut reader)?;
+            }
         }
         reader.finish()?;
         Ok(Message::InitSyn { zid, batch_size })
@@ -786,6 +791,16 @@ pub fn decode_batch(batch: &[u8]) -> Result<Message<'_>, Refusal> {
 
 /// Decodes one batch body under `bounds`.
 pub fn decode_batch_with<'a>(batch: &'a [u8], bounds: &Bounds) -> Result<Message<'a>, Refusal> {
+    decode_batch_in(batch, bounds, false)
+}
+
+/// Decodes one batch body. `graph` is the one difference a graph session makes to a handshake message:
+/// the INIT extensions an rmw_zenoh peer sends. Its FRAMEs are read by [`graph::decode_graph_batch`].
+fn decode_batch_in<'a>(
+    batch: &'a [u8],
+    bounds: &Bounds,
+    graph: bool,
+) -> Result<Message<'a>, Refusal> {
     if batch.is_empty() {
         return Err(Refusal::EmptyBatch);
     }
@@ -795,7 +810,7 @@ pub fn decode_batch_with<'a>(batch: &'a [u8], bounds: &Bounds) -> Result<Message
     let mut reader = Reader::new(batch);
     let header = reader.u8()?;
     match header & ID_MASK {
-        ID_INIT => init(reader, header),
+        ID_INIT => init(reader, header, graph),
         ID_OPEN => open(reader, header),
         ID_CLOSE => close(reader, header),
         ID_KEEP_ALIVE => keep_alive(reader, header),

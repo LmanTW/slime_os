@@ -39,6 +39,9 @@ pub mod zenoh_link;
 mod zenoh_links;
 pub mod zenoh_node;
 pub mod zenoh_profile0;
+#[cfg(test)]
+mod zenoh_rmw;
+pub mod zenoh_rmw_graph;
 pub mod zenoh_service;
 #[cfg(feature = "component-runtime")]
 pub mod zenoh_service_client;

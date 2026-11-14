@@ -5,6 +5,7 @@ item :: s.Item = (h.task "01a1cc3c-6d0f-7a22-9b6e-4d41c0a7d9a2" "zenoh-rmw-graph
   "Zenoh Profile 0 builds a ROS 2 graph from the liveliness tokens an rmw_zenoh peer declares"
   "The session item lets a Profile 0 listener take the declarations an rmw_zenoh peer sends, among them 26 liveliness tokens under `@ros2_lv` in three captured sessions. Nothing reads those tokens. A ROS 2 node cannot learn which nodes, topics and services its peer holds, and the QoS substring and the `%` name mangling that every token carries are undecoded. The session's declarations are recorded and not interpreted.")
   with {
+    intent = #active;
     depends = { "01a1cb73-ab5b-7711-8c1a-2a033f84b417"; };
     owns = {
       "components/lib/src/zenoh_rmw_graph*";
