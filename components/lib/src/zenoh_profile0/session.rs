@@ -510,7 +510,8 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize> SessionOf<K
     }
 
     /// A graph session's commit after it applied a FRAME whole: the sequence number advances and the
-    /// frame renews the lease, exactly as a plain session's accepted FRAME does.
+    /// frame renews the lease. It stamps the clock as `on_batch_with` does for a plain session's accepted
+    /// FRAME, without a `max`: only `tick` keeps the latest time a call gave the session.
     pub(super) fn graph_frame_accepted(&mut self, now_ms: u64) {
         self.rx_sn = self.rx_sn.wrapping_add(1);
         self.last_rx_ms = now_ms;

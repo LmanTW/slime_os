@@ -179,3 +179,22 @@ fn a_lookup_after_many_removals_still_ends() {
     assert_eq!(table.find(999), None);
     assert!(table.is_empty());
 }
+
+#[test]
+fn a_pending_slot_is_visible_only_to_pending() {
+    let mut table = SlotTable::<4, 20>::new();
+    let at = table.insert(7, b"demo/key").expect("insert");
+    assert_eq!(table.pending(at), None, "a used slot is not pending");
+    table.defer_remove(at);
+    assert_eq!(table.find(7), None, "a pending slot is out of lookups");
+    assert_eq!(table.get(at), None);
+    assert_eq!(table.pending(at), Some((7, &b"demo/key"[..])));
+    assert_eq!(table.pending(at + 1), None, "an empty slot is not pending");
+    assert_eq!(table.pending(99), None, "an index past the table");
+    table.restore(at);
+    assert_eq!(table.pending(at), None, "a restored slot is used again");
+    assert_eq!(table.find(7), Some(at));
+    table.defer_remove(at);
+    table.settle(at);
+    assert_eq!(table.pending(at), None, "a settled slot holds nothing");
+}
