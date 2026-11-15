@@ -5,6 +5,7 @@ item :: s.Item = (h.task "01a1d4ef-2383-70fa-88a9-81383f9f491b" "zenoh-rmw-graph
   "Repair the reader of the rmw graph exam so it sees the first line a test prints"
   "The checker reads the graph exam's Rust output with `exam_lines_graph`, which keeps a line only when it starts with `[zenoh-exam] graph `. With `--nocapture`, libtest starts a test's output on the line that names the test, so the first graph line begins with `test zenoh_rmw_graph::the_rmw_graph_exam ... ` and the reader drops it. The judge then sees 105 of 106 lines and refuses an honest run. The other slices read Rust output with `exam_lines`, which searches each line for the marker and sees all of it. No implementation can pass `zenoh_rmw_graph_check` while the reader drops that line.")
   with {
+    intent = #active;
     depends = { "01a1cc3c-6d0f-7a22-9b6e-4d41c0a7d9a2"; };
     owns = {
       "scripts/check/check-zenoh-profile0.py";

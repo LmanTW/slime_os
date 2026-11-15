@@ -5,6 +5,7 @@ item :: s.Item = (h.task "01a1d3d0-7566-743d-80dd-ff6e13f41056" "zenoh-rmw-exam-
   "Repair the rmw exam's default-session push so the Profile 0 decoder passes it to the session"
   "The exam of `zenoh-rmw-session` pins `refuse-rmw-default-push-undeclared` as refused with class `undeclared-key` by the default session. Its batch is the talker's push on `chatter`, whose Put header sets the timestamp flag. The decoder refuses a Put with a timestamp as `unsupported-message` before the session reads the key, and the pinned vector `put_timestamp_flag` keeps it that way, so no default session can return `undeclared-key` for that batch. Every push the three captured sessions hold carries a timestamp, so none of them reaches the subscriber check in a default session.")
   with {
+    intent = #active;
     depends = { "01a1cb73-ab5b-7711-8c1a-2a033f84b417"; };
     owns = {
       "scripts/lib/zenoh_rmw_exam.py";
