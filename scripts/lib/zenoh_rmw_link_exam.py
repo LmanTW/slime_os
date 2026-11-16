@@ -146,7 +146,8 @@ def session_batches(group: str) -> list[bytes]:
 
 def unknown_entity_frame() -> bytes:
     """One frame of three tokens: a node `a`, a token of the unknown kind `XX`, and a node `c`, written by the
-    host reference with the sequence number the talker's first frame carries. The link must count the middle
+    host reference with the sequence number the talker's first frame carries. Each token names its alias in the
+    sender's mapping, as all 29 captured tokens do. The link must count the middle
     one and still take the third, which is how the exam shows the link stayed open and useful."""
     zid = "77bf039722c084d5ddae7b5ba3647a11"
     messages: list[bytes] = []
@@ -154,7 +155,7 @@ def unknown_entity_frame() -> bytes:
         alias, ident = 90 + number, 91 + 2 * number
         key = f"@ros2_lv/0/{zid}/0/{60 + number}/{kind}/%/%/{node}"
         messages.append(wire.encode(wire.Message("keyexpr", alias, 0, key, qos=8)))
-        messages.append(wire.encode(wire.Message("token", ident, alias, None, qos=8)))
+        messages.append(wire.encode(wire.Message("token", ident, alias, None, sender=True, qos=8)))
     sn = wire.frame(session_exam.captured("talker-03-frame"))[0]
     return bytes([wire.ID_FRAME | wire.FLAG_N]) + wire.leb128(sn) + b"".join(messages)
 
