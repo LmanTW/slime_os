@@ -15,7 +15,8 @@ Owners:
 - decoder and `StreamFramerOf`: `components/lib/src/zenoh_profile0.rs`; encoder:
   `zenoh_profile0/encode.rs`; session machine: `zenoh_profile0/session.rs`;
 - graph session: `zenoh_profile0/graph.rs`; the graph its liveliness tokens build:
-  `components/lib/src/zenoh_rmw_graph.rs`; their exam fixtures:
+  `components/lib/src/zenoh_rmw_graph.rs`; the link that carries them:
+  `components/lib/src/zenoh_rmw_link.rs`; their exam fixtures:
   `contracts/zenoh-rmw-session/v1/` and `contracts/zenoh-rmw-graph/v1/`;
 - link configurations: `contracts/zenoh-link-limits/v1/` judges a named configuration, and
   `zenoh_profile0/limits.rs` states the same arithmetic in Rust; FRAGMENT:
@@ -176,6 +177,32 @@ The rules are those of `rmw_zenoh_cpp` 0.6.10, with one difference. Upstream rea
 and the graph refuses each. A token may not have more or fewer parts than its kind. A number must be
 canonical decimal. A Zenoh ID must be 1 to 32 lowercase hexadecimal digits. A graph serves one domain and
 refuses another as `wrong-domain`. A key outside `@ros2_lv` is ignored and counted.
+
+### Graph link
+
+`zenoh_rmw_link.rs` carries a graph session over a `ByteLink`. Its type is
+`GraphLinkOf<L, FRAMED, A, D, B, N>`. The parameters are the batch with its stream length, the aliases and
+declarations of its session, the longest key, and the entities of its graph.
+
+The plain link matches `Event` exhaustively, so the graph link is a separate type. It reuses the plain
+link's `ByteLink`, `PumpReport`, stream framer, encoder and retry limit.
+
+A pump flushes the single send slot and reads whatever chunks the stream gives. It decodes each complete
+batch and feeds every token the batch carries into the graph. Then it checks the lease.
+
+The link writes the handshake, a `KEEP_ALIVE` a quarter of its own lease after it last sent, and a `CLOSE`.
+It declares nothing and answers nothing.
+
+| Event | What the link does |
+| --- | --- |
+| A token the graph refuses, or has no room for | Counts it in `refused_tokens` and stays open. |
+| A bad length prefix, an unreadable batch or a session refusal | Ends, queues a `CLOSE` of reason 0 and empties the graph. |
+| The end of the stream, a stream error, or a send that stalls more than `MAX_RETRIES` times in a row | Ends and empties the graph. The `CLOSE` is queued as above, and a stream that takes no byte never writes it. |
+| The peer's `CLOSE`, a local `close`, or the peer's lease running out | Ends, with that reason or `CLOSE_EXPIRED`, and empties the graph. `close_reason` says which. |
+
+A link that ends has an empty graph: a graph of a session that ended describes nothing. A link whose single
+send slot is occupied when it ends writes no `CLOSE`, and the peer finds out by its own lease. The plain
+link has the same limit, and no test here holds that.
 
 ## Service core
 
@@ -349,10 +376,11 @@ recipe is explicit and in no aggregate. See the
 - The graph session and graph are observed by replaying three captured sessions of one peer, `rmw_zenoh_cpp`
   0.6.10 on zenoh 1.10.1, on one host. No live rmw_zenoh peer runs in CI. The captured peer's graph was
   visible over one direct link with no router and no gossip, in one run.
-- The link, `zenoh_link.rs`, cannot carry a graph session, because it matches `Event` exhaustively. The
-  composition therefore does not use it, and no QEMU gate runs it.
-- The graph holds each entity's QoS and does not match a publisher to a subscription. The session answers
-  no query and declares no token of its own, so a ROS 2 node cannot yet discover a Slime node.
+- The plain link, `zenoh_link.rs`, cannot carry a graph session, because it matches `Event` exhaustively.
+  The graph link does. No component, composition or QEMU gate runs it, so it is judged on the host over a
+  scripted byte stream.
+- The graph holds each entity's QoS and does not match a publisher to a subscription. The session and
+  the link answer no query and declare no token. A ROS 2 node therefore cannot yet discover a Slime node.
 - No router, scouting, service or action interoperability, or transport security, and no Raspberry Pi 5
   claim. The ROSIDL importer and RIHS01 generator are not here: the demo contract's checker derives
   those values.
@@ -384,6 +412,11 @@ recipe is explicit and in no aggregate. See the
   transcript is built from `scripts/lib/zenoh_rmw_graph.py`. It covers 12 QoS substrings, 8 synthetic
   tokens, 25 refused keys and a graph filled to its capacity. It records 106 cases and 196 negative
   controls;
+- `just zenoh_rmw_link_check` — the same three sessions written to a graph link three ways: whole batches,
+  one byte at a time and all at once. The bytes the link writes are judged to the byte. They are an
+  `INIT_ACK` of 512 bytes, an `OPEN_ACK`, a `KEEP_ALIVE` at 7500 ms, and a `CLOSE` of reason 5 at
+  60001 ms. A refused token is counted and the link stays open. A stream fault ends it, and every ending
+  leaves 0 entities. It records 133 cases and 236 negative controls;
 - `just zenoh_xcheck_check` — the codec and session against the real eclipse-zenoh 1.0.0
   crates: the 17 corpus batches as upstream's encoder produces them, a 6000-case sweep
   (5993 compared, 7 refused as a non-canonical Zenoh ID, none differing), our decoder
