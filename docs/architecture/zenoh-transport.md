@@ -14,6 +14,9 @@ Owners:
   to eclipse-zenoh wire version `0x09` and are not declared here;
 - decoder and `StreamFramerOf`: `components/lib/src/zenoh_profile0.rs`; encoder:
   `zenoh_profile0/encode.rs`; session machine: `zenoh_profile0/session.rs`;
+- graph session: `zenoh_profile0/graph.rs`; the graph its liveliness tokens build:
+  `components/lib/src/zenoh_rmw_graph.rs`; their exam fixtures:
+  `contracts/zenoh-rmw-session/v1/` and `contracts/zenoh-rmw-graph/v1/`;
 - link configurations: `contracts/zenoh-link-limits/v1/` judges a named configuration, and
   `zenoh_profile0/limits.rs` states the same arithmetic in Rust; FRAGMENT:
   `zenoh_profile0/fragment.rs`; reassembly into storage the component lends:
@@ -137,6 +140,40 @@ the 2 s lease. A link whose send slot is occupied runs only the expiry half
 A refused call leaves the session unchanged. The only transitions into
 `Closed` are a received `CLOSE`, a local `close()` and lease expiry; a caller
 that wants the link gone after a refusal says so.
+
+## rmw_zenoh graph
+
+A ROS 2 node that uses `rmw_zenoh_cpp` declares its graph before it publishes. The graph session
+(`zenoh_profile0/graph.rs`) takes those declarations. It is a separate type, `GraphSessionOf<A, D, B>`,
+and `Params::GRAPH` configures it. `Params::graph` is `false` in every other constructor, and
+`SessionOf::with_params` refuses a configuration that sets it. The plain decoder, `Network`, `Event` and
+`SessionError` gain no variant, so the stock-peer, undeclare and subscribers exams keep every pinned
+refusal.
+
+A graph session takes these, and the plain session refuses each of them:
+
+| The peer sends | The graph session |
+| --- | --- |
+| Key aliases | Holds up to `A` aliases of up to `B` bytes. A repeated id or a scope on an alias is `invalid-keyexpr`. `UndeclareKeyExpr` is `unsupported-message`. |
+| `DeclareSubscriber`, `DeclareQueryable` and `DeclareToken`, and the undeclaration of a queryable or a token | Records each declaration in a table of `D` slots. An undeclaration of one it does not hold is `unknown-declaration`. `UndeclareSubscriber` is `unsupported-message`. |
+| The INIT extensions: a unit extension with id 1, then optionally id 7 with a value of at most 1 | Accepts that chain only. Any other extension, or a mandatory one, is `unsupported-extension`. |
+| A `Put` with a timestamp, and the source-info and attachment extensions | Parses it and drops it. A push to a key nobody subscribed to is counted. |
+
+A subscriber or a queryable may name a wildcard key, as the peer's `@/<zid>/peer/config/**` does. A token
+key or the key of a push may not, and is `wildcard-keyexpr`. The session announces a 512-byte batch in its `INIT_ACK` and bounds keys at 253
+bytes, the longest alias an rmw_zenoh peer declared. It sends nothing after the handshake, answers no
+query and declares no token. A `FRAME` applies whole or not at all, as in the plain session.
+
+`zenoh_rmw_graph.rs` reads each `@ros2_lv` token into an `Entity` and holds the live ones in
+`Graph<N>`. A token is `@ros2_lv/<domain>/<zid>/<nid>/<id>/<kind>/<enclave>/<namespace>/<node>`, and a
+node, publisher, subscription, service server or service client token adds
+`/<topic>/<type>/<hash>/<qos>`. A `%` in a name field reads as `/`. An empty field of the QoS
+substring is rmw_zenoh's default. The graph refuses the `N + 1`th entity as `graph-full` and never evicts.
+
+The rules are those of `rmw_zenoh_cpp` 0.6.10, with one difference. Upstream reads three things loosely,
+and the graph refuses each. A token may not have more or fewer parts than its kind. A number must be
+canonical decimal. A Zenoh ID must be 1 to 32 lowercase hexadecimal digits. A graph serves one domain and
+refuses another as `wrong-domain`. A key outside `@ros2_lv` is ignored and counted.
 
 ## Service core
 
@@ -307,9 +344,16 @@ recipe is explicit and in no aggregate. See the
 - A Zenoh ID ending in `0x00`, or all zero, is refused: upstream holds it as a
   little-endian integer, drops trailing zero bytes and refuses zero, so the bytes
   would not round-trip.
-- No `rmw_zenoh` interoperability, liveliness, queryables, router, scouting or
-  transport security, and no Raspberry Pi 5 claim. The ROSIDL importer and RIHS01
-  generator are not here: the demo contract's checker derives those values.
+- The graph session and graph are observed by replaying three captured sessions of one peer, `rmw_zenoh_cpp`
+  0.6.10 on zenoh 1.10.1, on one host. No live rmw_zenoh peer runs in CI. The captured peer's graph was
+  visible over one direct link with no router and no gossip, in one run.
+- The link, `zenoh_link.rs`, cannot carry a graph session, because it matches `Event` exhaustively. The
+  composition therefore does not use it, and no QEMU gate runs it.
+- The graph holds each entity's QoS and does not match a publisher to a subscription. The session answers
+  no query and declares no token of its own, so a ROS 2 node cannot yet discover a Slime node.
+- No router, scouting, service or action interoperability, or transport security, and no Raspberry Pi 5
+  claim. The ROSIDL importer and RIHS01 generator are not here: the demo contract's checker derives
+  those values.
 
 ## Verification
 
@@ -330,6 +374,14 @@ recipe is explicit and in no aggregate. See the
   including its `UndeclareSubscriber` that names the subscriber by id alone behind the
   network QoS extension, which the host reference reproduces byte for byte, and ten
   variants of it refused by name and class;
+- `just zenoh_rmw_check` — 60 batches from three sessions of an `rmw_zenoh_cpp` peer, replayed into a graph
+  listener. The host reference `scripts/lib/zenoh_rmw_wire.py` writes every captured frame again byte for
+  byte. The listener's `INIT_ACK` and its silence after the handshake are judged. 11 variants are
+  refused. It records 75 cases and 182 negative controls;
+- `just zenoh_rmw_graph_check` — the 26 liveliness tokens of those sessions, read into a graph. The
+  transcript is built from `scripts/lib/zenoh_rmw_graph.py`. It covers 12 QoS substrings, 8 synthetic
+  tokens, 25 refused keys and a graph filled to its capacity. It records 106 cases and 196 negative
+  controls;
 - `just zenoh_xcheck_check` — the codec and session against the real eclipse-zenoh 1.0.0
   crates: the 17 corpus batches as upstream's encoder produces them, a 6000-case sweep
   (5993 compared, 7 refused as a non-canonical Zenoh ID, none differing), our decoder
