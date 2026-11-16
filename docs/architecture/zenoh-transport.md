@@ -191,13 +191,14 @@ A pump flushes the single send slot and reads whatever chunks the stream gives. 
 batch and feeds every token the batch carries into the graph. Then it checks the lease.
 
 The link writes the handshake, a `KEEP_ALIVE` a quarter of its own lease after it last sent, and a `CLOSE`.
-It declares nothing and answers nothing.
+It declares nothing and answers no query.
 
 | Event | What the link does |
 | --- | --- |
 | A token the graph refuses, or has no room for | Counts it in `refused_tokens` and stays open. |
-| A bad length prefix, an unreadable batch or a session refusal | Ends, queues a `CLOSE` of reason 0 and empties the graph. |
-| The end of the stream, a stream error, or a send that stalls more than `MAX_RETRIES` times in a row | Ends and empties the graph. The `CLOSE` is queued as above, and a stream that takes no byte never writes it. |
+| A bad length prefix, an unreadable batch or a session refusal | Ends and empties the graph. It queues a `CLOSE` of reason 0 into a free send slot. |
+| A receive error, or the end of the stream at a batch boundary | Ends and empties the graph. It queues a `CLOSE` of reason 0 into a free slot, and a stream that takes no byte never writes it. |
+| A send that stalls more than `MAX_RETRIES` times in a row, or a send error | Ends as `retry-limit` or a link error and empties the graph. The slot still holds the unsent batch, so no `CLOSE` is queued. |
 | The peer's `CLOSE`, a local `close`, or the peer's lease running out | Ends, with that reason or `CLOSE_EXPIRED`, and empties the graph. `close_reason` says which. |
 
 A link that ends has an empty graph: a graph of a session that ended describes nothing. A link whose single
@@ -414,8 +415,8 @@ recipe is explicit and in no aggregate. See the
   controls;
 - `just zenoh_rmw_link_check` — the same three sessions written to a graph link three ways: whole batches,
   one byte at a time and all at once. The bytes the link writes are judged to the byte. They are an
-  `INIT_ACK` of 512 bytes, an `OPEN_ACK`, a `KEEP_ALIVE` at 7500 ms, and a `CLOSE` of reason 5 at
-  60001 ms. A refused token is counted and the link stays open. A stream fault ends it, and every ending
+  `INIT_ACK` of 512 bytes, an `OPEN_ACK`, a `KEEP_ALIVE` at each quarter lease from 7500 ms, and a
+  `CLOSE` of reason 5 at 60001 ms. A refused token is counted and the link stays open. A stream fault ends it, and every ending
   leaves 0 entities. It records 133 cases and 236 negative controls;
 - `just zenoh_xcheck_check` — the codec and session against the real eclipse-zenoh 1.0.0
   crates: the 17 corpus batches as upstream's encoder produces them, a 6000-case sweep
