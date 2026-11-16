@@ -197,9 +197,9 @@ def expiry_ticks() -> list[int]:
 
 
 def expiry_probes() -> list[tuple[int, bytes]]:
-    """(time, bytes written at it) for that scenario. At each tick the link writes a KEEP_ALIVE, at the peer's
-    lease it writes nothing more, and one millisecond past it a CLOSE of reason 5. The KEEP_ALIVEs are in the
-    `sent` line too, because the stream is the whole of what the link wrote."""
+    """(time, bytes written at it) for that scenario. The link writes a KEEP_ALIVE at each tick, the last at the
+    peer's lease, and does not close until one millisecond past it, when it writes a CLOSE of reason 5. The
+    KEEP_ALIVEs are in the `sent` line too, because the stream is the whole of what the link wrote."""
     probes = [(at, framed(KEEP_ALIVE)) for at in expiry_ticks()]
     probes.append((PEER_LEASE_MS + 1, close_bytes(CLOSE_EXPIRED)))
     return probes
@@ -443,6 +443,8 @@ def transcript_mutations() -> list[tuple[str, list[str]]]:
     out.append(("a link that kept its graph after lease expiry", [line.replace("link entities lease-expiry 0", "link entities lease-expiry 11", 1) for line in good]))
     out.append(("a link that kept its graph after a stream fault", [line.replace("link entities oversized-length-prefix 0", "link entities oversized-length-prefix 4", 1) for line in good]))
     out.append(("a link that kept its graph after a zero prefix", [line.replace("link entities zero-length-prefix 0", "link entities zero-length-prefix 4", 1) for line in good]))
+    out.append(("a local close that wrote another reason", [line.replace(close_bytes(0).hex(), close_bytes(7).hex(), 1) if line.startswith("link close local") else line for line in good]))
+    out.append(("a local close that wrote nothing after the handshake", [line.replace(close_bytes(0).hex(), "", 1) if line.startswith("link close local") else line for line in good]))
     out.append(("a link that kept its graph after a local close", [line.replace("link entities local-close 0", "link entities local-close 11", 1) for line in good]))
     out.append(("a refused token not counted", [line.replace(f" {counted('token-of-an-unknown-entity')} open=", " 0 open=", 1) if line.startswith("link counted token-of-an-unknown-entity") else line for line in good]))
     out.append(("a full graph that counted one token", [line.replace(f" {counted('graph-over-capacity')} open=", " 1 open=", 1) if line.startswith("link counted graph-over-capacity") else line for line in good]))
@@ -475,7 +477,7 @@ def all_controls() -> int:
 # .tasks/terminal. While the item is open its stored predicates are compared with these. Both are exact.
 PINNED_CASES = 133
 PINNED_REFUSALS = 6
-PINNED_CONTROLS = 234
+PINNED_CONTROLS = 236
 
 
 def item_pins() -> tuple[int, int]:

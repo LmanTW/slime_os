@@ -44,7 +44,7 @@ item :: s.Item = (h.task "01a1e334-31fa-75ae-89e5-927dd60fac6f" "zenoh-rmw-link"
         "A local close writes a CLOSE with reason 0 behind the handshake and leaves the graph with 0 entities."
         { "zenoh_rmw_link_check"; };
       h.req "controls-are-refused"
-        "The judge refuses 234 corrupted records before it judges the real run."
+        "The judge refuses 236 corrupted records before it judges the real run."
         { "zenoh_rmw_link_check"; };
       h.req "neighbours-pass-unchanged"
         "The session exam and the graph exam pass unchanged beside the link slice."
@@ -53,7 +53,7 @@ item :: s.Item = (h.task "01a1e334-31fa-75ae-89e5-927dd60fac6f" "zenoh-rmw-link"
     acceptance = {
       h.observedWhere "zenoh_rmw_link_check" {
         h.count "casesObserved" 133;
-        h.count "negativeControlsRefused" 234;
+        h.count "negativeControlsRefused" 236;
       };
     };
     decisions = {
