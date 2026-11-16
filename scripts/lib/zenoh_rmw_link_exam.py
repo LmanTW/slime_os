@@ -13,7 +13,7 @@ captured bytes, `zenoh_rmw_graph` and `zenoh_wire`, and the Rust must print it, 
 
 * the bytes the listener wrote, which are exactly an INIT_ACK and an OPEN_ACK, and for a peer's CLOSE nothing more;
 * the live entities of the graph before the peer's CLOSE, and none after it;
-* three scenarios that stress the stream, two that count a token the graph refuses and keep the link open, and six
+* three scenarios that stress the stream, one pumped on the schedule the lease sets, two that count a token the graph refuses and keep the link open, and six
   that end the link or refuse a call, each with the class it ends as and the bytes it wrote.
 
 The listener is configured with `ZID`, `COOKIE`, a 30 s lease and initial sequence number 7, so the bytes it writes
@@ -189,11 +189,25 @@ def keep_alive_probes() -> list[tuple[int, bytes]]:
     return [(KEEP_ALIVE_AT - 1, b""), (KEEP_ALIVE_AT, framed(KEEP_ALIVE)), (KEEP_ALIVE_AT + 1, b"")]
 
 
+def expiry_ticks() -> list[int]:
+    """When the scenario pumps a link that hears nothing after the handshake: every quarter of the lease the
+    link announced, which is when it owes a KEEP_ALIVE, through the lease the peer announced. The peer is silent,
+    so each pump writes one KEEP_ALIVE and the link must not close."""
+    return list(range(KEEP_ALIVE_AT, PEER_LEASE_MS + 1, KEEP_ALIVE_AT))
+
+
 def expiry_probes() -> list[tuple[int, bytes]]:
-    """(time, bytes written at it) for a link that hears nothing after the handshake. The peer announced
-    `PEER_LEASE_MS` and the link tolerates exactly that much silence, so it writes nothing at the lease and
-    a CLOSE of reason 5 one millisecond after it. The KEEP_ALIVEs it writes on the way are not in the probe."""
-    return [(PEER_LEASE_MS, b""), (PEER_LEASE_MS + 1, close_bytes(CLOSE_EXPIRED))]
+    """(time, bytes written at it) for that scenario. At each tick the link writes a KEEP_ALIVE, at the peer's
+    lease it writes nothing more, and one millisecond past it a CLOSE of reason 5. The KEEP_ALIVEs are in the
+    `sent` line too, because the stream is the whole of what the link wrote."""
+    probes = [(at, framed(KEEP_ALIVE)) for at in expiry_ticks()]
+    probes.append((PEER_LEASE_MS + 1, close_bytes(CLOSE_EXPIRED)))
+    return probes
+
+
+def expiry_stream() -> bytes:
+    """The whole stream of the expiry scenario: the handshake, a KEEP_ALIVE at each tick, then the CLOSE."""
+    return handshake_bytes() + framed(KEEP_ALIVE) * len(expiry_ticks()) + close_bytes(CLOSE_EXPIRED)
 
 
 ENTITIES_AFTER_END = 0
@@ -248,7 +262,7 @@ def good_lines() -> list[str]:
     lines.append(f"link ok {SCENARIOS[1]}")
     for at, wrote in expiry_probes():
         lines.append(f"link probe lease-expiry t={at} wrote={hexed(wrote)}")
-    lines.append(f"link sent lease-expiry {hexed(handshake_bytes() + close_bytes(CLOSE_EXPIRED))}")
+    lines.append(f"link sent lease-expiry {hexed(expiry_stream())}")
     lines.append(f"link entities lease-expiry {ENTITIES_AFTER_END}")
     lines.append(f"link ok {SCENARIOS[2]}")
     for name in COUNTED:
@@ -311,10 +325,6 @@ def counted_agrees(unknown: int | None = None, full: int | None = None, survive:
     _need(in_space == 11, f"the talker declares {in_space} tokens in the admin space, the item says 11")
 
 
-def in_space_count() -> int:
-    return sum(1 for action, key in graph_exam.session_tokens("talker") if action == "declare" and key.startswith("@ros2_lv/"))
-
-
 def outbound_agrees(
     handshake: Callable[[], bytes] = handshake_bytes,
     closer: Callable[[int], bytes] = close_bytes,
@@ -323,12 +333,12 @@ def outbound_agrees(
     """Every outbound the exam expects is a stream the host reference reads as it describes it."""
     _need(announced == ANNOUNCED_BATCH, f"the exam announces {announced}, the item fixes {ANNOUNCED_BATCH}")
     for group in GROUPS:
-        for tail in (b"", framed(KEEP_ALIVE), closer(CLOSE_EXPIRED), closer(0)):
+        for tail in (b"", framed(KEEP_ALIVE), framed(KEEP_ALIVE) * len(expiry_ticks()) + closer(CLOSE_EXPIRED), closer(0)):
             data = handshake() + tail
             if handshake is handshake_bytes and closer is close_bytes:
                 check_outbound(group, data, tail)
             batches = split_stream(data)
-            _need(len(batches) == 2 + (1 if tail else 0), f"{group}: an expected stream of {len(batches)} batches")
+            _need(len(batches) == 2 + len(split_stream(tail)), f"{group}: an expected stream of {len(batches)} batches")
             _need(wire.init_ack(batches[0]).batch == ANNOUNCED_BATCH, f"{group}: the expected INIT_ACK announces another batch")
             _need(wire.init_ack(batches[0]).cookie == peer_cookie(group), f"{group}: the expected cookie is not the peer's")
             _need(batches[1][0] & 0x1F == wire.ID_OPEN and batches[1][0] & 0x20 != 0, f"{group}: the expected OPEN_ACK is not an OPEN_ACK")
@@ -424,8 +434,11 @@ def transcript_mutations() -> list[tuple[str, list[str]]]:
     out.append(("a keep-alive missing at the quarter", [line.replace("t=7500 wrote=010004", "t=7500 wrote=-", 1) for line in good]))
     out.append(("a second keep-alive right after the first", [line.replace("t=7501 wrote=-", "t=7501 wrote=010004", 1) for line in good]))
     out.append(("a keep-alive written before the quarter", [line.replace("t=7499 wrote=-", "t=7499 wrote=010004", 1) for line in good]))
-    out.append(("a link that closed at the lease and not past it", [line.replace("t=60000 wrote=-", "t=60000 wrote=02002305", 1) for line in good]))
+    out.append(("a link that closed at the lease and not past it", [line.replace("t=60000 wrote=010004", "t=60000 wrote=02002305", 1) for line in good]))
     out.append(("a link that never closed past the lease", [line.replace("t=60001 wrote=02002305", "t=60001 wrote=-", 1) for line in good]))
+    out.append(("a link that skipped a keep-alive on the way", [line.replace("t=30000 wrote=010004", "t=30000 wrote=-", 1) for line in good]))
+    out.append(("a link that wrote a keep-alive early on the way", [line.replace("t=30000 wrote=010004", "t=29999 wrote=010004", 1) for line in good]))
+    out.append(("a link that wrote two keep-alives at one tick", [line.replace("t=45000 wrote=010004", "t=45000 wrote=010004010004", 1) for line in good]))
     out.append(("a link that closed with another reason", [line.replace("wrote=02002305", "wrote=02002300", 1) for line in good]))
     out.append(("a link that kept its graph after lease expiry", [line.replace("link entities lease-expiry 0", "link entities lease-expiry 11", 1) for line in good]))
     out.append(("a link that kept its graph after a stream fault", [line.replace("link entities oversized-length-prefix 0", "link entities oversized-length-prefix 4", 1) for line in good]))
@@ -460,9 +473,9 @@ def all_controls() -> int:
 
 # What the item fixes, held here as well so the gate stays correct after the item is closed and moved to
 # .tasks/terminal. While the item is open its stored predicates are compared with these. Both are exact.
-PINNED_CASES = 126
+PINNED_CASES = 133
 PINNED_REFUSALS = 6
-PINNED_CONTROLS = 224
+PINNED_CONTROLS = 234
 
 
 def item_pins() -> tuple[int, int]:

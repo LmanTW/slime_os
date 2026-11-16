@@ -29,7 +29,7 @@ item :: s.Item = (h.task "01a1e334-31fa-75ae-89e5-927dd60fac6f" "zenoh-rmw-link"
         "For every session and every way of writing it, the link writes an INIT_ACK that announces 512 bytes, carries no extension and offers the cookie the peer echoed, then an OPEN_ACK of a 30 s lease, and no other byte."
         { "zenoh_rmw_link_check"; };
       h.req "keeps-and-ends-the-lease"
-        "A link that has sent nothing since the handshake writes nothing at 7499 ms, one KEEP_ALIVE at 7500 ms and nothing at 7501 ms. A link that hears nothing after the handshake writes nothing at 60000 ms, the 60 s lease the peer announced, and a CLOSE with reason 5 at 60001 ms."
+        "A link that has sent nothing since the handshake writes nothing at 7499 ms, one KEEP_ALIVE at 7500 ms and nothing at 7501 ms. A link pumped every 7500 ms that hears nothing after the handshake writes one KEEP_ALIVE at each of the 8 pumps up to 60000 ms, the 60 s lease the peer announced, and a CLOSE with reason 5 at 60001 ms."
         { "zenoh_rmw_link_check"; };
       h.req "counts-a-bad-token-and-stays-open"
         "A frame of three tokens, the middle one of an unknown entity, is counted once and leaves 2 entities. A graph of capacity 2 counts the 9 tokens it has no room for and holds 2. In both the link stays open."
@@ -40,8 +40,11 @@ item :: s.Item = (h.task "01a1e334-31fa-75ae-89e5-927dd60fac6f" "zenoh-rmw-link"
       h.req "refuses-what-it-must"
         "A send that stalls past the retry limit is `retry-limit`, a handle of an earlier generation is `stale-handle`, a call after close is `send-after-close`, and an end of stream before the handshake is `link-closed`."
         { "zenoh_rmw_link_check"; };
+      h.req "closes-locally"
+        "A local close writes a CLOSE with reason 0 behind the handshake and leaves the graph with 0 entities."
+        { "zenoh_rmw_link_check"; };
       h.req "controls-are-refused"
-        "The judge refuses 224 corrupted records before it judges the real run."
+        "The judge refuses 234 corrupted records before it judges the real run."
         { "zenoh_rmw_link_check"; };
       h.req "neighbours-pass-unchanged"
         "The session exam and the graph exam pass unchanged beside the link slice."
@@ -49,8 +52,8 @@ item :: s.Item = (h.task "01a1e334-31fa-75ae-89e5-927dd60fac6f" "zenoh-rmw-link"
     };
     acceptance = {
       h.observedWhere "zenoh_rmw_link_check" {
-        h.count "casesObserved" 126;
-        h.count "negativeControlsRefused" 224;
+        h.count "casesObserved" 133;
+        h.count "negativeControlsRefused" 234;
       };
     };
     decisions = {
@@ -65,10 +68,10 @@ item :: s.Item = (h.task "01a1e334-31fa-75ae-89e5-927dd60fac6f" "zenoh-rmw-link"
         h.agentDefault
         { "replays-every-session-three-ways"; };
       h.decided "the-graph-is-emptied-on-close"
-        "When the link ends, by a peer CLOSE, a local close, a stream refusal or lease expiry, its graph holds 0 entities, and the transcript prints that count for each ending."
+        "When the link ends, by a peer CLOSE, a local close, a stream refusal or lease expiry, its graph holds 0 entities, and the transcript prints that count for each ending. A local close writes a CLOSE with reason 0 behind the handshake."
         "a graph of a session that ended describes nothing, and a stale entity would outlive its peer"
         h.agentDefault
-        { "replays-every-session-three-ways"; "ends-on-a-stream-fault"; };
+        { "replays-every-session-three-ways"; "ends-on-a-stream-fault"; "keeps-and-ends-the-lease"; "closes-locally"; };
     };
   };
 
