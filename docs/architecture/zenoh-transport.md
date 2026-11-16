@@ -144,9 +144,9 @@ that wants the link gone after a refusal says so.
 ## rmw_zenoh graph
 
 A ROS 2 node that uses `rmw_zenoh_cpp` declares its graph before it publishes. The graph session
-(`zenoh_profile0/graph.rs`) takes those declarations. It is a separate type, `GraphSessionOf<A, D, B>`,
-and `Params::GRAPH` configures it. `Params::graph` is `false` in every other constructor, and
-`SessionOf::with_params` refuses a configuration that sets it. The plain decoder, `Network`, `Event` and
+(`zenoh_profile0/graph.rs`) takes those declarations. Its type is `GraphSessionOf<A, D, B>`, and
+`Params::GRAPH` configures it. `Params::graph` is `false` in every other constructor. `SessionOf::with_params`
+refuses a configuration that sets it. The plain decoder, `Network`, `Event` and
 `SessionError` gain no variant, so the stock-peer, undeclare and subscribers exams keep every pinned
 refusal.
 
@@ -157,12 +157,16 @@ A graph session takes these, and the plain session refuses each of them:
 | Key aliases | Holds up to `A` aliases of up to `B` bytes. A repeated id or a scope on an alias is `invalid-keyexpr`. `UndeclareKeyExpr` is `unsupported-message`. |
 | `DeclareSubscriber`, `DeclareQueryable` and `DeclareToken`, and the undeclaration of a queryable or a token | Records each declaration in a table of `D` slots. An undeclaration of one it does not hold is `unknown-declaration`. `UndeclareSubscriber` is `unsupported-message`. |
 | The INIT extensions: a unit extension with id 1, then optionally id 7 with a value of at most 1 | Accepts that chain only. Any other extension, or a mandatory one, is `unsupported-extension`. |
-| A `Put` with a timestamp, and the source-info and attachment extensions | Parses it and drops it. A push to a key nobody subscribed to is counted. |
+| A `Put` with a timestamp, and the source-info and attachment extensions | Parses it and drops it. The session holds no subscription, so every push whose key is valid is dropped and counted. |
 
 A subscriber or a queryable may name a wildcard key, as the peer's `@/<zid>/peer/config/**` does. A token
-key or the key of a push may not, and is `wildcard-keyexpr`. The session announces a 512-byte batch in its `INIT_ACK` and bounds keys at 253
-bytes, the longest alias an rmw_zenoh peer declared. It sends nothing after the handshake, answers no
-query and declares no token. A `FRAME` applies whole or not at all, as in the plain session.
+key or the key of a push may not, and is `wildcard-keyexpr`.
+
+The session announces a 512-byte batch in its `INIT_ACK`. It bounds keys at 253 bytes, the longest alias
+an rmw_zenoh peer declared. It sends nothing after the handshake, answers no query and declares no token.
+A `FRAME` applies whole or not at all, as in the plain session.
+
+
 
 `zenoh_rmw_graph.rs` reads each `@ros2_lv` token into an `Entity` and holds the live ones in
 `Graph<N>`. A token is `@ros2_lv/<domain>/<zid>/<nid>/<id>/<kind>/<enclave>/<namespace>/<node>`, and a
@@ -375,8 +379,8 @@ recipe is explicit and in no aggregate. See the
   network QoS extension, which the host reference reproduces byte for byte, and ten
   variants of it refused by name and class;
 - `just zenoh_rmw_check` — 60 batches from three sessions of an `rmw_zenoh_cpp` peer, replayed into a graph
-  listener. The host reference `scripts/lib/zenoh_rmw_wire.py` writes every captured frame again byte for
-  byte. The listener's `INIT_ACK` and its silence after the handshake are judged. 11 variants are
+  session. The host reference `scripts/lib/zenoh_rmw_wire.py` writes every captured frame again byte for
+  byte. The session's `INIT_ACK` and its silence after the handshake are judged. 11 variants are
   refused. It records 75 cases and 182 negative controls;
 - `just zenoh_rmw_graph_check` — the 26 liveliness tokens of those sessions, read into a graph. The
   transcript is built from `scripts/lib/zenoh_rmw_graph.py`. It covers 12 QoS substrings, 8 synthetic
