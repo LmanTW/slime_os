@@ -224,7 +224,8 @@ impl<
     }
 
     /// Queues CLOSE and ends the link. Refused with [`GraphLinkError::SendBusy`], changing nothing, while a
-    /// batch is still waiting to be sent.
+    /// batch is still waiting to be sent. The free slot is checked first, and a CLOSE is two bytes, so
+    /// `queue` cannot then refuse it at any batch size the profile allows.
     pub fn close(&mut self, handle: GraphHandle, reason: u8) -> Result<(), GraphLinkError> {
         self.check(handle)?;
         if self.send_len != 0 {
@@ -278,6 +279,11 @@ impl<
     }
 
     /// Drives the link once: flush, read, decode and reply, then check the lease.
+    ///
+    /// One send slot holds one batch. When the lease runs out while the slot is occupied, the link ends and
+    /// the graph is emptied, but the CLOSE is not written: only a free slot queues it. A refusal that ends
+    /// the link has the same limit. The plain link behaves the same way, and the peer finds out by its own
+    /// lease.
     pub fn pump(&mut self, handle: GraphHandle, now_ms: u64) -> Result<PumpReport, GraphLinkError> {
         if handle.generation != self.generation {
             return Err(GraphLinkError::StaleHandle);
