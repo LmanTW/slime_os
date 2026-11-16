@@ -46,6 +46,12 @@ CLOSE_EXPIRED = 5
 KEEP_ALIVE = b"\x04"
 # A graph link of capacity 2 refuses the third entity of the talker's session.
 SMALL_GRAPH = 2
+# The clock the lease scenarios run at, in ms after the handshake finished at 0. Our listener announced
+# `LEASE_MS`, so a keep-alive is due at a quarter of it; the peer announced `PEER_LEASE_MS` in its OPEN_SYN, and
+# the link closes when it has heard nothing for longer than that. Each probe is a pump at that time, and the
+# transcript says how many bytes the link wrote at it.
+KEEP_ALIVE_AT = LEASE_MS // 4
+PEER_LEASE_MS = 60_000
 
 SCENARIOS = (
     "partial-writes-complete-the-handshake",
@@ -139,11 +145,18 @@ def session_batches(group: str) -> list[bytes]:
 
 
 def unknown_entity_frame() -> bytes:
-    """The talker's fourth frame, which declares the node token, with the token's kind `NN` changed to `XX`: the
-    same length, so every length field in the frame stays right. A link derives the batch the same way."""
-    batch = session_exam.captured("talker-04-frame")
-    _need(batch.count(b"/NN/") == 1, "the talker's fourth frame does not hold exactly one node token")
-    return batch.replace(b"/NN/", b"/XX/")
+    """One frame of three tokens: a node `a`, a token of the unknown kind `XX`, and a node `c`, written by the
+    host reference with the sequence number the talker's first frame carries. The link must count the middle
+    one and still take the third, which is how the exam shows the link stayed open and useful."""
+    zid = "77bf039722c084d5ddae7b5ba3647a11"
+    messages: list[bytes] = []
+    for number, (kind, node) in enumerate((("NN", "a"), ("XX", "b"), ("NN", "c"))):
+        alias, ident = 90 + number, 91 + 2 * number
+        key = f"@ros2_lv/0/{zid}/0/{60 + number}/{kind}/%/%/{node}"
+        messages.append(wire.encode(wire.Message("keyexpr", alias, 0, key, qos=8)))
+        messages.append(wire.encode(wire.Message("token", ident, alias, None, qos=8)))
+    sn = wire.frame(session_exam.captured("talker-03-frame"))[0]
+    return bytes([wire.ID_FRAME | wire.FLAG_N]) + wire.leb128(sn) + b"".join(messages)
 
 
 def counted(name: str) -> int:
@@ -168,6 +181,39 @@ def counted(name: str) -> int:
             except graph_exam.graph.GraphError:
                 refused += 1
     return refused
+
+
+def keep_alive_probes() -> list[tuple[int, bytes]]:
+    """(time, bytes written at it) for a link that has sent nothing since the handshake. Before a quarter of
+    the lease it writes nothing, at the quarter it writes one KEEP_ALIVE, and right after, nothing more."""
+    return [(KEEP_ALIVE_AT - 1, b""), (KEEP_ALIVE_AT, framed(KEEP_ALIVE)), (KEEP_ALIVE_AT + 1, b"")]
+
+
+def expiry_probes() -> list[tuple[int, bytes]]:
+    """(time, bytes written at it) for a link that hears nothing after the handshake. The peer announced
+    `PEER_LEASE_MS` and the link tolerates exactly that much silence, so it writes nothing at the lease and
+    a CLOSE of reason 5 one millisecond after it. The KEEP_ALIVEs it writes on the way are not in the probe."""
+    return [(PEER_LEASE_MS, b""), (PEER_LEASE_MS + 1, close_bytes(CLOSE_EXPIRED))]
+
+
+ENTITIES_AFTER_END = 0
+
+
+def surviving(name: str) -> int:
+    """How many entities the graph still holds after the scenario, counted by the host reference: the other
+    tokens of the frame land, and a graph of capacity 2 holds exactly 2."""
+    if name == "token-of-an-unknown-entity":
+        state = graph_exam.graph.Graph(graph_exam.DOMAIN, graph_exam.CAPACITY)
+        table: dict[int, str] = {}
+        for message, full in wire.resolve(wire.frame(unknown_entity_frame())[1], table):
+            if message.kind == "token" and full is not None:
+                try:
+                    state.declare(full)
+                except graph_exam.graph.GraphError:
+                    pass
+        return len(state.live)
+    _need(name == "graph-over-capacity", f"no counted scenario named {name}")
+    return SMALL_GRAPH
 
 
 def final_close(group: str) -> int:
@@ -196,18 +242,29 @@ def good_lines() -> list[str]:
             lines.append(f"link ok {group}-{mode}")
     lines.append(f"link sent partial-writes {hexed(handshake_bytes())}")
     lines.append(f"link ok {SCENARIOS[0]}")
+    for at, wrote in keep_alive_probes():
+        lines.append(f"link probe keep-alive t={at} wrote={hexed(wrote)}")
     lines.append(f"link sent keep-alive {hexed(handshake_bytes() + framed(KEEP_ALIVE))}")
     lines.append(f"link ok {SCENARIOS[1]}")
+    for at, wrote in expiry_probes():
+        lines.append(f"link probe lease-expiry t={at} wrote={hexed(wrote)}")
     lines.append(f"link sent lease-expiry {hexed(handshake_bytes() + close_bytes(CLOSE_EXPIRED))}")
+    lines.append(f"link entities lease-expiry {ENTITIES_AFTER_END}")
     lines.append(f"link ok {SCENARIOS[2]}")
     for name in COUNTED:
-        lines.append(f"link counted {name} {counted(name)} open={OPEN_AFTER_COUNTED}")
+        lines.append(f"link counted {name} {counted(name)} open={OPEN_AFTER_COUNTED} entities={surviving(name)}")
     for name, cls in REFUSALS:
         lines.append(f"link refused {name} {cls} {hexed(refusal_tail(name))}")
+        if name in ENDS_THE_LINK:
+            lines.append(f"link entities {name} {ENTITIES_AFTER_END}")
+    lines.append(f"link close local {hexed(handshake_bytes() + close_bytes(0))}")
+    lines.append(f"link entities local-close {ENTITIES_AFTER_END}")
     return lines
 
 
 OPEN_AFTER_COUNTED = "true"
+# The refusals that end the link; the others are refused calls and leave it as it was.
+ENDS_THE_LINK = ("oversized-length-prefix", "zero-length-prefix")
 
 
 def refusal_tail(name: str) -> bytes:
@@ -239,15 +296,23 @@ def judge(lines: list[str]) -> tuple[int, int]:
     return len(wanted) - refusals, refusals
 
 
-def counted_agrees(unknown: int | None = None, full: int | None = None) -> None:
+def counted_agrees(unknown: int | None = None, full: int | None = None, survive: int | None = None) -> None:
     """The two counted scenarios are about what they say: one bad token, and the tokens a capacity of 2 cannot hold."""
     unknown = counted("token-of-an-unknown-entity") if unknown is None else unknown
     full = counted("graph-over-capacity") if full is None else full
     _need(unknown == 1, f"the unknown-entity scenario counts {unknown} refused tokens, it is about exactly one")
+    survive = surviving("token-of-an-unknown-entity") if survive is None else survive
+    _need(survive == 2, f"the unknown-entity scenario leaves {survive} entities, the frame's two good tokens land")
+
     declared = sum(1 for action, _key in graph_exam.session_tokens("talker") if action == "declare")
     in_space = sum(1 for action, key in graph_exam.session_tokens("talker") if action == "declare" and key.startswith("@ros2_lv/"))
     _need(full == in_space - SMALL_GRAPH, f"the full-graph scenario counts {full} refused tokens, a capacity of {SMALL_GRAPH} over {in_space} tokens refuses {in_space - SMALL_GRAPH}")
     _need(in_space < declared, "the talker declares no token outside the admin space, so the scenario would not show the link ignoring it")
+    _need(in_space == 11, f"the talker declares {in_space} tokens in the admin space, the item says 11")
+
+
+def in_space_count() -> int:
+    return sum(1 for action, key in graph_exam.session_tokens("talker") if action == "declare" and key.startswith("@ros2_lv/"))
 
 
 def outbound_agrees(
@@ -260,6 +325,8 @@ def outbound_agrees(
     for group in GROUPS:
         for tail in (b"", framed(KEEP_ALIVE), closer(CLOSE_EXPIRED), closer(0)):
             data = handshake() + tail
+            if handshake is handshake_bytes and closer is close_bytes:
+                check_outbound(group, data, tail)
             batches = split_stream(data)
             _need(len(batches) == 2 + (1 if tail else 0), f"{group}: an expected stream of {len(batches)} batches")
             _need(wire.init_ack(batches[0]).batch == ANNOUNCED_BATCH, f"{group}: the expected INIT_ACK announces another batch")
@@ -286,6 +353,8 @@ def reference_controls() -> int:
         ("an unknown-entity scenario that counts none", {"unknown": 0}, "it is about exactly one"),
         ("a full-graph scenario that counts one token", {"full": 1}, "a capacity of 2"),
         ("a full-graph scenario that counts all of them", {"full": 11}, "a capacity of 2"),
+        ("an unknown-entity scenario that leaves one entity", {"survive": 1}, "the frame's two good tokens land"),
+        ("an unknown-entity scenario that leaves none", {"survive": 0}, "the frame's two good tokens land"),
     ]
     refused = 0
     for label, changes, reason in counted_cases:
@@ -348,6 +417,20 @@ def transcript_mutations() -> list[tuple[str, list[str]]]:
     out.append(("the first two refusals swapped", swapped(kinds["refused"][0], kinds["refused"][1])))
     out.append(("a link that ended on a refused token", [line.replace("open=true", "open=false", 1) if line.startswith("link counted token-of-an-unknown-entity") else line for line in good]))
     out.append(("a link that ended on a full graph", [line.replace("open=true", "open=false", 1) if line.startswith("link counted graph-over-capacity") else line for line in good]))
+    out.append(("a link that kept no entity after a counted token", [line.replace("entities=2", "entities=0", 1) if line.startswith("link counted token-of-an-unknown-entity") else line for line in good]))
+    out.append(("a link that dropped the session after a counted token", [line.replace("entities=2", "entities=1", 1) if line.startswith("link counted token-of-an-unknown-entity") else line for line in good]))
+    out.append(("a full graph that held three entities", [line.replace("entities=2", "entities=3", 1) if line.startswith("link counted graph-over-capacity") else line for line in good]))
+    out.append(("a keep-alive one millisecond early", [line.replace("t=7500 wrote=010004", "t=7499 wrote=010004", 1) for line in good]))
+    out.append(("a keep-alive missing at the quarter", [line.replace("t=7500 wrote=010004", "t=7500 wrote=-", 1) for line in good]))
+    out.append(("a second keep-alive right after the first", [line.replace("t=7501 wrote=-", "t=7501 wrote=010004", 1) for line in good]))
+    out.append(("a keep-alive written before the quarter", [line.replace("t=7499 wrote=-", "t=7499 wrote=010004", 1) for line in good]))
+    out.append(("a link that closed at the lease and not past it", [line.replace("t=60000 wrote=-", "t=60000 wrote=02002305", 1) for line in good]))
+    out.append(("a link that never closed past the lease", [line.replace("t=60001 wrote=02002305", "t=60001 wrote=-", 1) for line in good]))
+    out.append(("a link that closed with another reason", [line.replace("wrote=02002305", "wrote=02002300", 1) for line in good]))
+    out.append(("a link that kept its graph after lease expiry", [line.replace("link entities lease-expiry 0", "link entities lease-expiry 11", 1) for line in good]))
+    out.append(("a link that kept its graph after a stream fault", [line.replace("link entities oversized-length-prefix 0", "link entities oversized-length-prefix 4", 1) for line in good]))
+    out.append(("a link that kept its graph after a zero prefix", [line.replace("link entities zero-length-prefix 0", "link entities zero-length-prefix 4", 1) for line in good]))
+    out.append(("a link that kept its graph after a local close", [line.replace("link entities local-close 0", "link entities local-close 11", 1) for line in good]))
     out.append(("a refused token not counted", [line.replace(f" {counted('token-of-an-unknown-entity')} open=", " 0 open=", 1) if line.startswith("link counted token-of-an-unknown-entity") else line for line in good]))
     out.append(("a full graph that counted one token", [line.replace(f" {counted('graph-over-capacity')} open=", " 1 open=", 1) if line.startswith("link counted graph-over-capacity") else line for line in good]))
     out.append(("a graph that kept its entities after the peer's CLOSE", [line.replace("entities=0", "entities=11", 1) if line.startswith("link closed talker whole") else line for line in good]))
@@ -377,9 +460,9 @@ def all_controls() -> int:
 
 # What the item fixes, held here as well so the gate stays correct after the item is closed and moved to
 # .tasks/terminal. While the item is open its stored predicates are compared with these. Both are exact.
-PINNED_CASES = 116
+PINNED_CASES = 126
 PINNED_REFUSALS = 6
-PINNED_CONTROLS = 198
+PINNED_CONTROLS = 224
 
 
 def item_pins() -> tuple[int, int]:
