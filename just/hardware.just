@@ -95,6 +95,17 @@ zenoh_rmw_check:
 zenoh_rmw_graph_check:
     python3 scripts/check/check-zenoh-profile0.py --slice rmw-graph
 
+# A Profile 0 graph link: one graph session over a byte stream, with the tokens it receives held in a
+# bounded graph. The three captured sessions of an rmw_zenoh_cpp peer are written to it whole, one byte at
+# a time and all at once, and the bytes the listener writes are judged to the byte: an INIT_ACK of 512
+# bytes, an OPEN_ACK, a keep-alive after a quarter lease, a CLOSE on expiry. A refused token is counted and
+# the link stays open; a stream fault ends it. The expected transcript is built by
+# scripts/lib/zenoh_rmw_link_exam.py from the captured bytes. The session and graph exams run beside it.
+# Nothing here needs a registry or a ROS install. Fails until the link exists.
+[group('hardware')]
+zenoh_rmw_link_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice rmw-link
+
 # Judges a Zenoh Profile 0 session that holds several subscriptions of its own. The session refused
 # a second one as subscriber-limit, whatever its parameters said. Params.local now says how many it
 # holds. The links exam and the stock-peer exam run beside it, because both pin the subscriber limit.
