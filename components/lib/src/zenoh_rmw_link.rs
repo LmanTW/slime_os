@@ -282,8 +282,8 @@ impl<
     ///
     /// One send slot holds one batch. When the lease runs out while the slot is occupied, the link ends and
     /// the graph is emptied, but the CLOSE is not written: only a free slot queues it. A refusal that ends
-    /// the link has the same limit. The plain link behaves the same way, and the peer finds out by its own
-    /// lease.
+    /// the link has the same limit. The peer then finds out by its own lease. The plain link `zenoh_link` has the same limit
+    /// today, and no test here holds that.
     pub fn pump(&mut self, handle: GraphHandle, now_ms: u64) -> Result<PumpReport, GraphLinkError> {
         if handle.generation != self.generation {
             return Err(GraphLinkError::StaleHandle);
