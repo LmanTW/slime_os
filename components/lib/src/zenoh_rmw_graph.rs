@@ -579,6 +579,11 @@ impl<const N: usize> Graph<N> {
         Ok(Declared::Entity)
     }
 
+    /// Drops every entity. A link whose session ended holds no graph.
+    pub fn clear(&mut self) {
+        self.live = [None; N];
+    }
+
     /// Drops the entity a withdrawn token names. A token that names none is ignored.
     pub fn withdraw(&mut self, key: &str) -> Result<(), GraphError> {
         let Some(entity) = Entity::parse(key, self.domain)? else {

@@ -743,6 +743,17 @@ impl<const A: usize, const D: usize, const B: usize> GraphSessionOf<A, D, B> {
         Ok(self.plain(&outcome))
     }
 
+    /// The lease check without a keep-alive, for a link whose single send slot is occupied.
+    pub fn tick_lease(&mut self, now_ms: u64, out: &mut [u8]) -> Result<GraphOutcome, GraphError> {
+        let outcome = self.inner.tick_lease(now_ms, out)?;
+        Ok(self.plain(&outcome))
+    }
+
+    /// Tells the session a batch reached the wire at `now_ms`, which restarts the keep-alive cadence.
+    pub fn note_sent(&mut self, now_ms: u64) {
+        self.inner.note_sent(now_ms);
+    }
+
     /// Closes the session locally with a CLOSE batch.
     pub fn close(&mut self, reason: u8, out: &mut [u8]) -> Result<GraphOutcome, GraphError> {
         let outcome = self.inner.close(reason, out)?;

@@ -5,6 +5,7 @@ item :: s.Item = (h.task "01a1e334-31fa-75ae-89e5-927dd60fac6f" "zenoh-rmw-link"
   "A Profile 0 graph link carries a graph session over a byte stream and keeps a graph of its tokens"
   "The graph session and its graph exist, and nothing carries them. The plain link, `zenoh_link.rs`, matches the plain session's `Event` exhaustively, so a graph session cannot run under it, and the graph session is exercised only by batches a test hands it one at a time. No component can hold a session with an rmw_zenoh peer. A runtime has to read length-prefixed batches in whatever chunks a stream gives, write its own in whatever chunks the stream takes, feed each liveliness token it receives into a bounded graph, and end itself when the stream or the session refuses something.")
   with {
+    intent = #active;
     owns = {
       "components/lib/src/zenoh_rmw_link*";
       "components/lib/src/zenoh_rmw_link/**";
