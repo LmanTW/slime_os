@@ -196,7 +196,7 @@ It declares nothing and answers no query.
 | Event | What the link does |
 | --- | --- |
 | A token the graph refuses, or has no room for | Counts it in `refused_tokens` and stays open. |
-| A bad length prefix, an unreadable batch or a session refusal | Ends and empties the graph. It queues a `CLOSE` of reason 0 into a free send slot. |
+| A bad length prefix, an unreadable batch, a full buffer with no whole batch or a session refusal | Ends and empties the graph. It queues a `CLOSE` of reason 0 into a free send slot. |
 | A receive error, or the end of the stream at a batch boundary | Ends and empties the graph. It queues a `CLOSE` of reason 0 into a free slot, and a stream that takes no byte never writes it. |
 | A send that stalls more than `MAX_RETRIES` times in a row, or a send error | Ends as `retry-limit` or a link error and empties the graph. The slot still holds the unsent batch, so no `CLOSE` is queued. |
 | The peer's `CLOSE`, a local `close`, or the peer's lease running out | Ends, with that reason or `CLOSE_EXPIRED`, and empties the graph. `close_reason` says which. |
