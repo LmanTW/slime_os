@@ -166,8 +166,6 @@ The session announces a 512-byte batch in its `INIT_ACK`. It bounds keys at 253 
 an rmw_zenoh peer declared. It sends nothing after the handshake, answers no query and declares no token.
 A `FRAME` applies whole or not at all, as in the plain session.
 
-
-
 `zenoh_rmw_graph.rs` reads each `@ros2_lv` token into an `Entity` and holds the live ones in
 `Graph<N>`. A token is `@ros2_lv/<domain>/<zid>/<nid>/<id>/<kind>/<enclave>/<namespace>/<node>`, and a
 node, publisher, subscription, service server or service client token adds
