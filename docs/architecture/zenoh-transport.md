@@ -174,8 +174,8 @@ all, as in the plain session.
 A graph session holds at most one subscription of its own, declared with `send_declare_subscriber`. A Put
 that names that key reaches the owner through `on_batch_samples` as a `Sample` with its subscription id,
 sequence number, timestamp and payload. The Put must carry the 33-byte attachment. Without a readable
-attachment the whole `FRAME` is refused, which ends the connection. A second subscription is
-`subscriber-limit`.
+attachment the whole `FRAME` is refused. The session stays open, and the graph link ends on a refusal.
+A second subscription is `subscriber-limit`.
 
 `send_put` writes a Put with the sender mapping and the attachment. The peer must have declared a subscriber
 on that key. Without one the Put is `undeclared-key`, and a payload over the bound is `over-bound`. The
@@ -414,8 +414,8 @@ recipe is explicit and in no aggregate. See the
   best-effort subscriber received the Puts. A peer that reconnected sent no second `INTEREST`. A Slime
   peer that dialed `rmw_zenohd` as a peer got no sample through, and one that announced itself as a client
   got all 12. The encoder writes no client `INIT`.
-- A peer waits about 10 s for the answer to its `INTEREST`, and a session that fails to write it ends the
-  connection. `ZENOH_ROUTER_CHECK_ATTEMPTS=0` stopped the one peer from exchanging data in the probes, and a
+- A peer waits about 10 s for the answer to its `INTEREST`. A `FRAME` whose answer the session cannot write
+  is refused whole. `ZENOH_ROUTER_CHECK_ATTEMPTS=0` stopped the one peer from exchanging data in the probes, and a
   value of 1 did not.
 - No router, scouting, service or action interoperability, or transport security, and no Raspberry Pi 5
   claim. The ROSIDL importer and RIHS01 generator are not here: the demo contract's checker derives
@@ -453,6 +453,11 @@ recipe is explicit and in no aggregate. See the
   `INIT_ACK` of 512 bytes, an `OPEN_ACK`, a `KEEP_ALIVE` at each quarter lease from 7500 ms, and a
   `CLOSE` of reason 5 at 60001 ms. A refused token is counted and the link stays open. A stream fault ends it, and every ending
   leaves 0 entities. It records 133 cases and 236 negative controls;
+- `just zenoh_rmw_data_check` — two captured data sessions replayed into a graph session that holds one
+  subscription. A talker's 11 samples are delivered and 28 other pushes are dropped. The `INTEREST` is
+  answered with a `DeclareFinal`, and the 8 Puts a listener asks for equal what `scripts/lib/zenoh_wire.py`
+  writes. 7 variants are refused. The captured batches reach the Rust through
+  `contracts/zenoh-rmw-data/v1`. It records 140 cases and 208 negative controls;
 - `just zenoh_xcheck_check` — the codec and session against the real eclipse-zenoh 1.0.0
   crates: the 17 corpus batches as upstream's encoder produces them, a 6000-case sweep
   (5993 compared, 7 refused as a non-canonical Zenoh ID, none differing), our decoder
