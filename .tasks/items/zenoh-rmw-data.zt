@@ -3,37 +3,38 @@ h ::= import "./helpers.zt";
 
 item :: s.Item = (h.task "01a1e837-2355-7509-b9bc-ae166ec3b47f" "zenoh-rmw-data" "zenoh-transport"
   "A Profile 0 graph session holds one subscription of its own and delivers and sends samples on one key"
-  "The graph session drops every push, because it holds no subscription, and it writes no declaration. An rmw_zenoh talker's samples therefore never reach a Slime owner, and a listener's subscription is never answered. Both captured data sessions also carry an INTEREST on `@ros2_lv/0/**` as the second message of the third batch, and the graph session refuses it as `unsupported-message`, which ends the connection before any sample.")
+  "The graph session drops every push, because it holds no subscription, and it writes no declaration. An rmw_zenoh talker's samples therefore never reach a Slime owner, and a listener's subscription is never answered. Both captured data sessions also carry an INTEREST on `@ros2_lv/0/**` in their fourth batch, after a key alias declaration, and the graph session refuses it as `unsupported-message`, which ends the connection before any sample.")
   with {
     owns = {
       "components/lib/src/zenoh_rmw_data*";
       "components/lib/src/zenoh_rmw_data/**";
+      "contracts/zenoh-rmw-data/**";
       "components/lib/src/zenoh_profile0/graph.rs";
       "components/lib/src/zenoh_rmw_graph.rs";
       "components/lib/src/lib.rs";
     };
     nonGoals = {
       h.nonGoal "Declaring a liveliness token. The captures show an rmw_zenoh peer sends data without one, so a Slime node does not appear in `ros2 topic list`." h.agentDefault;
-      h.nonGoal "Answering an INTEREST. The session reads one INTEREST of the pinned shape and sends nothing in reply." h.agentDefault;
+      h.nonGoal "Answering an INTEREST. The session reads one INTEREST of the pinned shape and sends nothing in reply. Mode and options follow the Zenoh protocol specification: mode in header bits 6:5, options A M N R T Q S K." h.agentDefault;
       h.nonGoal "A component, a composition or a QEMU gate. This item judges the session on the host over captured bytes." h.agentDefault;
       h.nonGoal "A router, two peers, best-effort QoS or a type other than `std_msgs/String`. One capture of each direction is the evidence." h.agentDefault;
       h.nonGoal "Changing the plain session, the plain link or any pinned refusal of earlier exams." h.agentDefault;
     };
     requirements = {
       h.req "reads-the-captured-interest"
-        "Both captured sessions, replayed batch by batch, are accepted whole. The one INTEREST of id 3, options `0x79` over `@ros2_lv/0/**` is read and answered with no byte."
+        "Both captured sessions, replayed batch by batch from the record the checker hands over, are accepted whole. The one INTEREST of id 3, mode 1 (current), options `0x79` over `@ros2_lv/0/**` is read, and the session writes 0 bytes during either replay."
         { "zenoh_rmw_data_check"; };
       h.req "delivers-the-talkers-samples"
-        "A session that holds one subscription on the chatter key delivers 7 samples of the talker with sequence numbers 1 to 7, their timestamps and their CDR strings, and drops 20 other pushes."
+        "A session that holds one subscription on the chatter key delivers 7 samples of the talker with sequence numbers 1 to 7, their timestamps and their CDR strings, and drops and counts 20 pushes to other keys. A push to a key with no subscription is a drop, not a refusal."
         { "zenoh_rmw_data_check"; };
       h.req "sends-on-the-peers-subscription"
         "After the listener declares a subscriber on the chatter key, the session writes 6 Puts that equal the bytes `zenoh_wire` writes, in the sender mapping with a timestamp and a 33-byte attachment."
         { "zenoh_rmw_data_check"; };
       h.req "refuses-what-it-must"
-        "A Put on another topic, a second subscription, a send before the peer declares, a send to another key, a payload of 23 bytes, and an INTEREST with a second key, for subscribers or for the future only, are each refused with the class the exam pins."
+        "A second subscription, a send before the peer declares, a send to another key, a payload of 23 bytes, and an INTEREST with a second key, for subscribers or for the future only, are each refused with the class the exam pins."
         { "zenoh_rmw_data_check"; };
       h.req "controls-are-refused"
-        "The judge refuses 168 corrupted records before it judges the real run."
+        "The judge refuses 181 corrupted records before it judges the real run, among them records of the hand-off under `contracts/zenoh-rmw-data/v1` that change, drop or add a captured batch."
         { "zenoh_rmw_data_check"; };
       h.req "neighbours-pass-unchanged"
         "The session exam and the graph exam pass unchanged beside the data slice."
@@ -41,8 +42,8 @@ item :: s.Item = (h.task "01a1e837-2355-7509-b9bc-ae166ec3b47f" "zenoh-rmw-data"
     };
     acceptance = {
       h.observedWhere "zenoh_rmw_data_check" {
-        h.count "casesObserved" 117;
-        h.count "negativeControlsRefused" 168;
+        h.count "casesObserved" 118;
+        h.count "negativeControlsRefused" 181;
       };
     };
     decisions = {

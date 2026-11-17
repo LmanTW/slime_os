@@ -97,7 +97,7 @@ zenoh_rmw_graph_check:
 
 # A Profile 0 graph session that holds one subscription of its own. The two captured data sessions of an
 # rmw_zenoh_cpp peer are replayed into it: a talker's 7 samples are delivered, 20 other pushes are dropped,
-# the peer's INTEREST is read, and the Puts a listener's subscription asks for are written to the byte. The
+# the peer's INTEREST is read and not answered, and the Puts a listener's subscription asks for are written to the byte. The
 # expected transcript is built by scripts/lib/zenoh_rmw_data_exam.py from the captured bytes in
 # scripts/lib/zenoh_rmw_data_peer.py. The session and graph exams run beside it. Nothing here needs a
 # registry or a ROS install. Fails until the data session exists.

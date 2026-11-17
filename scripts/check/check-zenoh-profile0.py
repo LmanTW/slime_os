@@ -2049,6 +2049,7 @@ def rmw_link_main(controls_only: bool) -> int:
 
 
 RMW_DATA_FILTER = "zenoh_rmw_data::"
+RMW_DATA_FIXTURES = ROOT / "build" / "zenoh-rmw-data" / "fixtures.zti"
 # The exam's own Rust tests, by name: a filter that matches nothing passes silently.
 RMW_DATA_TESTS = tuple(f"zenoh_rmw_data::{name}" for name in (
     "the_data_exam",
@@ -2068,7 +2069,18 @@ def run_rmw_data() -> list[str]:
         zenoh_rmw_graph_exam.judge(graph_lines)
     except zenoh_rmw_graph_exam.GraphExamError as error:
         fail(str(error))
-    environment = {**_os.environ, "ZENOH_RMW_FIXTURES": str(RMW_FIXTURES), "ZENOH_RMW_GRAPH_FIXTURES": str(RMW_GRAPH_FIXTURES)}
+    RMW_DATA_FIXTURES.parent.mkdir(parents=True, exist_ok=True)
+    RMW_DATA_FIXTURES.write_text(zenoh_rmw_data_exam.fixture_zti())
+    try:
+        zenoh_rmw_data_exam.validate_handoff(RMW_DATA_FIXTURES.read_text())
+    except zenoh_rmw_data_exam.DataExamError as error:
+        fail(str(error))
+    environment = {
+        **_os.environ,
+        "ZENOH_RMW_FIXTURES": str(RMW_FIXTURES),
+        "ZENOH_RMW_GRAPH_FIXTURES": str(RMW_GRAPH_FIXTURES),
+        "ZENOH_RMW_DATA_FIXTURES": str(RMW_DATA_FIXTURES),
+    }
     data_stdout, data_output = cargo_tests((RMW_DATA_FILTER,), environment)
     data_passed = tests_passed(data_output)
     data_missing = [name for name in RMW_DATA_TESTS if name not in data_passed]

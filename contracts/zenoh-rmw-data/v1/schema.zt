@@ -1,0 +1,85 @@
+-- The captured batches of the rmw_zenoh data exam, handed from its checker to its Rust tests.
+--
+-- `check-zenoh-profile0.py --slice rmw-data` writes one record of this shape to
+-- `build/zenoh-rmw-data/fixtures.zti`; the `zenoh_rmw_data::` tests read it. The rows are the batches an
+-- rmw_zenoh_cpp peer sent to a Slime-side peer in two captured sessions, from `scripts/lib/zenoh_rmw_data_peer.py`,
+-- each as lower-case hex without the 2-byte stream length. Only the container is fixed here; the wire format is
+-- Zenoh's and the judge owns it.
+
+d ::= import stdlib.data;
+r ::= import stdlib.result;
+
+Row :: type {
+  name : Text;
+  bytes : Text;
+};
+
+Capture :: type {
+  formatVersion : Int;
+  peerpub : List Row;
+  slimepub : List Row;
+};
+
+FromData @Row :: derive
+FromData @Capture :: derive
+
+formatVersion :: Int = 1;
+peerpubCount :: Int = 45;
+slimepubCount :: Int = 44;
+maxBatchBytes :: Int = 512;
+
+-- `decode` ignores a field it does not know, so the field set is closed here.
+topFields :: List Text = { "formatVersion"; "peerpub"; "slimepub"; };
+rowFields :: List Text = { "name"; "bytes"; };
+
+isAllowed :: Text -> List Text -> Bool
+  = wanted allowed => match allowed {
+    | {;} => false;
+    | {head; ...tail} => if head == wanted then true else isAllowed wanted tail;
+  };
+
+onlyThese :: List Text -> List d.DataField -> Bool
+  = allowed found => match found {
+    | {;} => true;
+    | {head; ...tail} => isAllowed head.name allowed && onlyThese allowed tail;
+  };
+
+recordIsClosed :: List Text -> Data -> Bool
+  = allowed data => match d.asRecord data {
+    | #ok { value = found; } => onlyThese allowed found;
+    | #err { error = _; } => true;
+  };
+
+everyRowClosed :: List Data -> Bool
+  = rows => match rows {
+    | {;} => true;
+    | {head; ...tail} => recordIsClosed rowFields head && everyRowClosed tail;
+  };
+
+rowsAreClosed :: Text -> Data -> Bool
+  = group data => match d.field group data {
+    | #ok { value = value; } => match d.asList value {
+      | #ok { value = rows; } => everyRowClosed rows;
+      | #err { error = _; } => true;
+    };
+    | #err { error = _; } => true;
+  };
+
+closedCapture :: Data -> Bool
+  = data => recordIsClosed topFields data && rowsAreClosed "peerpub" data && rowsAreClosed "slimepub" data;
+
+extraField :: DecodeIssue
+  = { path = {;}; error = #custom { message = "a field the contract does not name"; }; };
+
+decodeCapture :: Data -> Validation DecodeIssue Capture
+  = data => if closedCapture data then decode data else r.invalidOne extraField;
+
+{
+  Row =;
+  Capture =;
+  decodeCapture =;
+  formatVersion =;
+  peerpubCount =;
+  slimepubCount =;
+  maxBatchBytes =;
+}

@@ -29,7 +29,10 @@ from __future__ import annotations
 
 import hashlib
 import re
+import shutil
+import tempfile
 from collections.abc import Callable
+from pathlib import Path
 
 import zenoh_rmw_data_peer as peer
 import zenoh_rmw_exam
@@ -37,9 +40,11 @@ import zenoh_rmw_graph_exam
 import zenoh_rmw_link_exam
 import zenoh_rmw_wire as wire
 import zenoh_wire
+import zutai_cli
 from harness import ROOT
 
 ITEM = ROOT / ".tasks" / "items" / "zenoh-rmw-data.zt"
+SCHEMA = ROOT / "contracts" / "zenoh-rmw-data" / "v1" / "schema.zt"
 
 KEY = "0/chatter/std_msgs::msg::dds_::String_/RIHS01_df668c740482bbd48fb39d76a70dfd4bd59db1288021743503259e948f6b1a18"
 SUBSCRIPTION_ID = 1
@@ -50,6 +55,7 @@ COOKIE = zenoh_rmw_link_exam.COOKIE
 # The sequence number our listener's OPEN_ACK announces. Our first frame carries it.
 FIRST_SN = 7
 SENT = 6
+INTEREST_MODE = 1
 INTEREST_OPTIONS = 0x79
 INTEREST_ID = 3
 INTEREST_KEY = "@ros2_lv/0/**"
@@ -81,6 +87,100 @@ GROUPS = (
     ("SLIMEPUB_OURS", peer.SLIMEPUB_OURS),
 )
 
+
+# ------------------------------------------------------------------------------------------ the hand-off
+
+
+def fixture_zti() -> str:
+    """The captured batches of the peer, as one `contracts/zenoh-rmw-data/v1` record for the Rust tests."""
+
+    def rows(items: tuple[tuple[str, str], ...]) -> str:
+        return "".join(f'    {{ name = "{name}"; bytes = "{hexed}"; }};\n' for name, hexed in items)
+
+    return f"{{\n  formatVersion = 1;\n  peerpub = [\n{rows(peer.PEERPUB)}  ];\n  slimepub = [\n{rows(peer.SLIMEPUB)}  ];\n}}\n"
+
+
+DECODED_ENTRY = re.compile(r'\s*\{ bytes = "([0-9a-f]*)";\s+name = "([^"\\]*)" \}\s*')
+
+
+def _decoded_rows(decoded: str, group: str) -> list[tuple[str, str]]:
+    start = re.search(rf"\b{group} = \[", decoded)
+    _need(start is not None, f"data hand-off: the decoded record has no {group} group")
+    assert start is not None
+    position, rows = start.end(), []
+    while True:
+        entry = DECODED_ENTRY.match(decoded, position)
+        _need(entry is not None, f"data hand-off: {group} holds an entry the checker cannot read at offset {position}")
+        assert entry is not None
+        rows.append((entry.group(2), entry.group(1)))
+        position = entry.end()
+        if decoded[position : position + 1] == "]":
+            return rows
+        _need(decoded[position : position + 1] == ";", f"data hand-off: {group} is not a list of entries at offset {position}")
+        position += 1
+
+
+def validate_handoff(text: str) -> None:
+    """The record decodes under the contract and holds exactly the pinned batches, each within 512 bytes."""
+    (ROOT / "build").mkdir(exist_ok=True)
+    scratch = Path(tempfile.mkdtemp(prefix="zenoh-rmw-data-", dir=ROOT / "build"))
+    try:
+        shutil.copyfile(SCHEMA, scratch / "schema.zt")
+        (scratch / "decode.zt").write_text(
+            's ::= import "schema.zt"; env ::= import stdlib.env; load ::= import stdlib.load; '
+            "main :: { env : Env; load : Load; } -> Validation DecodeIssue s.Capture ! { * env.GetEffects; * load.ZtiEffects; } "
+            '= caps => [ path := env.get caps.env "SLIME_ZENOH_RMW_DATA_FIXTURES_PATH" ?? ""; s.decodeCapture (load.zti caps.load path) ]; main\n'
+        )
+        record = scratch / "fixtures.zti"
+        record.write_text(text)
+        try:
+            decoded = zutai_cli.evaluate("run", scratch / "decode.zt", input_path=record, env_var="SLIME_ZENOH_RMW_DATA_FIXTURES_PATH")
+        except zutai_cli.ZutaiError as error:
+            raise DataExamError(f"data hand-off does not decode under contracts/zenoh-rmw-data/v1: {error}") from error
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+    _need(decoded.startswith("#valid"), f"data hand-off is refused by contracts/zenoh-rmw-data/v1: {decoded[:200]}")
+    version = re.search(r"\bformatVersion = (\d+)", decoded)
+    _need(version is not None and int(version.group(1)) == 1, "data hand-off: formatVersion is not 1")
+    for group, expected in (("peerpub", peer.PEERPUB), ("slimepub", peer.SLIMEPUB)):
+        rows = _decoded_rows(decoded, group)
+        _need(rows == list(expected), f"data hand-off: {group} is not the {len(expected)} batches the exam pins")
+        _need(all(len(hexed) <= 1024 for _name, hexed in rows), f"data hand-off: {group} holds a batch over 512 bytes")
+
+
+def handoff_controls() -> int:
+    honest = fixture_zti()
+    first_name, first_hex = peer.PEERPUB[0]
+    first = f'    {{ name = "{first_name}"; bytes = "{first_hex}"; }};\n'
+    respelled = honest.replace(first, f'    {{\n      name = "{first_name}";\n      bytes = "{first_hex}";\n    }};\n', 1).replace("formatVersion = 1;", "formatVersion =\n    1;", 1)
+    _need(respelled != honest, "control: the respelled honest hand-off equals the original")
+    validate_handoff(honest)
+    validate_handoff(respelled)
+    last_name, last_hex = peer.SLIMEPUB[-1]
+    last = f'    {{ name = "{last_name}"; bytes = "{last_hex}"; }};\n'
+    mutations = [
+        ("a missing group", honest.replace("  slimepub = [", "  slimepux = [")),
+        ("a wrong format version", honest.replace("formatVersion = 1;", "formatVersion = 2;")),
+        ("a peerpub batch missing", honest.replace(first, "", 1)),
+        ("a slimepub batch missing", honest.replace(last, "", 1)),
+        ("a batch with a byte changed", honest.replace(f'bytes = "{first_hex}"', f'bytes = "{first_hex[:-2]}{"00" if first_hex[-2:] != "00" else "01"}"', 1)),
+        ("a batch of 513 bytes", honest.replace(f'bytes = "{first_hex}"', 'bytes = "' + "00" * 513 + '"', 1)),
+        ("a row with no bytes", honest.replace('bytes = "', 'bytex = "', 1)),
+        ("a row with an extra field", honest.replace(first, first.replace(" }", ' extra = "x"; }'), 1)),
+        ("a record with an extra field", honest.replace("formatVersion = 1;", 'formatVersion = 1;\n  extra = [];', 1)),
+        ("an empty record", "{}\n"),
+    ]
+    refused = 0
+    for label, text in mutations:
+        _need(text != honest, f"control: {label} did not change the hand-off")
+        try:
+            validate_handoff(text)
+        except DataExamError:
+            refused += 1
+            continue
+        raise DataExamError(f"control: the data hand-off check accepted {label}")
+    return refused
+
 # --------------------------------------------------------------------------------------- read the peer
 
 
@@ -97,19 +197,26 @@ def read_string(payload: bytes) -> str:
     return payload[8:-1].decode()
 
 
-def _interest(reader: wire.Reader, aliases: dict[int, str]) -> tuple[int, int, str]:
-    """INTEREST: <hdr 0xb9><id><options><scope><key length><suffix><ext>. The capture names the key by the
-    alias the peer declared just before it, `@ros2_lv/0`, plus the suffix `/**`."""
+def _interest(reader: wire.Reader, aliases: dict[int, str]) -> tuple[int, int, int, str]:
+    """INTEREST: <hdr: Z, mode in bits 6:5, id 0x19><id><options><scope><key length><suffix><ext>.
+
+    The options byte is A M N R T Q S K from bit 7 to bit 0. The capture's header is `0xb9`, mode 1 (current),
+    and its options are `0x79`: keyexprs, tokens, restricted, named, the sender's mapping. The key is the alias
+    the peer declared just before it, `@ros2_lv/0`, plus the suffix `/**`.
+    """
     header = reader.u8()
     _need(header & 0x1F == 0x19, "not an INTEREST")
-    _need(header == 0xB9, f"an INTEREST header of {header:#04x}, the capture's is 0xb9")
+    mode = (header >> 5) & 3
+    _need(mode != 0, "a final INTEREST, which carries no options byte")
     ident = reader.leb()
     options = reader.u8()
+    _need(options & 0x10 and options & 0x20, "an INTEREST that is not restricted to a named key")
     scope = reader.leb()
     _need(scope in aliases, "an INTEREST that names an alias the peer did not declare")
     suffix = reader.take(reader.leb()).decode()
-    wire.extensions(reader)
-    return ident, options, aliases[scope] + suffix
+    if header & 0x80:
+        wire.extensions(reader)
+    return ident, mode, options, aliases[scope] + suffix
 
 
 def walk(batch: bytes, aliases: dict[int, str]):
@@ -136,7 +243,7 @@ class Samples:
     def __init__(self) -> None:
         self.delivered: list[tuple[int, int, str]] = []
         self.dropped = 0
-        self.interests: list[tuple[int, int, str]] = []
+        self.interests: list[tuple[int, int, int, str]] = []
         self.aliases: dict[int, str] = {}
         self.peer_subscribers: dict[int, str] = {}
 
@@ -207,14 +314,13 @@ def check_written() -> None:
 # --------------------------------------------------------------------------------------- the transcript
 
 REFUSALS = (
-    ("put-on-another-topic", "undeclared-key"),
     ("put-with-a-second-subscription", "subscriber-limit"),
     ("send-before-the-peer-declares", "undeclared-key"),
     ("send-to-another-key", "undeclared-key"),
     ("send-over-the-payload-bound", "over-bound"),
     ("interest-with-a-second-key", "unsupported-message"),
     ("interest-for-subscribers", "unsupported-message"),
-    ("interest-future-only", "unsupported-message"),
+    ("interest-future-mode", "unsupported-message"),
 )
 
 # The payload bound of the exam's session, in CDR bytes. `Hello Slime 0` is 13 characters and 22 bytes with its
@@ -236,7 +342,9 @@ def good_lines() -> list[str]:
     lines.append(f"data dropped peerpub {peerpub.dropped}")
     lines.append(f"data delivered-none slimepub {len(slimepub.delivered)}")
     lines.append(f"data dropped slimepub {slimepub.dropped}")
-    lines.append(f"data interest {INTEREST_ID} {INTEREST_OPTIONS:#04x} {INTEREST_KEY}")
+    lines.append("data replay-wrote peerpub 0")
+    lines.append("data replay-wrote slimepub 0")
+    lines.append(f"data interest {INTEREST_ID} {INTEREST_MODE} {INTEREST_OPTIONS:#04x} {INTEREST_KEY}")
     lines.append(f"data wrote subscriber {subscriber_frame().hex()}")
     for number in range(SENT):
         lines.append(f"data wrote put-{number} {put_frame(number).hex()}")
@@ -265,7 +373,7 @@ def judge(lines: list[str]) -> tuple[int, int]:
 
 def reference_agrees(
     groups: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = GROUPS,
-    interest: tuple[int, int, str] = (INTEREST_ID, INTEREST_OPTIONS, INTEREST_KEY),
+    interest: tuple[int, int, int, str] = (INTEREST_ID, INTEREST_MODE, INTEREST_OPTIONS, INTEREST_KEY),
     write: Callable[[int], bytes] = put_frame,
     delivered: int | None = None,
 ) -> None:
@@ -297,9 +405,10 @@ def reference_controls() -> int:
 
     cases: list[tuple[str, dict, str]] = [
         ("a captured batch with a byte changed", {"groups": corrupt("PEERPUB", 5, lambda h: h[:-2] + ("00" if h[-2:] != "00" else "01"))}, "not the ones the exam pins"),
-        ("an INTEREST with another id", {"interest": (4, INTEREST_OPTIONS, INTEREST_KEY)}, "the exam names"),
-        ("an INTEREST with other options", {"interest": (INTEREST_ID, 0x73, INTEREST_KEY)}, "the exam names"),
-        ("an INTEREST over another key", {"interest": (INTEREST_ID, INTEREST_OPTIONS, "@ros2_lv/1/**")}, "the exam names"),
+        ("an INTEREST with another id", {"interest": (4, INTEREST_MODE, INTEREST_OPTIONS, INTEREST_KEY)}, "the exam names"),
+        ("an INTEREST with other options", {"interest": (INTEREST_ID, INTEREST_MODE, 0x73, INTEREST_KEY)}, "the exam names"),
+        ("an INTEREST over another key", {"interest": (INTEREST_ID, INTEREST_MODE, INTEREST_OPTIONS, "@ros2_lv/1/**")}, "the exam names"),
+        ("an INTEREST of another mode", {"interest": (INTEREST_ID, 3, INTEREST_OPTIONS, INTEREST_KEY)}, "the exam names"),
         ("a talker that gave six samples", {"delivered": 6}, "the item says 7"),
         ("a talker that gave eight samples", {"delivered": 8}, "the item says 7"),
         ("a written Put with a sample number off by one", {"write": lambda number: put_frame(number + 1)}, "is not what zenoh_wire writes"),
@@ -324,7 +433,7 @@ def transcript_mutations() -> list[tuple[str, list[str]]]:
         out[first], out[second] = out[second], out[first]
         return out
 
-    kinds = {k: [i for i, line in enumerate(good) if line.startswith(f"data {k} ")] for k in ("replay", "delivered", "dropped", "wrote", "refused", "ok", "interest")}
+    kinds = {k: [i for i, line in enumerate(good) if line.startswith(f"data {k} ")] for k in ("replay", "delivered", "dropped", "wrote", "refused", "ok", "interest", "replay-wrote")}
     out: list[tuple[str, list[str]]] = [
         ("an empty transcript", []),
         ("a line that is not a data exam line", [*good, "link ok talker-whole"]),
@@ -340,7 +449,7 @@ def transcript_mutations() -> list[tuple[str, list[str]]]:
     ]
     for index, line in enumerate(good):
         out.append((f"line {index} missing ({line[:44]})", [*good[:index], *good[index + 1 :]]))
-    for kind in ("delivered", "dropped", "wrote", "refused", "interest"):
+    for kind in ("delivered", "dropped", "wrote", "refused", "interest", "replay-wrote"):
         for index in kinds[kind][:10]:
             fields = good[index].split(" ")
             last = fields[-1]
@@ -378,14 +487,14 @@ def transcript_controls() -> int:
 
 
 def all_controls() -> int:
-    return transcript_controls() + reference_controls()
+    return transcript_controls() + reference_controls() + handoff_controls()
 
 
 # What the item fixes, held here as well so the gate stays correct after the item is closed and moved to
 # .tasks/terminal. While the item is open its stored predicates are compared with these. Both are exact.
-PINNED_CASES = 117
-PINNED_REFUSALS = 8
-PINNED_CONTROLS = 168
+PINNED_CASES = 118
+PINNED_REFUSALS = 7
+PINNED_CONTROLS = 181
 
 
 def item_pins() -> tuple[int, int]:

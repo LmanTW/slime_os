@@ -14,9 +14,10 @@ side's batches (`*_OURS`) were written by `zenoh_wire` and are not fixtures of t
   declaration on the full chatter key and wrote 6 Puts on exactly that key. The listener printed
   `I heard: [Hello Slime 0]` to `5`. 44 batches.
 
-Both peers send one INTEREST as the second message of their third batch, header `0xb9`, interest id 3,
-options `0x79` (keyexprs and tokens, restricted, current and future) over `@ros2_lv/0/**`, behind the network
-QoS extension. A Slime session that refuses it ends the connection at that batch.
+Both peers send one INTEREST in their fourth batch, `peerpub-04-frame` and `slimepub-04-frame`, as the second
+message after a key alias declaration. Its header is `0xb9`: mode 1 (current) in bits 6:5 and an extension chain.
+Its interest id is 3 and its options are `0x79`: keyexprs, tokens, restricted, named and the sender's mapping. It
+covers `@ros2_lv/0/**` and carries the network QoS extension. A Slime session that refuses it ends the connection at that batch.
 
 What this does not cover: a router, two peers, best-effort QoS, a type other than `std_msgs/String`, a
 peer other than this one, and what `ros2 topic list` shows of a Slime node. See `.tasks/items/zenoh-rmw-data.zt`.
