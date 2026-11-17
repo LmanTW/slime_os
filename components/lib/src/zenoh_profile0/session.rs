@@ -338,6 +338,23 @@ fn same(left: &[u8], right: &[u8]) -> bool {
             == 0
 }
 
+fn put_byte(out: &mut [u8], at: &mut usize, byte: u8) -> Result<(), SessionError> {
+    *out.get_mut(*at).ok_or(EncodeError::OutputTooSmall)? = byte;
+    *at += 1;
+    Ok(())
+}
+
+fn put_leb(out: &mut [u8], at: &mut usize, mut value: u32) -> Result<(), SessionError> {
+    loop {
+        let low = (value & 0x7F) as u8;
+        value >>= 7;
+        if value == 0 {
+            return put_byte(out, at, low);
+        }
+        put_byte(out, at, low | 0x80)?;
+    }
+}
+
 /// What a table that would not take a slot means: `full` for a table with no room.
 fn table_error(error: InsertError, full: SessionError) -> SessionError {
     match error {
@@ -516,6 +533,53 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize> SessionOf<K
         self.rx_sn = self.rx_sn.wrapping_add(1);
         self.last_rx_ms = now_ms;
         self.now_ms = now_ms;
+    }
+
+    /// A graph session's Put on a key the peer declared a subscriber for. The graph session holds the
+    /// peer's subscribers and has checked the key, so this checks only what the plain `send_put` checks
+    /// of the Put itself: the attachment, the payload bound and one FRAME.
+    pub(super) fn graph_send_put<'a>(
+        &mut self,
+        key: &str,
+        attachment: &[u8],
+        payload: &[u8],
+        out: &mut [u8],
+    ) -> Result<Outcome<'a, E>, SessionError> {
+        if payload.len() > self.params.bounds.payload {
+            return Err(SessionError::Decode(Refusal::OverBound));
+        }
+        encode::validate_put(key, attachment, payload.len(), &self.params.bounds)?;
+        if self.state == State::Open && !self.put_fits_one_frame(key, attachment, payload.len()) {
+            return Err(SessionError::Decode(Refusal::OverBound));
+        }
+        self.send_frame(out, |frame| {
+            frame.push_put(Mapping::Sender, key, attachment, payload)
+        })
+    }
+
+    /// A graph session's answer to an INTEREST: one reliable FRAME holding a DECLARE with the interest
+    /// flag, the interest id and a DeclareFinal. `FrameEncoder` writes no such message, so the bytes are
+    /// written here. The sequence number is spent only when the frame was built.
+    pub(super) fn graph_send_final<'a>(
+        &mut self,
+        interest: u32,
+        out: &mut [u8],
+    ) -> Result<Outcome<'a, E>, SessionError> {
+        if self.state != State::Open {
+            return Err(SessionError::NotOpen);
+        }
+        let mut at = 0;
+        put_byte(out, &mut at, p::ID_FRAME as u8 | p::FLAG_BIT5 as u8)?;
+        put_leb(out, &mut at, self.tx_sn)?;
+        put_byte(out, &mut at, p::ID_DECLARE as u8 | p::FLAG_BIT5 as u8)?;
+        put_leb(out, &mut at, interest)?;
+        put_byte(out, &mut at, p::ID_DECLARE_FINAL as u8)?;
+        if at > self.send_body_max() {
+            return Err(EncodeError::BatchTooLarge.into());
+        }
+        self.tx_sn = self.tx_sn.wrapping_add(1);
+        self.sent_now(self.now_ms);
+        Ok(Outcome::sending(at))
     }
 
     pub const fn role(&self) -> Role {

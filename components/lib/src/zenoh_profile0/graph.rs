@@ -6,16 +6,19 @@
 //! [`GraphSessionOf`] is a separate type, selected by `Params::graph`, so no plain decoder, event or
 //! error gains a variant and the stock-peer exams keep their pinned refusals.
 //!
-//! A graph session records declarations and sends nothing in reply. It holds no subscription of its own,
-//! so every PUSH is dropped and counted. A FRAME is applied whole or not at all, as in the plain session.
-//! Keys and counts are bounded by the const parameters, and nothing allocates.
+//! A graph session records declarations. It holds at most one subscription of its own, declared with
+//! [`GraphSessionOf::send_declare_subscriber`], and delivers a PUSH on that key as a [`Sample`]. Every other
+//! PUSH is dropped and counted. It answers the one INTEREST an rmw_zenoh peer sends over `@ros2_lv` with a
+//! DeclareFinal and no declaration, and refuses any other INTEREST. [`GraphSessionOf::send_put`] writes a
+//! Put on a key the peer declared a subscriber for. A FRAME is applied whole or not at all, as in the plain
+//! session. Keys and counts are bounded by the const parameters, and nothing allocates.
 
 use super::session::{Config, Event, Outcome, Params, Role, SessionError, SessionOf, State};
 use super::tables::{InsertError, Keys, SlotTable};
 use super::{
     Bounds, FLAG_BIT5, FLAG_BIT6, FLAG_Z, ID_D_FINAL, ID_DECLARE, ID_FRAME, ID_MASK, ID_PUSH,
-    ID_PUT, MAX_ATTACHMENT_BYTES, Message, Reader, Refusal, decode_batch_in, key_reference,
-    network_qos_extension,
+    ID_PUT, MAX_ATTACHMENT_BYTES, Message, Reader, Refusal, decode_batch_in,
+    key_reference, network_qos_extension,
 };
 use slime_proto::zenoh_profile as p;
 
@@ -44,6 +47,18 @@ const SOURCE_INFO_EXT: u8 = 1;
 const ATTACHMENT_EXT: u8 = 3;
 const SOURCE_INFO_MAX: usize = 64;
 const TIMESTAMP_ZID_MAX: usize = 16;
+
+/// The network message id of an INTEREST.
+const ID_INTEREST: u8 = 0x19;
+/// The only INTEREST mode a graph session takes: current, in header bits 6:5.
+pub const INTEREST_MODE: u8 = 1;
+/// The only INTEREST options it takes: keyexprs and tokens (`K`, `T`), restricted (`R`), named (`N`) and the
+/// sender's mapping (`M`), from the Zenoh protocol's `A M N R T Q S K` byte.
+pub const INTEREST_OPTIONS: u8 = 0x79;
+const ATTACHMENT_GID_LEN_AT: usize = 16;
+const GID_BYTES: u8 = 16;
+const LIVELINESS_PREFIX: &[u8] = b"@ros2_lv/";
+const LIVELINESS_SUFFIX: &[u8] = b"/**";
 
 const ID_D_QUERYABLE: u8 = 4;
 const ID_D_TOKEN: u8 = 6;
@@ -108,6 +123,14 @@ pub enum GraphNetwork<'a> {
     },
     Final,
     Push {
+        key: WireKey<'a>,
+        payload: &'a [u8],
+        /// The 33-byte attachment, when the Put carried one.
+        attachment: Option<&'a [u8]>,
+    },
+    /// An INTEREST of the one shape the session takes.
+    Interest {
+        id: u32,
         key: WireKey<'a>,
     },
 }
@@ -355,9 +378,10 @@ fn declare<'a>(
 }
 
 /// The extensions of a Put a graph session takes: source info, then the attachment, each optional and
-/// each a ZBuf.
-fn put_extensions(reader: &mut Reader<'_>) -> Result<(), Refusal> {
+/// each a ZBuf. Returns the attachment, if there was one.
+fn put_extensions<'a>(reader: &mut Reader<'a>) -> Result<Option<&'a [u8]>, Refusal> {
     let mut last = 0u8;
+    let mut found = None;
     loop {
         let header = reader.u8()?;
         if header & EXT_MANDATORY != 0 || header & EXT_ENCODING_MASK != EXT_ZBUF {
@@ -381,10 +405,13 @@ fn put_extensions(reader: &mut Reader<'_>) -> Result<(), Refusal> {
             }
             _ => return Err(Refusal::UnsupportedExtension),
         }
-        reader.take(length)?;
+        let bytes = reader.take(length)?;
+        if id == ATTACHMENT_EXT {
+            found = Some(bytes);
+        }
         last = id;
         if header & EXT_MORE == 0 {
-            return Ok(());
+            return Ok(found);
         }
     }
 }
@@ -415,15 +442,50 @@ fn push<'a>(
         }
         reader.take(zid)?;
     }
-    if put & FLAG_Z != 0 {
-        put_extensions(reader)?;
-    }
+    let attachment = if put & FLAG_Z != 0 {
+        put_extensions(reader)?
+    } else {
+        None
+    };
     let size = reader.leb(p::LEB128_MAX_BITS)? as usize;
     if size > bounds.payload {
         return Err(Refusal::OverBound);
     }
-    reader.take(size)?;
-    Ok(GraphNetwork::Push { key })
+    let payload = reader.take(size)?;
+    Ok(GraphNetwork::Push {
+        key,
+        payload,
+        attachment,
+    })
+}
+
+/// An INTEREST: `<header: Z, mode in bits 6:5><id><options><scope><suffix length><suffix>[QoS]`. Only
+/// the current mode and the one options byte are taken, so a future-only interest, one for subscribers and
+/// a final one are refused as unsupported.
+fn interest<'a>(
+    reader: &mut Reader<'a>,
+    header: u8,
+    bounds: &Bounds,
+) -> Result<GraphNetwork<'a>, Refusal> {
+    if (header >> 5) & 0x03 != INTEREST_MODE {
+        return Err(Refusal::UnsupportedMessage);
+    }
+    let id = reader.leb(p::LEB128_MAX_BITS)?;
+    if reader.u8()? != INTEREST_OPTIONS {
+        return Err(Refusal::UnsupportedMessage);
+    }
+    let key = wire_key(reader, true, true, bounds)?;
+    if header & FLAG_Z != 0 {
+        network_qos_extension(reader)?;
+    }
+    Ok(GraphNetwork::Interest { id, key })
+}
+
+/// Whether `key` is `@ros2_lv/<domain>/**`, the one key an rmw_zenoh peer asks about.
+fn liveliness_interest(key: &[u8]) -> bool {
+    key.strip_prefix(LIVELINESS_PREFIX)
+        .and_then(|rest| rest.strip_suffix(LIVELINESS_SUFFIX))
+        .is_some_and(|domain| !domain.is_empty() && domain.iter().all(u8::is_ascii_digit))
 }
 
 fn parse_graph_network<'a>(
@@ -434,6 +496,7 @@ fn parse_graph_network<'a>(
     match header & ID_MASK {
         ID_DECLARE => declare(reader, header, bounds),
         ID_PUSH => push(reader, header, bounds),
+        ID_INTEREST => interest(reader, header, bounds),
         _ => Err(Refusal::UnsupportedMessage),
     }
 }
@@ -544,7 +607,12 @@ pub struct Counts {
     pub unqueryable: u32,
     pub untoken: u32,
     pub finals: u32,
+    /// Every PUSH accepted, whether delivered or dropped.
     pub push: u32,
+    /// The PUSHes delivered to the session's own subscription.
+    pub delivered: u32,
+    /// The INTERESTs answered.
+    pub interest: u32,
 }
 
 impl Counts {
@@ -571,6 +639,8 @@ impl Counts {
         self.untoken += other.untoken;
         self.finals += other.finals;
         self.push += other.push;
+        self.delivered += other.delivered;
+        self.interest += other.interest;
     }
 }
 
@@ -600,9 +670,20 @@ impl GraphOutcome {
     }
 }
 
+/// A Put the session's own subscription matched, reported after the FRAME that carried it was applied.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Sample<'a> {
+    /// The id the subscription was declared with.
+    pub subscription: u32,
+    pub sequence: i64,
+    pub timestamp: i64,
+    pub payload: &'a [u8],
+}
+
 /// A table change a FRAME made, so a frame that fails midway can be undone.
 #[derive(Clone, Copy, Debug)]
 enum Journal {
+    Interest(usize),
     Alias(usize),
     Declared(usize),
     Withdrawn(usize),
@@ -624,6 +705,17 @@ fn check_key(bytes: &[u8], wildcards: bool) -> Result<(), Refusal> {
     Ok(())
 }
 
+/// The sequence number and timestamp of the 33-byte attachment, when its GID length byte is 16.
+fn read_attachment(raw: &[u8]) -> Option<(i64, i64)> {
+    if raw.len() != MAX_ATTACHMENT_BYTES || raw.get(ATTACHMENT_GID_LEN_AT) != Some(&GID_BYTES) {
+        return None;
+    }
+    let word = |at: usize| -> Option<i64> {
+        Some(i64::from_le_bytes(raw.get(at..at + 8)?.try_into().ok()?))
+    };
+    Some((word(0)?, word(8)?))
+}
+
 fn insert_error(error: InsertError) -> GraphError {
     match error {
         InsertError::Duplicate => Refusal::InvalidKeyexpr.into(),
@@ -640,6 +732,8 @@ pub struct GraphSessionOf<const A: usize, const D: usize, const B: usize> {
     aliases: SlotTable<A, B>,
     /// Subscribers, queryables and tokens, by `(kind tag << 32) | id`.
     decls: SlotTable<D, B>,
+    /// The one INTEREST answered, by its id; the key is the resolved `@ros2_lv/<domain>/**`.
+    interest: SlotTable<1, B>,
     counts: Counts,
 }
 
@@ -671,7 +765,12 @@ impl<const A: usize, const D: usize, const B: usize> GraphSessionOf<A, D, B> {
     /// A session in [`State::Idle`], or [`SessionError::InvalidConfig`] when `params` is not a graph
     /// configuration of this size. `per_side` is the declarations the peer may hold.
     pub fn new(role: Role, config: &Config<'_>, params: Params) -> Result<Self, SessionError> {
-        if !params.graph || params.bounds.key != B || params.aliases != A || params.per_side != D {
+        if !params.graph
+            || params.bounds.key != B
+            || params.aliases != A
+            || params.per_side != D
+            || params.local > 1
+        {
             return Err(SessionError::InvalidConfig);
         }
         let inner_params = Params {
@@ -689,6 +788,7 @@ impl<const A: usize, const D: usize, const B: usize> GraphSessionOf<A, D, B> {
             params,
             aliases: SlotTable::new(),
             decls: SlotTable::new(),
+            interest: SlotTable::new(),
             counts: Counts::default(),
         })
     }
@@ -726,6 +826,21 @@ impl<const A: usize, const D: usize, const B: usize> GraphSessionOf<A, D, B> {
             .count()
     }
 
+    /// The INTEREST the session answered: its id and the key it named, resolved.
+    pub fn interest(&self) -> Option<(u32, &[u8])> {
+        self.interest.first().map(|(id, key)| (id as u32, key))
+    }
+
+    /// The subscription this side declared: its id and key.
+    pub fn local_subscription(&self) -> Option<(u32, &str)> {
+        Some((self.inner.subscriber_id()?, self.inner.subscriber_key()?))
+    }
+
+    /// The sequence number the next FRAME from the peer must carry.
+    pub const fn expected_rx_sn(&self) -> u32 {
+        self.inner.expected_rx_sn()
+    }
+
     /// The batch the peer announced; the session sends nothing but a handshake reply and keep-alives.
     pub const fn peer_batch(&self) -> usize {
         self.inner.peer_batch()
@@ -754,6 +869,43 @@ impl<const A: usize, const D: usize, const B: usize> GraphSessionOf<A, D, B> {
         self.inner.note_sent(now_ms);
     }
 
+    /// Declares this side's one subscription on `key`, which a Put from the peer must name to be
+    /// delivered. A second one is refused as [`SessionError::SubscriberLimit`].
+    pub fn send_declare_subscriber(
+        &mut self,
+        id: u32,
+        key: &str,
+        out: &mut [u8],
+    ) -> Result<GraphOutcome, GraphError> {
+        let outcome = self.inner.send_declare_subscriber(id, key, out)?;
+        Ok(self.plain(&outcome))
+    }
+
+    /// Writes a Put on `key`, which the peer must have declared a subscriber for. `attachment` is from
+    /// [`super::encode::attachment`]. A key the peer did not declare is [`SessionError::UndeclaredKey`], and a
+    /// Put that does not fit the payload bound or one FRAME is over the bound.
+    pub fn send_put(
+        &mut self,
+        key: &str,
+        attachment: &[u8],
+        payload: &[u8],
+        out: &mut [u8],
+    ) -> Result<GraphOutcome, GraphError> {
+        if self.inner.state() == State::Closed {
+            return Err(SessionError::Closed.into());
+        }
+        let declared = (0..D).any(|index| {
+            self.decls.get(index).is_some_and(|(id, held)| {
+                id >> 32 == Kind::Subscriber.tag() && held == key.as_bytes()
+            })
+        });
+        if !declared {
+            return Err(SessionError::UndeclaredKey.into());
+        }
+        let outcome = self.inner.graph_send_put(key, attachment, payload, out)?;
+        Ok(self.plain(&outcome))
+    }
+
     /// Closes the session locally with a CLOSE batch.
     pub fn close(&mut self, reason: u8, out: &mut [u8]) -> Result<GraphOutcome, GraphError> {
         let outcome = self.inner.close(reason, out)?;
@@ -779,11 +931,25 @@ impl<const A: usize, const D: usize, const B: usize> GraphSessionOf<A, D, B> {
         out: &mut [u8],
         visit: &mut dyn FnMut(Change<'_>),
     ) -> Result<GraphOutcome, GraphError> {
+        self.on_batch_samples(batch, now_ms, out, visit, &mut |_| {})
+    }
+
+    /// As [`on_batch_visit`](Self::on_batch_visit), and reports each Put that matched the session's own
+    /// subscription, in order, once the FRAME was applied. The batch written, if any, is the answer to an
+    /// INTEREST.
+    pub fn on_batch_samples(
+        &mut self,
+        batch: &[u8],
+        now_ms: u64,
+        out: &mut [u8],
+        visit: &mut dyn FnMut(Change<'_>),
+        samples: &mut dyn FnMut(Sample<'_>),
+    ) -> Result<GraphOutcome, GraphError> {
         if self.inner.state() == State::Closed {
             return Err(SessionError::Closed.into());
         }
         match decode_graph_batch(batch, &self.params.bounds)? {
-            GraphMessage::Frame(frame) => self.on_frame(&frame, now_ms, visit),
+            GraphMessage::Frame(frame) => self.on_frame(&frame, now_ms, out, visit, samples),
             GraphMessage::Plain(message) => {
                 let outcome = self.inner.on_message(message, now_ms, out)?;
                 Ok(self.plain(&outcome))
@@ -804,6 +970,7 @@ impl<const A: usize, const D: usize, const B: usize> GraphSessionOf<A, D, B> {
                     result.closed = Some(reason);
                     self.aliases.clear();
                     self.decls.clear();
+                    self.interest.clear();
                 }
                 _ => {}
             }
@@ -837,19 +1004,30 @@ impl<const A: usize, const D: usize, const B: usize> GraphSessionOf<A, D, B> {
         &mut self,
         frame: &GraphFrame<'_>,
         now_ms: u64,
+        out: &mut [u8],
         visit: &mut dyn FnMut(Change<'_>),
+        samples: &mut dyn FnMut(Sample<'_>),
     ) -> Result<GraphOutcome, GraphError> {
         self.inner.graph_frame_expected(frame.sn)?;
         let mut journal = [None; JOURNAL];
         let mut used = 0;
         let mut counts = Counts::default();
-        match self.apply(frame, &mut journal, &mut used, &mut counts) {
-            Ok(()) => {
+        let mut answer = None;
+        let applied = self
+            .apply(frame, &mut journal, &mut used, &mut counts, &mut answer)
+            .and_then(|()| match answer {
+                // The answer is written before the FRAME is committed, so a frame whose answer cannot be
+                // written is undone and refused.
+                Some(id) => Ok(self.inner.graph_send_final(id, out)?.sent),
+                None => Ok(0),
+            });
+        match applied {
+            Ok(sent) => {
                 for change in journal.iter().take(used).flatten() {
                     let (declared, at) = match *change {
                         Journal::Declared(at) => (true, at),
                         Journal::Withdrawn(at) => (false, at),
-                        Journal::Alias(_) => continue,
+                        Journal::Alias(_) | Journal::Interest(_) => continue,
                     };
                     let held = if declared {
                         self.decls.get(at)
@@ -872,9 +1050,11 @@ impl<const A: usize, const D: usize, const B: usize> GraphSessionOf<A, D, B> {
                         self.decls.settle(at);
                     }
                 }
+                self.deliver(frame, samples);
                 self.inner.graph_frame_accepted(now_ms);
                 self.counts.add(&counts);
                 Ok(GraphOutcome {
+                    sent,
                     counts,
                     ..GraphOutcome::default()
                 })
@@ -885,9 +1065,43 @@ impl<const A: usize, const D: usize, const B: usize> GraphSessionOf<A, D, B> {
                         Journal::Alias(at) => self.aliases.remove(at),
                         Journal::Declared(at) => self.decls.remove(at),
                         Journal::Withdrawn(at) => self.decls.restore(at),
+                        Journal::Interest(at) => self.interest.remove(at),
                     }
                 }
                 Err(error)
+            }
+        }
+    }
+
+    /// Reports each Put of an applied FRAME whose key is the session's own subscription. `apply` checked
+    /// every one, so a Put that fails to read here is skipped, and the FRAME stays applied.
+    fn deliver(&self, frame: &GraphFrame<'_>, samples: &mut dyn FnMut(Sample<'_>)) {
+        let Some((subscription, own)) = self.local_subscription() else {
+            return;
+        };
+        for network in frame.messages() {
+            let GraphNetwork::Push {
+                key,
+                payload,
+                attachment: Some(raw),
+            } = network
+            else {
+                continue;
+            };
+            let mut joined = [0u8; B];
+            let Ok(length) = self.resolve(&key, &mut joined) else {
+                continue;
+            };
+            if joined.get(..length) != Some(own.as_bytes()) {
+                continue;
+            }
+            if let Some((sequence, timestamp)) = read_attachment(raw) {
+                samples(Sample {
+                    subscription,
+                    sequence,
+                    timestamp,
+                    payload,
+                });
             }
         }
     }
@@ -898,6 +1112,7 @@ impl<const A: usize, const D: usize, const B: usize> GraphSessionOf<A, D, B> {
         journal: &mut [Option<Journal>; JOURNAL],
         used: &mut usize,
         counts: &mut Counts,
+        answer: &mut Option<u32>,
     ) -> Result<(), GraphError> {
         fn note(
             journal: &mut [Option<Journal>; JOURNAL],
@@ -957,13 +1172,43 @@ impl<const A: usize, const D: usize, const B: usize> GraphSessionOf<A, D, B> {
                     }
                 }
                 GraphNetwork::Final => counts.finals += 1,
-                GraphNetwork::Push { key } => {
-                    // The session holds no subscription, so a push is to a key nobody subscribed to: it
-                    // is dropped and counted once its key is known to be one.
+                GraphNetwork::Push {
+                    key,
+                    attachment,
+                    ..
+                } => {
+                    // A push to a key nobody subscribed to is dropped and counted once its key is known
+                    // to be one. A push to the session's own subscription must carry a readable
+                    // attachment, because the sample reports its sequence number and timestamp.
                     let mut joined = [0u8; B];
                     let length = self.resolve(&key, &mut joined)?;
-                    check_key(joined.get(..length).ok_or(Refusal::OverBound)?, false)?;
+                    let joined = joined.get(..length).ok_or(Refusal::OverBound)?;
+                    check_key(joined, false)?;
                     counts.push += 1;
+                    if self
+                        .local_subscription()
+                        .is_some_and(|(_, own)| own.as_bytes() == joined)
+                    {
+                        if attachment.and_then(read_attachment).is_none() {
+                            return Err(Refusal::MalformedMessage.into());
+                        }
+                        counts.delivered += 1;
+                    }
+                }
+                GraphNetwork::Interest { id, key } => {
+                    let mut joined = [0u8; B];
+                    let length = self.resolve(&key, &mut joined)?;
+                    let joined = joined.get(..length).ok_or(Refusal::OverBound)?;
+                    if !liveliness_interest(joined) || self.interest.len() != 0 {
+                        return Err(Refusal::UnsupportedMessage.into());
+                    }
+                    let at = self
+                        .interest
+                        .insert(u64::from(id), joined)
+                        .map_err(insert_error)?;
+                    note(journal, used, Journal::Interest(at))?;
+                    *answer = Some(id);
+                    counts.interest += 1;
                 }
             }
         }

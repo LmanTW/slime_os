@@ -24,8 +24,8 @@ FromData @Row :: derive
 FromData @Capture :: derive
 
 formatVersion :: Int = 1;
-peerpubCount :: Int = 45;
-slimepubCount :: Int = 44;
+peerpubCount :: Int = 64;
+slimepubCount :: Int = 41;
 maxBatchBytes :: Int = 512;
 
 -- `decode` ignores a field it does not know, so the field set is closed here.
