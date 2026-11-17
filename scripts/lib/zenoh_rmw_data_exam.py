@@ -54,7 +54,8 @@ ZID = zenoh_rmw_link_exam.ZID
 COOKIE = zenoh_rmw_link_exam.COOKIE
 # The sequence number our listener's OPEN_ACK announces. Our first frame carries it.
 FIRST_SN = 7
-SENT = 6
+SENT = 8
+TALKER_SAMPLES = 11
 INTEREST_MODE = 1
 INTEREST_OPTIONS = 0x79
 INTEREST_ID = 3
@@ -294,9 +295,22 @@ def subscriber_frame() -> bytes:
     return zenoh_wire.frame(FIRST_SN, zenoh_wire.declare_subscriber(SUBSCRIPTION_ID, KEY, True))
 
 
+def final_frame(sn: int) -> bytes:
+    """A DECLARE with the interest flag, the interest id and a DeclareFinal: the answer to the peer's INTEREST."""
+    declare = bytes([zenoh_wire.ID_DECLARE | 0x20, INTEREST_ID, 0x1A])
+    return zenoh_wire.frame(sn, declare)
+
+
+# Where each side's frames fall in the sequence. A talker session writes its subscriber, then the answer. A
+# listener session writes the answer, then a Put for each of the peer's chatter subscriptions.
+PEERPUB_FINAL_SN = FIRST_SN + 1
+SLIMEPUB_FINAL_SN = FIRST_SN
+FIRST_PUT_SN = FIRST_SN + 1
+
+
 def put_frame(number: int) -> bytes:
     attachment = zenoh_wire.attachment(number + 1, 1_000_000_000 + number, GID)
-    return zenoh_wire.frame(FIRST_SN + number, zenoh_wire.push_put(KEY, attachment, cdr_string(f"Hello Slime {number}"), True))
+    return zenoh_wire.frame(FIRST_PUT_SN + number, zenoh_wire.push_put(KEY, attachment, cdr_string(f"Hello Slime {number}"), True))
 
 
 def check_written() -> None:
@@ -304,9 +318,12 @@ def check_written() -> None:
     independent source of what the session must write."""
     ours = dict(peer.PEERPUB_OURS)
     _need(bytes.fromhex(ours["peerpub-ours-03"]) == subscriber_frame(), "the captured subscriber frame is not what zenoh_wire writes")
+    _need(bytes.fromhex(ours["peerpub-ours-04"]) == final_frame(PEERPUB_FINAL_SN), "the captured answer is not the DeclareFinal the exam builds")
     slime = dict(peer.SLIMEPUB_OURS)
+    _need(bytes.fromhex(slime["slimepub-ours-03"]) == final_frame(SLIMEPUB_FINAL_SN), "the captured answer is not the DeclareFinal the exam builds")
+    _need(len(peer.SLIMEPUB_OURS) == 3 + SENT and len(peer.PEERPUB_OURS) == 4, "a captured side wrote a number of batches the exam does not pin")
     for number in range(SENT):
-        name = f"slimepub-ours-{number + 3:02d}"
+        name = f"slimepub-ours-{number + 4:02d}"
         _need(bytes.fromhex(slime[name]) == put_frame(number), f"{name} is not what zenoh_wire writes")
     _need(bytes.fromhex(dict(peer.PEERPUB_OURS)["peerpub-ours-01"]) == zenoh_rmw_link_exam.init_ack(), "the captured INIT_ACK is not the link exam's")
 
@@ -342,8 +359,8 @@ def good_lines() -> list[str]:
     lines.append(f"data dropped peerpub {peerpub.dropped}")
     lines.append(f"data delivered-none slimepub {len(slimepub.delivered)}")
     lines.append(f"data dropped slimepub {slimepub.dropped}")
-    lines.append("data replay-wrote peerpub 0")
-    lines.append("data replay-wrote slimepub 0")
+    lines.append(f"data replay-wrote peerpub {final_frame(PEERPUB_FINAL_SN).hex()}")
+    lines.append(f"data replay-wrote slimepub {final_frame(SLIMEPUB_FINAL_SN).hex()}")
     lines.append(f"data interest {INTEREST_ID} {INTEREST_MODE} {INTEREST_OPTIONS:#04x} {INTEREST_KEY}")
     lines.append(f"data wrote subscriber {subscriber_frame().hex()}")
     for number in range(SENT):
@@ -378,13 +395,13 @@ def reference_agrees(
     delivered: int | None = None,
 ) -> None:
     """The captured bytes are the ones the exam pins, the peer sent exactly the one INTEREST the exam names, and
-    the host reference reads seven samples from the talker and none from the listener."""
+    the host reference reads eleven samples from the talker and none from the listener."""
     _need(capture_digest(groups) == CAPTURE_SHA256, "the captured batches are not the ones the exam pins")
     peerpub, slimepub = replay("PEERPUB"), replay("SLIMEPUB")
     _need(peerpub.interests == [interest] and slimepub.interests == [interest], f"the peers' INTERESTs are {peerpub.interests} and {slimepub.interests}, the exam names {interest}")
     count = len(peerpub.delivered) if delivered is None else delivered
-    _need(count == 7, f"the host reference reads {count} samples from the talker, the item says 7")
-    _need([s[0] for s in peerpub.delivered] == list(range(1, 8)), "the talker's samples do not carry sequence numbers 1 to 7")
+    _need(count == TALKER_SAMPLES, f"the host reference reads {count} samples from the talker, the item says {TALKER_SAMPLES}")
+    _need([s[0] for s in peerpub.delivered] == list(range(1, TALKER_SAMPLES + 1)), f"the talker's samples do not carry sequence numbers 1 to {TALKER_SAMPLES}")
     _need(not slimepub.delivered, "the listener pushed a chatter sample, so the exam's second session is not a subscriber's")
     _need(slimepub.peer_subscribers.get(23) == KEY, "the listener's subscriber on the chatter key is not id 23")
     for number in range(SENT):
@@ -409,8 +426,8 @@ def reference_controls() -> int:
         ("an INTEREST with other options", {"interest": (INTEREST_ID, INTEREST_MODE, 0x73, INTEREST_KEY)}, "the exam names"),
         ("an INTEREST over another key", {"interest": (INTEREST_ID, INTEREST_MODE, INTEREST_OPTIONS, "@ros2_lv/1/**")}, "the exam names"),
         ("an INTEREST of another mode", {"interest": (INTEREST_ID, 3, INTEREST_OPTIONS, INTEREST_KEY)}, "the exam names"),
-        ("a talker that gave six samples", {"delivered": 6}, "the item says 7"),
-        ("a talker that gave eight samples", {"delivered": 8}, "the item says 7"),
+        ("a talker that gave ten samples", {"delivered": 10}, "the item says 11"),
+        ("a talker that gave twelve samples", {"delivered": 12}, "the item says 11"),
         ("a written Put with a sample number off by one", {"write": lambda number: put_frame(number + 1)}, "is not what zenoh_wire writes"),
     ]
     refused = 0
@@ -464,7 +481,7 @@ def transcript_mutations() -> list[tuple[str, list[str]]]:
     out.append(("a sample delivered to another subscription", [good[i].replace("delivered 1 ", "delivered 2 ", 1) if i == kinds["delivered"][0] else good[i] for i in range(len(good))]))
     out.append(("a sample with another payload", [good[i].replace("Hello_World:_1", "Hello_World:_2", 1) if i == kinds["delivered"][0] else good[i] for i in range(len(good))]))
     sender_put = put_frame(0).hex()
-    receiver_put = sender_put.replace("25077d00", "25073d00", 1)
+    receiver_put = sender_put.replace("25087d00", "25083d00", 1)
     out.append(("a Put written with the receiver mapping", [good[i].replace(sender_put, receiver_put, 1) if i == kinds["wrote"][1] else good[i] for i in range(len(good))]))
     return out
 
@@ -492,9 +509,9 @@ def all_controls() -> int:
 
 # What the item fixes, held here as well so the gate stays correct after the item is closed and moved to
 # .tasks/terminal. While the item is open its stored predicates are compared with these. Both are exact.
-PINNED_CASES = 118
+PINNED_CASES = 140
 PINNED_REFUSALS = 7
-PINNED_CONTROLS = 181
+PINNED_CONTROLS = 208
 
 
 def item_pins() -> tuple[int, int]:
