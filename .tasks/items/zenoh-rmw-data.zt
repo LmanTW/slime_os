@@ -5,6 +5,7 @@ item :: s.Item = (h.task "01a1e837-2355-7509-b9bc-ae166ec3b47f" "zenoh-rmw-data"
   "A Profile 0 graph session holds one subscription of its own and delivers and sends samples on one key"
   "The graph session drops every push, because it holds no subscription, and it writes no declaration. An rmw_zenoh talker's samples therefore never reach a Slime owner, and a listener's subscription is never answered. Both captured data sessions also carry an INTEREST on `@ros2_lv/0/**` in their fourth batch, after a key alias declaration, and the graph session refuses it as `unsupported-message`, which ends the connection before any sample. A peer that gets no answer to that INTEREST holds its first publication for about 10 s.")
   with {
+    intent = #active;
     owns = {
       "components/lib/src/zenoh_rmw_data*";
       "components/lib/src/zenoh_rmw_data/**";
