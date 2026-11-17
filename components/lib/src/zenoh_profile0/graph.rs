@@ -1018,7 +1018,7 @@ impl<const A: usize, const D: usize, const B: usize> GraphSessionOf<A, D, B> {
             .and_then(|()| match answer {
                 // The answer is written before the FRAME is committed, so a frame whose answer cannot be
                 // written is undone and refused.
-                Some(id) => Ok(self.inner.graph_send_final(id, out)?.sent),
+                Some(id) => Ok(self.inner.graph_send_final(id, now_ms, out)?.sent),
                 None => Ok(0),
             });
         match applied {

@@ -234,12 +234,25 @@ fn slime_publishes() -> Run {
     for (at, (name, hexed)) in fixtures::SLIMEPUB.iter().enumerate() {
         let mut ready = false;
         let outcome = session
-            .on_batch_visit(&unhex(hexed), 1 + at as u64, &mut out, &mut |change| {
-                ready |= change.kind == Kind::Subscriber
-                    && change.declared
-                    && change.id == PEER_SUBSCRIBER_ID
-                    && change.key == KEY.as_bytes();
-            })
+            .on_batch_samples(
+                &unhex(hexed),
+                1 + at as u64,
+                &mut out,
+                &mut |change| {
+                    ready |= change.kind == Kind::Subscriber
+                        && change.declared
+                        && change.id == PEER_SUBSCRIBER_ID
+                        && change.key == KEY.as_bytes();
+                },
+                &mut |sample| {
+                    run.delivered.push((
+                        sample.subscription,
+                        sample.sequence,
+                        sample.timestamp,
+                        read_string(sample.payload),
+                    ));
+                },
+            )
             .unwrap_or_else(|error| panic!("{name}: refused as {}", error.class()));
         note_frame(&mut run, &out, outcome.sent);
         run.names.push(name);
@@ -427,4 +440,27 @@ fn the_data_exam() {
     for (name, class) in refused {
         line(&std::format!("refused {name} {class}"));
     }
+}
+
+/// The answer to an INTEREST is traffic: it restarts the keep-alive cadence from the time of the batch that
+/// asked for it, not from the earlier batch the session last saw.
+#[test]
+fn the_answer_to_an_interest_restarts_the_keep_alive() {
+    let mut out = [0u8; 512];
+    let mut session = opened(Params::GRAPH);
+    let batch = interest_frame(&session, INTEREST_MODE, INTEREST_OPTIONS, INTEREST_KEY);
+    let answered = session
+        .on_batch(&batch, 7_000, &mut out)
+        .expect("the interest is answered");
+    assert_ne!(answered.sent, 0, "the answer is one frame");
+    let quiet = session.tick(7_600, &mut out).expect("a tick");
+    assert_eq!(
+        quiet.sent, 0,
+        "600 ms after the answer is before a quarter lease"
+    );
+    let due = session.tick(14_500, &mut out).expect("a tick");
+    assert_ne!(
+        due.sent, 0,
+        "a quarter lease after the answer is a keep-alive"
+    );
 }

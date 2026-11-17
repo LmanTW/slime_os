@@ -563,6 +563,7 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize> SessionOf<K
     pub(super) fn graph_send_final<'a>(
         &mut self,
         interest: u32,
+        now_ms: u64,
         out: &mut [u8],
     ) -> Result<Outcome<'a, E>, SessionError> {
         if self.state != State::Open {
@@ -578,7 +579,9 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize> SessionOf<K
             return Err(EncodeError::BatchTooLarge.into());
         }
         self.tx_sn = self.tx_sn.wrapping_add(1);
-        self.sent_now(self.now_ms);
+        // The FRAME that asked for the answer is being applied at `now_ms`, and the clock is stamped when
+        // it is committed, so the answer restarts the keep-alive from this time and not the previous one.
+        self.sent_now(now_ms);
         Ok(Outcome::sending(at))
     }
 
