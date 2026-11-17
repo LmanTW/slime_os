@@ -179,11 +179,11 @@ attachment the whole `FRAME` is refused, which ends the connection. A second sub
 
 `send_put` writes a Put with the sender mapping and the attachment. The peer must have declared a subscriber
 on that key. Without one the Put is `undeclared-key`, and a payload over the bound is `over-bound`. The
-inner session's table holds no subscriber of the peer in a graph session, so `session.rs` gains a method
-that writes the Put after the graph session made that check.
+graph session holds the peer's subscribers in its own table, and the inner session's table holds none.
+`session.rs` therefore gains a method that writes the Put after the graph session made that check.
 
-A peer sends one `INTEREST` for `@ros2_lv/<domain>/**` before it sends data, and a peer that gets no
-answer holds its first publication for about 10 s. The session answers it with a `DeclareFinal` that
+A peer sends one `INTEREST` for `@ros2_lv/<domain>/**` before it sends data. A peer that gets no answer
+holds its first publication for about 10 s. The session answers it with a `DeclareFinal` that
 carries the interest id and declares no token, queryable or key alias in reply. The answer is written
 before the `FRAME` that asked for it is committed, so a `FRAME` whose answer cannot be written is undone.
 The answer restarts the keep-alive cadence from the time of that `FRAME`. The session takes one
@@ -410,8 +410,8 @@ recipe is explicit and in no aggregate. See the
   the link answer no query and declare no token. In one run, `ros2 topic list` and `ros2 node list` showed
   no Slime node, and `ros2 topic echo` received the Puts of a Slime publisher.
 - The data session is observed by replaying two captured sessions, one talker and one listener, of
-  `std_msgs/String` over a direct link. Two live probes on one host showed more, with no CI evidence: a
-  best-effort subscriber received the Puts, and a peer that reconnected sent no second `INTEREST`. A Slime
+  `std_msgs/String` over a direct link. Live probes on one host showed more, with no CI evidence. A
+  best-effort subscriber received the Puts. A peer that reconnected sent no second `INTEREST`. A Slime
   peer that dialed `rmw_zenohd` as a peer got no sample through, and one that announced itself as a client
   got all 12. The encoder writes no client `INIT`.
 - A peer waits about 10 s for the answer to its `INTEREST`, and a session that fails to write it ends the
