@@ -96,9 +96,9 @@ zenoh_rmw_graph_check:
     python3 scripts/check/check-zenoh-profile0.py --slice rmw-graph
 
 # A Profile 0 graph session that holds one subscription of its own. The two captured data sessions of an
-# rmw_zenoh_cpp peer are replayed into it: a talker's 7 samples are delivered, 20 other pushes are dropped,
-# the peer's INTEREST is read and not answered, and the Puts a listener's subscription asks for are written to the byte. The
-# expected transcript is built by scripts/lib/zenoh_rmw_data_exam.py from the captured bytes in
+# rmw_zenoh_cpp peer are replayed into it: a talker's 11 samples are delivered, 28 other pushes are dropped,
+# the peer's INTEREST is answered with a DeclareFinal, and the 8 Puts a listener's subscription asks for are
+# written to the byte. The expected transcript is built by scripts/lib/zenoh_rmw_data_exam.py from the captured bytes in
 # scripts/lib/zenoh_rmw_data_peer.py. The session and graph exams run beside it. Nothing here needs a
 # registry or a ROS install. Fails until the data session exists.
 [group('hardware')]
@@ -111,7 +111,7 @@ zenoh_rmw_data_check:
 # bytes, an OPEN_ACK, a keep-alive after a quarter lease, a CLOSE on expiry. A refused token is counted and
 # the link stays open; a stream fault ends it. The expected transcript is built by
 # scripts/lib/zenoh_rmw_link_exam.py from the captured bytes. The session and graph exams run beside it.
-# Nothing here needs a registry or a ROS install. Fails until the link exists.
+# Nothing here needs a registry or a ROS install.
 [group('hardware')]
 zenoh_rmw_link_check:
     python3 scripts/check/check-zenoh-profile0.py --slice rmw-link
