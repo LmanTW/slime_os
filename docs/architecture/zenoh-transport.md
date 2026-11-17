@@ -17,7 +17,8 @@ Owners:
 - graph session: `zenoh_profile0/graph.rs`; the graph its liveliness tokens build:
   `components/lib/src/zenoh_rmw_graph.rs`; the link that carries them:
   `components/lib/src/zenoh_rmw_link.rs`; their exam fixtures:
-  `contracts/zenoh-rmw-session/v1/` and `contracts/zenoh-rmw-graph/v1/`;
+  `contracts/zenoh-rmw-session/v1/`, `contracts/zenoh-rmw-graph/v1/` and, for the samples,
+  `contracts/zenoh-rmw-data/v1/`;
 - link configurations: `contracts/zenoh-link-limits/v1/` judges a named configuration, and
   `zenoh_profile0/limits.rs` states the same arithmetic in Rust; FRAGMENT:
   `zenoh_profile0/fragment.rs`; reassembly into storage the component lends:
@@ -158,14 +159,37 @@ A graph session takes these, and the plain session refuses each of them:
 | Key aliases | Holds up to `A` aliases of up to `B` bytes. A repeated id or a scope on an alias is `invalid-keyexpr`. `UndeclareKeyExpr` is `unsupported-message`. |
 | `DeclareSubscriber`, `DeclareQueryable` and `DeclareToken`, and the undeclaration of a queryable or a token | Records each declaration in a table of `D` slots. An undeclaration of one it does not hold is `unknown-declaration`. `UndeclareSubscriber` is `unsupported-message`. |
 | The INIT extensions: a unit extension with id 1, then optionally id 7 with a value of at most 1 | Accepts that chain only. Any other extension, or a mandatory one, is `unsupported-extension`. |
-| A `Put` with a timestamp, and the source-info and attachment extensions | Parses it and drops it. The session holds no subscription, so every push whose key is valid is dropped and counted. |
+| A `Put` with a timestamp, and the source-info and attachment extensions | Parses it. A Put on the session's own subscription is a `Sample`. Every other push whose key is valid is dropped and counted. |
+| An `INTEREST` of mode 1 (current) with options `0x79` over `@ros2_lv/<domain>/**` | Takes it and writes one `FRAME` for it: a `DECLARE` with the interest flag, the interest id and a `DeclareFinal`. |
 
 A subscriber or a queryable may name a wildcard key, as the peer's `@/<zid>/peer/config/**` does. A token
 key or the key of a push may not, and is `wildcard-keyexpr`.
 
 The session announces a 512-byte batch in its `INIT_ACK`. It bounds keys at 253 bytes, the longest alias
-an rmw_zenoh peer declared. It sends nothing after the handshake, answers no query and declares no token.
-A `FRAME` applies whole or not at all, as in the plain session.
+an rmw_zenoh peer declared. It answers no query and declares no token. A `FRAME` applies whole or not at
+all, as in the plain session.
+
+### Samples and the INTEREST
+
+A graph session holds at most one subscription of its own, declared with `send_declare_subscriber`. A Put
+that names that key reaches the owner through `on_batch_samples` as a `Sample` with its subscription id,
+sequence number, timestamp and payload. The Put must carry the 33-byte attachment. Without a readable
+attachment the whole `FRAME` is refused, which ends the connection. A second subscription is
+`subscriber-limit`.
+
+`send_put` writes a Put with the sender mapping and the attachment. The peer must have declared a subscriber
+on that key. Without one the Put is `undeclared-key`, and a payload over the bound is `over-bound`. The
+inner session's table holds no subscriber of the peer in a graph session, so `session.rs` gains a method
+that writes the Put after the graph session made that check.
+
+A peer sends one `INTEREST` for `@ros2_lv/<domain>/**` before it sends data, and a peer that gets no
+answer holds its first publication for about 10 s. The session answers it with a `DeclareFinal` that
+carries the interest id and declares no token, queryable or key alias in reply. The answer is written
+before the `FRAME` that asked for it is committed, so a `FRAME` whose answer cannot be written is undone.
+The answer restarts the keep-alive cadence from the time of that `FRAME`. The session takes one
+`INTEREST`. Any other mode, any other options byte, a key that is not `@ros2_lv/<domain>/**` and a second
+`INTEREST` are `unsupported-message`. A peer that reconnects opens a new session. In one run, a reconnecting
+peer sent no second `INTEREST`.
 
 `zenoh_rmw_graph.rs` reads each `@ros2_lv` token into an `Entity` and holds the live ones in
 `Graph<N>`. A token is `@ros2_lv/<domain>/<zid>/<nid>/<id>/<kind>/<enclave>/<namespace>/<node>`, and a
@@ -191,7 +215,9 @@ A pump flushes the single send slot and reads whatever chunks the stream gives. 
 batch and feeds every token the batch carries into the graph. Then it checks the lease.
 
 The link writes the handshake, a `KEEP_ALIVE` a quarter of its own lease after it last sent, and a `CLOSE`.
-It declares nothing and answers no query.
+It declares nothing and answers no query. It does not deliver a sample, because it drives `on_batch_visit`,
+which has no sample callback. A frame the session writes in answer to an `INTEREST` is queued as any other
+reply, and no test here holds that.
 
 | Event | What the link does |
 | --- | --- |
@@ -381,7 +407,16 @@ recipe is explicit and in no aggregate. See the
   The graph link does. No component, composition or QEMU gate runs it, so it is judged on the host over a
   scripted byte stream.
 - The graph holds each entity's QoS and does not match a publisher to a subscription. The session and
-  the link answer no query and declare no token. A ROS 2 node therefore cannot yet discover a Slime node.
+  the link answer no query and declare no token. In one run, `ros2 topic list` and `ros2 node list` showed
+  no Slime node, and `ros2 topic echo` received the Puts of a Slime publisher.
+- The data session is observed by replaying two captured sessions, one talker and one listener, of
+  `std_msgs/String` over a direct link. Two live probes on one host showed more, with no CI evidence: a
+  best-effort subscriber received the Puts, and a peer that reconnected sent no second `INTEREST`. A Slime
+  peer that dialed `rmw_zenohd` as a peer got no sample through, and one that announced itself as a client
+  got all 12. The encoder writes no client `INIT`.
+- A peer waits about 10 s for the answer to its `INTEREST`, and a session that fails to write it ends the
+  connection. `ZENOH_ROUTER_CHECK_ATTEMPTS=0` stopped the one peer from exchanging data in the probes, and a
+  value of 1 did not.
 - No router, scouting, service or action interoperability, or transport security, and no Raspberry Pi 5
   claim. The ROSIDL importer and RIHS01 generator are not here: the demo contract's checker derives
   those values.
