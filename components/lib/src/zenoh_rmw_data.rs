@@ -11,8 +11,8 @@ mod fixtures;
 
 use crate::zenoh_profile0::encode::{self, FrameEncoder};
 use crate::zenoh_profile0::graph::{
-    GraphError, GraphSession, GraphSessionOf, INTEREST_MODE, INTEREST_OPTIONS, Kind,
-    GRAPH_KEY_BYTES, GRAPH_SLOTS,
+    GRAPH_KEY_BYTES, GRAPH_SLOTS, GraphError, GraphSession, GraphSessionOf, INTEREST_MODE,
+    INTEREST_OPTIONS, Kind,
 };
 use crate::zenoh_profile0::session::{Config, Params, Role};
 use crate::zenoh_profile0::{Bounds, Mapping};
@@ -55,7 +55,10 @@ fn unhex(text: &str) -> Vec<u8> {
 }
 
 fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| std::format!("{byte:02x}")).collect()
+    bytes
+        .iter()
+        .map(|byte| std::format!("{byte:02x}"))
+        .collect()
 }
 
 fn cdr_string(text: &str) -> Vec<u8> {
@@ -67,7 +70,11 @@ fn cdr_string(text: &str) -> Vec<u8> {
 }
 
 fn read_string(payload: &[u8]) -> String {
-    assert_eq!(payload.get(..4), Some(&[0x00, 0x01, 0x00, 0x00][..]), "a CDR header");
+    assert_eq!(
+        payload.get(..4),
+        Some(&[0x00, 0x01, 0x00, 0x00][..]),
+        "a CDR header"
+    );
     let length = u32::from_le_bytes(payload[4..8].try_into().expect("a length")) as usize;
     assert_eq!(payload.len(), 8 + length, "a CDR string of its own length");
     assert_eq!(payload.last(), Some(&0), "a NUL-ended CDR string");
@@ -94,7 +101,11 @@ fn listener() -> GraphSession {
 fn opened(params: Params) -> GraphSessionOf<GRAPH_SLOTS, GRAPH_SLOTS, GRAPH_KEY_BYTES> {
     let mut session = GraphSessionOf::new(Role::Listener, &config(), params).expect("a listener");
     let mut out = [0u8; 512];
-    for (at, (name, hexed)) in fixtures::SLIMEPUB.iter().take(HANDSHAKE_BATCHES).enumerate() {
+    for (at, (name, hexed)) in fixtures::SLIMEPUB
+        .iter()
+        .take(HANDSHAKE_BATCHES)
+        .enumerate()
+    {
         session
             .on_batch(&unhex(hexed), 1 + at as u64, &mut out)
             .unwrap_or_else(|error| panic!("{name}: refused as {}", error.class()));
@@ -145,7 +156,8 @@ fn interest_frame(session: &GraphSession, mode: u8, options: u8, key: &str) -> V
 }
 
 fn attachment(number: usize) -> [u8; 33] {
-    encode::attachment(number as i64 + 1, 1_000_000_000 + number as i64, &GID).expect("an attachment")
+    encode::attachment(number as i64 + 1, 1_000_000_000 + number as i64, &GID)
+        .expect("an attachment")
 }
 
 #[derive(Default)]
@@ -184,14 +196,20 @@ fn peer_publishes() -> Run {
     let mut out = [0u8; 512];
     for (at, (name, hexed)) in fixtures::PEERPUB.iter().enumerate() {
         let outcome = session
-            .on_batch_samples(&unhex(hexed), 1 + at as u64, &mut out, &mut |_| {}, &mut |sample| {
-                run.delivered.push((
-                    sample.subscription,
-                    sample.sequence,
-                    sample.timestamp,
-                    read_string(sample.payload),
-                ));
-            })
+            .on_batch_samples(
+                &unhex(hexed),
+                1 + at as u64,
+                &mut out,
+                &mut |_| {},
+                &mut |sample| {
+                    run.delivered.push((
+                        sample.subscription,
+                        sample.sequence,
+                        sample.timestamp,
+                        read_string(sample.payload),
+                    ));
+                },
+            )
             .unwrap_or_else(|error| panic!("{name}: refused as {}", error.class()));
         note_frame(&mut run, &out, outcome.sent);
         run.names.push(name);
@@ -236,7 +254,10 @@ fn slime_publishes() -> Run {
             }
         }
     }
-    assert!(sent, "the listener declared a subscriber on the chatter key");
+    assert!(
+        sent,
+        "the listener declared a subscriber on the chatter key"
+    );
     finish(&mut run, &session);
     run
 }
@@ -279,7 +300,11 @@ fn refusals() -> Vec<(&'static str, &'static str)> {
     bounded.bounds.payload = PAYLOAD_BOUND;
     let mut session = opened(bounded);
     peer_subscribes(&mut session, KEY);
-    assert_eq!(payload.len(), PAYLOAD_BOUND, "the longest string the bound takes");
+    assert_eq!(
+        payload.len(),
+        PAYLOAD_BOUND,
+        "the longest string the bound takes"
+    );
     session
         .send_put(KEY, &attachment(0), &payload, &mut out)
         .expect("a string of the bound is sent");
@@ -289,8 +314,18 @@ fn refusals() -> Vec<(&'static str, &'static str)> {
     ));
 
     for (name, mode, options, key) in [
-        ("interest-with-a-second-key", INTEREST_MODE, INTEREST_OPTIONS, "0/chatter/**"),
-        ("interest-for-subscribers", INTEREST_MODE, INTEREST_OPTIONS | 0x02, INTEREST_KEY),
+        (
+            "interest-with-a-second-key",
+            INTEREST_MODE,
+            INTEREST_OPTIONS,
+            "0/chatter/**",
+        ),
+        (
+            "interest-for-subscribers",
+            INTEREST_MODE,
+            INTEREST_OPTIONS | 0x02,
+            INTEREST_KEY,
+        ),
         ("interest-future-mode", 2, INTEREST_OPTIONS, INTEREST_KEY),
     ] {
         let mut session = opened(Params::GRAPH);
@@ -301,7 +336,9 @@ fn refusals() -> Vec<(&'static str, &'static str)> {
     // The one INTEREST the session takes is taken by it, in a frame of the same layout.
     let mut session = opened(Params::GRAPH);
     let batch = interest_frame(&session, INTEREST_MODE, INTEREST_OPTIONS, INTEREST_KEY);
-    let outcome = session.on_batch(&batch, 3, &mut out).expect("the interest is answered");
+    let outcome = session
+        .on_batch(&batch, 3, &mut out)
+        .expect("the interest is answered");
     assert_ne!(outcome.sent, 0, "the answer is one frame");
     found
 }
@@ -311,11 +348,19 @@ fn the_data_exam() {
     if let Some(path) = std::env::var_os("ZENOH_RMW_DATA_FIXTURES") {
         let record = std::fs::read_to_string(&path).expect("the hand-off record is readable");
         let mut wanted = String::from("{\n");
-        wanted.push_str(&std::format!("  formatVersion = {};\n", fixtures::FORMAT_VERSION));
-        for (group, rows) in [("peerpub", &fixtures::PEERPUB[..]), ("slimepub", &fixtures::SLIMEPUB[..])] {
+        wanted.push_str(&std::format!(
+            "  formatVersion = {};\n",
+            fixtures::FORMAT_VERSION
+        ));
+        for (group, rows) in [
+            ("peerpub", &fixtures::PEERPUB[..]),
+            ("slimepub", &fixtures::SLIMEPUB[..]),
+        ] {
             wanted.push_str(&std::format!("  {group} = [\n"));
             for (name, bytes) in rows {
-                wanted.push_str(&std::format!("    {{ name = \"{name}\"; bytes = \"{bytes}\"; }};\n"));
+                wanted.push_str(&std::format!(
+                    "    {{ name = \"{name}\"; bytes = \"{bytes}\"; }};\n"
+                ));
             }
             wanted.push_str("  ];\n");
         }
@@ -343,15 +388,34 @@ fn the_data_exam() {
         ));
     }
     line(&std::format!("dropped peerpub {}", peerpub.dropped));
-    line(&std::format!("delivered-none slimepub {}", slimepub.delivered.len()));
+    line(&std::format!(
+        "delivered-none slimepub {}",
+        slimepub.delivered.len()
+    ));
     line(&std::format!("dropped slimepub {}", slimepub.dropped));
     for (label, run) in [("peerpub", &peerpub), ("slimepub", &slimepub)] {
-        assert_eq!(run.replay_wrote.len(), 1, "{label}: one frame was written for the INTEREST");
-        line(&std::format!("replay-wrote {label} {}", hex(&run.replay_wrote[0])));
+        assert_eq!(
+            run.replay_wrote.len(),
+            1,
+            "{label}: one frame was written for the INTEREST"
+        );
+        line(&std::format!(
+            "replay-wrote {label} {}",
+            hex(&run.replay_wrote[0])
+        ));
     }
-    let (id, key) = peerpub.interest.as_ref().expect("the talker session answered an INTEREST");
-    assert_eq!(slimepub.interest.as_ref(), Some(&(*id, key.clone())), "both sessions name one INTEREST");
-    line(&std::format!("interest {id} {INTEREST_MODE} {INTEREST_OPTIONS:#04x} {key}"));
+    let (id, key) = peerpub
+        .interest
+        .as_ref()
+        .expect("the talker session answered an INTEREST");
+    assert_eq!(
+        slimepub.interest.as_ref(),
+        Some(&(*id, key.clone())),
+        "both sessions name one INTEREST"
+    );
+    line(&std::format!(
+        "interest {id} {INTEREST_MODE} {INTEREST_OPTIONS:#04x} {key}"
+    ));
     assert_eq!(peerpub.wrote.len(), 1);
     line(&std::format!("wrote subscriber {}", hex(&peerpub.wrote[0])));
     assert_eq!(slimepub.wrote.len(), SENT);

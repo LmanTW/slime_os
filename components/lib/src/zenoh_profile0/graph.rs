@@ -17,8 +17,8 @@ use super::session::{Config, Event, Outcome, Params, Role, SessionError, Session
 use super::tables::{InsertError, Keys, SlotTable};
 use super::{
     Bounds, FLAG_BIT5, FLAG_BIT6, FLAG_Z, ID_D_FINAL, ID_DECLARE, ID_FRAME, ID_MASK, ID_PUSH,
-    ID_PUT, MAX_ATTACHMENT_BYTES, Message, Reader, Refusal, decode_batch_in,
-    key_reference, network_qos_extension,
+    ID_PUT, MAX_ATTACHMENT_BYTES, Message, Reader, Refusal, decode_batch_in, key_reference,
+    network_qos_extension,
 };
 use slime_proto::zenoh_profile as p;
 
@@ -1173,9 +1173,7 @@ impl<const A: usize, const D: usize, const B: usize> GraphSessionOf<A, D, B> {
                 }
                 GraphNetwork::Final => counts.finals += 1,
                 GraphNetwork::Push {
-                    key,
-                    attachment,
-                    ..
+                    key, attachment, ..
                 } => {
                     // A push to a key nobody subscribed to is dropped and counted once its key is known
                     // to be one. A push to the session's own subscription must carry a readable
@@ -1199,7 +1197,7 @@ impl<const A: usize, const D: usize, const B: usize> GraphSessionOf<A, D, B> {
                     let mut joined = [0u8; B];
                     let length = self.resolve(&key, &mut joined)?;
                     let joined = joined.get(..length).ok_or(Refusal::OverBound)?;
-                    if !liveliness_interest(joined) || self.interest.len() != 0 {
+                    if !liveliness_interest(joined) || !self.interest.is_empty() {
                         return Err(Refusal::UnsupportedMessage.into());
                     }
                     let at = self
