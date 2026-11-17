@@ -9,6 +9,7 @@ item :: s.Item = (h.task "01a1e837-2355-7509-b9bc-ae166ec3b47f" "zenoh-rmw-data"
       "components/lib/src/zenoh_rmw_data*";
       "components/lib/src/zenoh_rmw_data/**";
       "contracts/zenoh-rmw-data/**";
+      "scripts/generate/generate-zenoh-rmw-data-bindings.py";
       "components/lib/src/zenoh_profile0/graph.rs";
       "components/lib/src/zenoh_rmw_graph.rs";
       "components/lib/src/lib.rs";
