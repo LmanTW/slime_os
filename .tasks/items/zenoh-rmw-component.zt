@@ -5,6 +5,7 @@ item :: s.Item = (h.task "01a1ed80-b13c-70ad-b27f-69434eccb321" "zenoh-rmw-compo
   "A component drives the graph link: it declares one subscription, publishes Puts and drains the samples the link queued"
   "The graph link serves an owner's subscription, and nothing owns one. No component runs a graph link over a network-service connection, so no seL4 guest can exchange a topic with an rmw_zenoh peer. The service component runs the plain link, which cannot carry a graph session. A composition can name the crate only after it has a manifest, a release profile, a component spec and a lockfile entry. The service component shows the form. Its crate and registration are judged by file facts, apart from the composition that boots it.")
   with {
+    intent = #active;
     owns = {
       "components/applications/zenoh-rmw-node/**";
       "contracts/component-spec/v1/components/zenoh-rmw-node.zti";
