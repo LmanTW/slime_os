@@ -21,7 +21,8 @@ A lane is a pair of a priority and a reliability. The rules the exam pins:
   final fragment, because 1.0.0 fragments carry no message marker.
 * At most `maxRuns` runs are open at once, one for each lane. A first fragment with no free run is refused on a
   reliable lane and dropped on a best-effort one.
-* A FRAME on a lane that has a run open is refused as `unexpected-message`.
+* A reliable FRAME on a lane that has a run open is refused as `unexpected-message`. A best-effort FRAME there drops
+  the run and is delivered, and the lost fragments are stale by their numbers. A stale FRAME leaves the run alone.
 
 What upstream fixes, and what this exam does not take from upstream: the header bytes below are what `zenoh-codec`
 1.0.0 writes, and the host reference here must write them again. The receive rules are read from the 1.10.1
@@ -293,10 +294,11 @@ class Model:
             priority, at = self._ext(batch, at)
         lane = (priority, reliable)
         self.touched.add(lane)
-        if lane in self.open_runs:
-            raise Refusal("unexpected-message")
         message = batch[at:]
+        out: list[str] = []
         if reliable:
+            if lane in self.open_runs:
+                raise Refusal("unexpected-message")
             if sn != self.next_of(lane):
                 raise Refusal("sequence-mismatch")
             self.counters[lane] = (sn + 1) & SN_MASK
@@ -304,10 +306,15 @@ class Model:
             if not self._ahead(lane, sn):
                 return [f"lanes drop p{priority} B cause=stale-sequence"]
             self.counters[lane] = (sn + 1) & SN_MASK
+            if lane in self.open_runs:
+                del self.open_runs[lane]
+                out.append(f"lanes drop p{priority} B cause=frame-during-run")
         try:
-            return [self._sample(lane, sn, message)]
+            return [*out, self._sample(lane, sn, message)]
         except frag.FragmentError as error:
-            raise Refusal(_classed(error)) from error
+            if reliable:
+                raise Refusal(_classed(error)) from error
+            return [*out, f"lanes drop p{priority} B cause=completed:{_classed(error)}"]
 
     def _fragment(self, batch: bytes, now: int) -> list[str]:
         header = batch[0]
@@ -444,6 +451,14 @@ def scenarios() -> list[Scenario]:
             at_time([*(lambda f: [f[0], frame_of(SN0, 5, True, small(29)), *f[1:]])(fragments_of(big(42), SN0, 2, True))]),
         ),
         one(
+            "best-effort-frame-after-a-lost-final-fragment",
+            at_time([*fragments_of(big(37), SN0, 3, False)[:2], frame_of(SN0 + 3, 3, False, small(47)), *fragments_of(big(50), SN0 + 4, 3, False)]),
+        ),
+        one(
+            "best-effort-stale-frame-leaves-the-run",
+            at_time([*fragments_of(big(48), SN0 + 1, 3, False)[:1], frame_of(SN0, 3, False, small(49)), *fragments_of(big(48), SN0 + 1, 3, False)[1:]]),
+        ),
+        one(
             "best-effort-half-window-edge",
             frames((SN0, 5, False, small(43)), (SN0 + HALF, 5, False, small(44)), (SN0 + HALF - 1, 5, False, small(45)), (SN0, 5, False, small(46))),
         ),
@@ -473,7 +488,6 @@ def scenarios() -> list[Scenario]:
     refuse("reliable-fragment-gap", "fragment-sequence", at_time([f_big(2, True)[0], f_big(2, True)[2]]))
     refuse("reliable-first-fragment-wrong-sn", "sequence-mismatch", at_time(f_big(2, True, SN0 + 5)))
     refuse("reliable-frame-on-open-lane", "unexpected-message", at_time([f_big(2, True)[0], frame_of(SN0 + 1, 2, True, small(36))]))
-    refuse("best-effort-frame-on-open-lane", "unexpected-message", at_time([f_big(2, False)[0], frame_of(SN0 + 1, 2, False, small(37))]))
     refuse("reliable-lane-limit", "lane-limit", at_time(interleave(f_big(1, True), f_big(2, True), f_big(3, True))))
     refuse("reliable-run-timeout", "reassembly-timeout", [(0, "batch", f_big(2, True)[0]), (TIMEOUT_MS + 1, "tick", b"")])
     refuse("reliable-completed-put-undeclared-key", "undeclared-key", at_time(fragments_of(big(38, OTHER_KEY), SN0, 2, True)))
@@ -803,11 +817,11 @@ def all_controls() -> int:
 
 # What the item fixes, held here as well so the gate stays correct after the item is closed and moved to
 # .tasks/terminal. While the item is open its stored predicates are compared with these. Both are exact.
-PINNED_TRANSCRIPT_CASES = 21
-PINNED_REFUSALS = 21
+PINNED_TRANSCRIPT_CASES = 23
+PINNED_REFUSALS = 20
 PINNED_CONTRACT = 17
 PINNED_CASES = PINNED_TRANSCRIPT_CASES + PINNED_REFUSALS + PINNED_CONTRACT
-PINNED_CONTROLS = 437
+PINNED_CONTROLS = 468
 
 
 def item_pins() -> tuple[int, int]:
