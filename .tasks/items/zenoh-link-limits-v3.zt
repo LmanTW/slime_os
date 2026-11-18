@@ -1,0 +1,67 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a1ef06-fb8b-7046-b24b-47fccf60c29f" "zenoh-link-limits-v3" "zenoh-transport"
+  "A link configuration declares how many subscriptions of its own the session may hold"
+  "A configuration of `contracts/zenoh-link-limits/v1` has no field for the local subscription count. `Params::DEMO` and `Params::from_limits` keep `local` at 1. The Zenoh service sets `Params { local: 3 }` directly, so no contract judges its count against its stack. Item 1 of `docs/decisions/zenoh-service.md` says a count above one needs a new version of the link-limits contract. It also says that version re-admits the links item. Version 2 is in the repository. `zenoh-fragment-lanes` planned it and added `maxRuns`. This item adds version 3 with both fields.")
+  with {
+    intent = #planned;
+    owns = {
+      "components/proto/src/zenoh_link_v3_limits*";
+      "components/proto/src/lib.rs";
+    };
+    depends = { "01a1ee8a-6ef8-73ab-8725-b6c0481587c3"; };
+    nonGoals = {
+      h.nonGoal "Any change to `contracts/zenoh-link-limits/v1`, to a v1 consumer, or to an exam that has landed. A link built from v1 keeps `local` at 1, and `Params::from_limits` does not move." h.agentDefault;
+      h.nonGoal "Changing `zenoh-fragment-lanes`, its exam or its version 2. This item reads the lanes exam and does not edit it." h.agentDefault;
+      h.nonGoal "The Rust reader of a v3 record, a `Params` constructor for it, and the `Params { local: 3 }` line of the Zenoh service. A later item moves them." h.agentDefault;
+      h.nonGoal "A stack or memory budget for the service. Another item may read the same configurations. This item owns the version and its judge." h.agentDefault;
+      h.nonGoal "Lazy declaration, credits, and excluding a publisher's own publications. The decision record fixes them." h.agentDefault;
+      h.nonGoal "A check that `components/proto/src/lib.rs` declares the generated module. The exam compares the generated file with the schema and compiles nothing." h.agentDefault;
+    };
+    requirements = {
+      h.req "v3-declares-local-subscriptions"
+        "The contract `contracts/zenoh-link-limits/v3` adds `localSubscriptions` and `maxRuns` to a configuration and takes the record only at format version 3. `localSubscriptions` is 1 to 65535 for both modes."
+        { "zenoh_link_limits_v3_check"; };
+      h.req "v3-counts-the-memory-it-declares"
+        "Each local subscription beyond the first adds a key slot to the stack. Each run beyond the first adds a run header to the stack and to the heap. The record is refused one byte below each total."
+        { "zenoh_link_limits_v3_check"; };
+      h.req "v3-keeps-the-v1-rules"
+        "The contract refuses every input version 1 refuses, and it refuses a v1 record, a v2 record and a record with either new field missing. A fixed link holds no run and a heap link holds 1 to 16."
+        { "zenoh_link_limits_v3_check"; };
+      h.req "v3-matches-the-lanes-arithmetic"
+        "At one local subscription, the stack and the heap equal the lanes exam's version 2 values for 1, 2, 3 and 16 runs. The two versions declare the same memory for one link."
+        { "zenoh_link_limits_v3_check"; };
+      h.req "v3-bindings-are-generated"
+        "`components/proto/src/zenoh_link_v3_limits.rs` equals the output of `generate-zenoh-link-v3-limits-bindings.py` byte for byte. The recipe `zenoh_link_v3_limits_gen` writes it."
+        { "zenoh_link_limits_v3_check"; };
+      h.req "controls-are-refused"
+        "The judge takes 11 records and refuses 32 through the contract's decoder. It also refuses 41 corruptions: 13 removed checks, 5 off-by-one bounds, 4 drifted constants, 2 drifted restatements and 17 corrupted binding files."
+        { "zenoh_link_limits_v3_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_link_limits_v3_check" {
+        h.count "casesObserved" 49;
+        h.count "negativeControlsRefused" 73;
+      };
+    };
+    decisions = {
+      h.decided "v3-not-v2"
+        "The contract with `localSubscriptions` is version 3 and carries `maxRuns` as well. It restates the `maxRuns` rules of the lanes item and does not import version 2."
+        "version 2 has landed with `maxRuns` and no `localSubscriptions`, and the lanes exam pins that record"
+        h.agentDefault
+        { "v3-declares-local-subscriptions"; "v3-matches-the-lanes-arithmetic"; };
+      h.decided "v3-stacks-on-an-unimplemented-v2"
+        "Version 3 restates the values of version 2. A run header is 64 bytes, a lane counter is 64 bytes and a heap link holds at most 16 runs. The judge reads them from `zenoh_lanes_exam`. The schema of version 2 and the exam agree on them today. The lanes item is still active. If it lands other values, a planning PR changes this schema and this exam first."
+        "the memory a link declares must be the same under both versions, and the lanes item may still change the values"
+        h.agentDefault
+        { "v3-matches-the-lanes-arithmetic"; };
+      h.decided "one-slot-per-local-subscription"
+        "Each local subscription beyond the first adds `keyBytes + slotOverheadBytes` to the stack. The first is inside `sessionFixedBytes`."
+        "the session holds `per_side + local` slots and its fixed storage measured 608 bytes with the two subscriber slots of version 1"
+        h.agentDefault
+        { "v3-counts-the-memory-it-declares"; };
+    };
+  };
+
+item

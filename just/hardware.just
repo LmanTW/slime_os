@@ -173,6 +173,17 @@ zenoh_subscribers_check:
 zenoh_lanes_check:
     python3 scripts/check/check-zenoh-profile0.py --slice lanes
 
+# Judges contracts/zenoh-link-limits/v3, which declares a link's local subscriptions beside its reassembly runs.
+# The decoder of the contract takes the records it must take and refuses the ones it must refuse, and each bound is
+# held on both sides. Each check is removed in turn and the weakened contract must take the record the check refuses.
+# The stack and heap at one local subscription must equal the lanes exam's version 2 arithmetic. The exam renders the
+# schema's constants as Rust and requires components/proto/src/zenoh_link_v3_limits.rs to equal that text byte for
+# byte, and its dependency runs the generator with --check. The expectation is scripts/lib/zenoh_link_v3_limits_exam.py.
+# Nothing here needs a registry. The recipe fails until that file lands.
+[group('hardware')]
+zenoh_link_limits_v3_check: (zenoh_link_v3_limits_gen "--check")
+    python3 scripts/check/check-zenoh-profile0.py --slice link-limits-v3
+
 # Judges what the Zenoh service may do for each holder. The decoder of
 # contracts/zenoh-service-grants/v1 takes the declarations it must take and refuses the ones it must
 # refuse. Each limit is held on both sides of its bound. Each check is removed in turn, and the

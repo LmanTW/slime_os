@@ -132,6 +132,7 @@ import zenoh_rmw_data_link_exam
 import zenoh_rmw_link_exam
 import zenoh_lanes_exam
 import zenoh_links_exam
+import zenoh_link_v3_limits_exam
 import zenoh_grants_exam
 import zenoh_client_exam
 import zenoh_client_abort_exam
@@ -2493,6 +2494,36 @@ def lanes_main(controls_only: bool) -> int:
     return 0
 
 
+def link_limits_v3_main(controls_only: bool) -> int:
+    exam = zenoh_link_v3_limits_exam
+    try:
+        refused_controls = exam.all_controls()
+        item_cases, item_controls = exam.item_pins()
+        cases = exam.judge_cases()
+    except exam.LinkV3Error as error:
+        fail(str(error))
+    if cases != exam.PINNED_CASES:
+        fail(f"link-limits-v3: the exam judges {cases} cases, the checker pins {exam.PINNED_CASES}")
+    if refused_controls != exam.PINNED_CONTROLS:
+        fail(f"link-limits-v3: {refused_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if item_cases and item_cases != exam.PINNED_CASES:
+        fail(f"link-limits-v3: the item fixes {item_cases} cases, the checker pins {exam.PINNED_CASES}")
+    if item_controls and item_controls != exam.PINNED_CONTROLS:
+        fail(f"link-limits-v3: the item requires {item_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 link-limits-v3 judge: refused {refused_controls} corrupted records")
+        return 0
+    # The generated constants are the implementation's, so the recipe fails until they land.
+    try:
+        exam.check_generated()
+    except exam.LinkV3Error as error:
+        fail(str(error))
+    print(f"[zenoh-profile0] slice=link-limits-v3 cases={cases} controls={refused_controls}")
+    devloop_observations.record(casesObserved=cases, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 link-limits-v3 check: the contract takes the records that declare local subscriptions and runs, refuses the ones it must, and its constants are the generated ones")
+    return 0
+
+
 def grants_main(controls_only: bool) -> int:
     try:
         refused_controls = zenoh_grants_exam.all_controls()
@@ -3420,7 +3451,7 @@ def lost_holder_main(controls_only: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-client", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "lanes", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service-peer", "service", "service-link", "holder-fault", "service-stack", "lost-holder"), required=True)
+    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-client", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "lanes", "link-limits-v3", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service-peer", "service", "service-link", "holder-fault", "service-stack", "lost-holder"), required=True)
     parser.add_argument("--controls-only", action="store_true")
     arguments = parser.parse_args()
     if arguments.slice == "composition":
@@ -3455,6 +3486,8 @@ def main() -> int:
         return subscribers_main(arguments.controls_only)
     if arguments.slice == "lanes":
         return lanes_main(arguments.controls_only)
+    if arguments.slice == "link-limits-v3":
+        return link_limits_v3_main(arguments.controls_only)
     if arguments.slice == "grants":
         return grants_main(arguments.controls_only)
     if arguments.slice == "client":
