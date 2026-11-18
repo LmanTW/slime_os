@@ -19,6 +19,7 @@ item :: s.Item = (h.task "01a1ef1a-ec52-74c8-8be6-505a372bdbc3" "zenoh-service-p
       h.nonGoal "A sample from the peer to a holder. The peer only receives in this item." h.agentDefault;
       h.nonGoal "A change to the service component, the service core, the link or any file of `components/lib`. The service already reports `peer=sent` when the peer declared the key." h.agentDefault;
       h.nonGoal "A new instance, grant, notification or network row in the system spec. The peer, its listener and its notifications exist already." h.agentDefault;
+      h.nonGoal "A NIC, a stock peer or a second boot. The peer shares the composition and the loopback backend, so the slice shows a sample crossing the Zenoh link and nothing on a wire." h.agentDefault;
       h.nonGoal "More than one peer, more than one key, a wildcard key, and a stock peer." h.agentDefault;
     };
     requirements = {
@@ -68,9 +69,6 @@ item :: s.Item = (h.task "01a1ef1a-ec52-74c8-8be6-505a372bdbc3" "zenoh-service-p
       h.invariant "derived-files-regenerate-in-the-implementation"
         "The implementation PR runs `python3 scripts/generate/generate-generation-from-spec.py` and regenerates the manifest and the boot layout only if `--check` reports drift. It runs `python3 scripts/generate/generate-system-image-closures.py --check`. No closure input set changes, so no closure source changes. No test-run record changes, because no plane gate's execution inputs change."
         h.agentDefault;
-    };
-    knownLimits = {
-      h.knownLimit "zenoh_service_peer_check" "The peer is in the same composition and the transport is the loopback backend. The slice shows a sample crossing the Zenoh link, and it shows no NIC, no stock peer and no second boot." h.agentDefault;
     };
   };
 
