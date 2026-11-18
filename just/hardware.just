@@ -155,6 +155,16 @@ zenoh_rmw_link_check:
 zenoh_subscribers_check:
     python3 scripts/check/check-zenoh-profile0.py --slice subscribers
 
+# Judges a Zenoh Profile 0 link that holds several reassembly runs and takes the traffic of a stock peer's
+# priorities. The host reference writes the INIT with the QoS extension, the FRAME and FRAGMENT headers of eight
+# priorities and both reliabilities, and the exam requires each to equal what eclipse-zenoh 1.0.0 wrote. A
+# transcript of 21 scenarios and 21 refusals is built from the reference and the Rust test must print it line for
+# line. The limits contract v2 takes 4 records and refuses 13. The links and stock-peer exams run beside it. The
+# expectation is scripts/lib/zenoh_lanes_exam.py. Nothing here needs a registry. Fails until the lanes land.
+[group('hardware')]
+zenoh_lanes_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice lanes
+
 # Judges what the Zenoh service may do for each holder. The decoder of
 # contracts/zenoh-service-grants/v1 takes the declarations it must take and refuses the ones it must
 # refuse. Each limit is held on both sides of its bound. Each check is removed in turn, and the

@@ -121,6 +121,7 @@ import zenoh_rmw_peer_component_exam
 import zenoh_rmw_data_exam
 import zenoh_rmw_data_link_exam
 import zenoh_rmw_link_exam
+import zenoh_lanes_exam
 import zenoh_links_exam
 import zenoh_grants_exam
 import zenoh_client_exam
@@ -2326,6 +2327,67 @@ def subscribers_main(controls_only: bool) -> int:
     return 0
 
 
+LANES_FILTER = "zenoh_lanes::"
+# The exam's own Rust test, by name: a filter that matches nothing passes silently.
+LANES_TESTS = ("zenoh_lanes::the_lanes_exam",)
+assert len(LANES_TESTS) == 1
+
+
+def run_lanes() -> list[str]:
+    # The links exam and the stock-peer exam pin the refusals this item turns into accepted behaviour for a link with
+    # two runs and keeps for a link with one, so both run and are judged here: a link with one run may not move any.
+    stock_fixtures()
+    STOCK_FIXTURES.parent.mkdir(parents=True, exist_ok=True)
+    STOCK_FIXTURES.write_text(zenoh_stock_peer.fixture_zti())
+    try:
+        zenoh_links_exam.judge(run_links())
+    except zenoh_links_exam.LinksError as error:
+        fail(str(error))
+    stdout, output = cargo_tests((LANES_FILTER,), {**_os.environ})
+    passed = tests_passed(output)
+    missing = [name for name in LANES_TESTS if name not in passed]
+    if missing:
+        fail(f"lanes: the exam's tests did not run and pass ({len(missing)} of {len(LANES_TESTS)}): {', '.join(missing[:4])}")
+    return [line for line in exam_lines(stdout) if line.startswith("lanes ")]
+
+
+def lanes_main(controls_only: bool) -> int:
+    neighbour_controls(subscribers=False)
+    if all(name in tests_passed("") for name in LANES_TESTS):
+        fail("control: a run with the lanes exam test missing was read as complete")
+    exam = zenoh_lanes_exam
+    try:
+        refused_controls = exam.all_controls()
+        item_cases, item_controls = exam.item_pins()
+        cases, refusals = exam.judge(exam.good_lines())
+    except exam.LanesError as error:
+        fail(str(error))
+    table = exam.contract_cases()
+    if cases + refusals + len(table) != exam.PINNED_CASES:
+        fail(f"lanes: an honest run is {cases + refusals + len(table)} cases, the checker pins {exam.PINNED_CASES}")
+    if refused_controls != exam.PINNED_CONTROLS:
+        fail(f"lanes: {refused_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if item_cases and item_cases != exam.PINNED_CASES:
+        fail(f"lanes: the item fixes {item_cases} cases, the checker pins {exam.PINNED_CASES}")
+    if item_controls and item_controls != exam.PINNED_CONTROLS:
+        fail(f"lanes: the item requires {item_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 lanes judge: refused {refused_controls} corrupted records")
+        return 0
+    try:
+        cases, refusals = exam.judge(run_lanes())
+        taken, refused_records = exam.judge_contract()
+    except exam.LanesError as error:
+        fail(str(error))
+    total = cases + refusals + taken + refused_records
+    if total != exam.PINNED_CASES:
+        fail(f"lanes: the run observed {total} cases, the checker pins {exam.PINNED_CASES}")
+    print(f"[zenoh-profile0] slice=lanes cases={total} refusals={refusals + refused_records} controls={refused_controls}")
+    devloop_observations.record(casesObserved=total, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 lanes check: a link with several runs took the priorities and best-effort traffic of a stock peer and kept every refusal of a link with one")
+    return 0
+
+
 def grants_main(controls_only: bool) -> int:
     try:
         refused_controls = zenoh_grants_exam.all_controls()
@@ -2997,7 +3059,7 @@ def composition_main(controls_only: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-component", "rmw-peer", "subscribers", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "limits", "service-component", "service-booted", "service", "service-link"), required=True)
+    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-component", "rmw-peer", "subscribers", "lanes", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "limits", "service-component", "service-booted", "service", "service-link"), required=True)
     parser.add_argument("--controls-only", action="store_true")
     arguments = parser.parse_args()
     if arguments.slice == "composition":
@@ -3026,6 +3088,8 @@ def main() -> int:
         return rmw_link_main(arguments.controls_only)
     if arguments.slice == "subscribers":
         return subscribers_main(arguments.controls_only)
+    if arguments.slice == "lanes":
+        return lanes_main(arguments.controls_only)
     if arguments.slice == "grants":
         return grants_main(arguments.controls_only)
     if arguments.slice == "client":

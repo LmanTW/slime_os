@@ -1,0 +1,85 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a1ee8a-6ef8-73ab-8725-b6c0481587c3" "zenoh-fragment-lanes" "zenoh-transport"
+  "A Profile 0 link takes the priorities, the best-effort traffic and the several open fragmented messages of a stock peer"
+  "A stock eclipse-zenoh peer keeps one sequence counter and one reassembly buffer for each pair of a priority and a reliability. Profile 0 keeps one counter and one run, and it refuses a best-effort fragment, a fragment with an extension and a second message. A link that negotiates QoS with a stock peer would meet all three, and it never offers QoS today, so no peer sends a priority.")
+  with {
+    intent = #planned;
+    owns = {
+      "components/lib/src/zenoh_lanes*";
+      "components/lib/src/zenoh_lanes/**";
+      "components/lib/src/zenoh_profile0.rs";
+      "components/lib/src/zenoh_profile0/**";
+      "components/lib/src/zenoh_link.rs";
+      "components/lib/src/zenoh_links.rs";
+      "components/lib/src/lib.rs";
+      "components/proto/src/zenoh_link_limits*";
+      "contracts/zenoh-link-limits/v2/**";
+      "scripts/generate/generate-zenoh-link-limits-bindings.py";
+    };
+    nonGoals = {
+      h.nonGoal "A component, a composition, a system spec or a QEMU gate that runs a link with several runs. This item judges the link on the host." h.agentDefault;
+      h.nonGoal "Any peer but eclipse-zenoh 1.0.0. The receive rules come from the 1.10.1 `zenoh-transport` sources. No live peer was observed sending a priority, a best-effort fragment or a full run." h.agentDefault;
+      h.nonGoal "Sending a priority, a best-effort frame or a best-effort fragment. The link sends reliable traffic on the default priority and takes the rest." h.agentDefault;
+      h.nonGoal "The QoS link extension (`QoSLink`, a priority range or a reliability) on an INIT. A link offers the unit extension only, and a peer that answers with the link form is refused." h.agentDefault;
+      h.nonGoal "Fragment markers (`first` and `drop` extensions), compression, multilink and any extension but the transport QoS extension." h.agentDefault;
+      h.nonGoal "Changing the fixed link, the demo configuration or any configuration of `zenoh-link-limits/v1`. A link with one run writes the bytes it writes today." h.agentDefault;
+      h.nonGoal "Releasing the stock-peer exam's pin on `transport_fragment`. The row stays refused for a link with one run." h.agentDefault;
+      h.nonGoal "Best-effort delivery to a holder of the Zenoh service. The service core serves whole reliable frames and is unchanged." h.agentDefault;
+    };
+    requirements = {
+      h.req "reference-matches-upstream"
+        "The host reference writes the bytes that `zenoh-codec` 1.0.0 wrote. They are 4 INIT messages, 16 FRAME headers and 32 FRAGMENT headers. The headers cover priorities 0, 2, 5 and 7, both reliabilities and two sequence numbers."
+        { "zenoh_lanes_check"; };
+      h.req "negotiates-by-both-offers"
+        "A link with 2 or more runs writes the QoS unit extension on its INIT. The lanes hold only when the peer's INIT carries it too. A link with 1 run writes the INIT it writes today. A connector with 1 run refuses an INIT_ACK that carries the extension."
+        { "zenoh_lanes_check"; };
+      h.req "keeps-one-counter-per-lane"
+        "Each pair of a priority and a reliability counts from the sequence number the peer's OPEN announced. A reliable lane takes exactly its next number. A best-effort lane takes a number ahead of the last by less than 2^31 and drops any other as stale."
+        { "zenoh_lanes_check"; };
+      h.req "joins-runs-by-lane"
+        "A link with 2 runs joins a fragmented message of each of two lanes at once, in the order the fragments arrive. Each completed message is delivered as one sample with its own sequence number."
+        { "zenoh_lanes_check"; };
+      h.req "drops-what-best-effort-loses"
+        "A best-effort lane that loses a fragment, a first fragment, a final fragment or a run's time drops the run and stays open. It discards fragments through the next final fragment. A reliable lane in the same cases is refused as it is today."
+        { "zenoh_lanes_check"; };
+      h.req "refuses-what-it-must"
+        "The link refuses 21 inputs, each by its class. Nine are `unsupported-extension` and two are `unsupported-message`. Seven are sequence, open-run, lane-limit and timeout errors. Two are empty fragments. One is a completed Put for an undeclared key."
+        { "zenoh_lanes_check"; };
+      h.req "one-run-keeps-every-refusal"
+        "A link with 1 run refuses a best-effort frame and fragment as `unsupported-message`. It refuses a QoS extension as `unsupported-extension`. The links and stock-peer exams pass beside it unchanged."
+        { "zenoh_lanes_check"; };
+      h.req "limits-v2-declares-runs"
+        "The contract `contracts/zenoh-link-limits/v2` adds `maxRuns` to a configuration. It takes 4 records and refuses 13 at the boundaries of the runs, the stack and the heap. It refuses a v1 record and a record with no `maxRuns`."
+        { "zenoh_lanes_check"; };
+      h.req "controls-are-refused"
+        "The judge refuses 437 corrupted records before it judges the real run."
+        { "zenoh_lanes_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_lanes_check" {
+        h.count "casesObserved" 59;
+        h.count "negativeControlsRefused" 437;
+      };
+    };
+    decisions = {
+      h.decided "lanes-need-both-offers"
+        "A link with 2 or more runs offers the QoS unit extension and takes a priority only when the peer offered it too. A link with 1 run offers nothing."
+        "upstream reads a non-default priority only on a connection that negotiated QoS, and a link with one run cannot hold a second lane"
+        h.agentDefault
+        { "negotiates-by-both-offers"; "one-run-keeps-every-refusal"; };
+      h.decided "a-best-effort-run-discards-through-its-final-fragment"
+        "A best-effort lane that breaks a run discards fragments through the next final fragment, because a 1.0.0 fragment has no message marker."
+        "without it, the fragments that follow a lost one would join into a message that fails at the decode, or into a wrong sample"
+        h.agentDefault
+        { "drops-what-best-effort-loses"; };
+      h.decided "a-run-belongs-to-one-lane"
+        "A link holds one run for each of its `maxRuns`, and a lane opens a run on its first fragment. A lane with a run open refuses a FRAME."
+        "upstream keeps one defragmentation buffer for each priority and reliability pair. The session cannot order a whole frame ahead of an open run on its lane"
+        h.agentDefault
+        { "joins-runs-by-lane"; "refuses-what-it-must"; };
+    };
+  };
+
+item
