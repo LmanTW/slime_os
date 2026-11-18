@@ -11,7 +11,7 @@ of the rules and writes every expected line from it. Nothing here reads the Rust
 
 * which holder is reclaimed, by which cause, and which holder only has its death noted;
 * that a reclaimed holder is refused every later request and cannot attach again;
-* that the other holder is still served: its attach, publish, take and detach answer as before, and a publication reaches only holders with a session,
+* that the other holder is still served: its attach, publish, take and detach answer as before, and a publication reports the core's reach, which a settled holder does not change,
   reports the same reach, the same peer flag and the same sample sequence;
 * that the deadline expires exactly at `DEADLINE_MS`, and one millisecond earlier reclaims nothing;
 * that a holder is settled once, so a late death report changes nothing;
@@ -77,7 +77,7 @@ FLAWS = (
     "expiry-unlisted",
     "done-on-first-settle",
     "survivor-reach-dropped",
-    "settled-still-reached",
+    "reach-follows-sessions",
     "survivor-ring-cleared",
 )
 
@@ -140,12 +140,15 @@ def _apply(states: list[str], rings: list, event: str, flaw: str | None) -> str:
             return "denied"
         sequence = rings[HOLDERS]
         rings[HOLDERS] = sequence + 1
+        # The core counts every holder with a subscribe row, whatever the holder's session. It is outside this
+        # item, so the reach does not change when a holder settles.
         live = [h for h in range(HOLDERS) if states[h] == "attached"]
-        targets = list(range(HOLDERS)) if flaw == "settled-still-reached" else live
-        reached = len(targets)
+        reached = len([h for h in range(HOLDERS) if states[h] in ("attached", "dead", "expired", "detached", "idle")])
+        if flaw == "reach-follows-sessions":
+            reached = len(live)
         if flaw == "survivor-reach-dropped":
             reached = max(0, reached - 1)
-        for h in targets:
+        for h in range(HOLDERS):
             rings[h] = (rings[h] + [sequence])[-RING:]
         if flaw == "survivor-ring-cleared" and "dead" in states:
             for h in live:

@@ -21,7 +21,7 @@ item :: s.Item = (h.task "01a1ef07-3784-7699-afef-d10b6a3d5cfe" "zenoh-holder-fa
     };
     requirements = {
       h.req "a-dead-holder-is-reclaimed"
-        "When the root reports a holder's task dead, the service closes that holder's session, and every later request or attach of that holder is denied. A publication reaches no ring of a settled holder."
+        "When the root reports a holder's task dead, the service closes that holder's session, and every later request or attach of that holder is denied. A publication reports the core's reach, which no settled holder changes."
         { "zenoh_service_holder_fault_check"; };
       h.req "the-others-are-served"
         "A holder that died or expired changes no answer to another holder. That holder still attaches, publishes, takes and detaches, with the same reach, peer flag and sample sequence."
@@ -39,7 +39,7 @@ item :: s.Item = (h.task "01a1ef07-3784-7699-afef-d10b6a3d5cfe" "zenoh-holder-fa
         "The component library exports the roster and its test. The server half has a `lose` call. `holders.rs` holds the wait, resolves a supervision binding, polls it, ends on the roster and prints one reclaim line."
         { "zenoh_service_holder_fault_check"; };
       h.req "controls-are-refused"
-        "The judge refuses 440 corrupted inputs. Seventeen of them are wrong services, each of which prints a transcript that the model refuses."
+        "The judge refuses 440 corrupted inputs. Eighteen of them are wrong services, each of which prints a transcript that the model refuses."
         { "zenoh_service_holder_fault_check"; };
     };
     acceptance = {
