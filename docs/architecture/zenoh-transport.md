@@ -305,8 +305,9 @@ Known limits of the component:
 - No gate grades a holder that faults or a holder that never detaches. The service ends only when every holder has attached and
   detached.
 - Nobody has computed the stack and memory sizes at real sizes. The composition runs at two holders and two rows.
-- A link configuration cannot declare more than one local subscription. A second declaration needs a new version of
-  `contracts/zenoh-link-limits`.
+- A configuration judged by `contracts/zenoh-link-limits/v1` cannot declare more than one local subscription. A second
+  declaration needs a new version of that contract. The component does not use that path: it opens its link with
+  `Params { local: 3 }`.
 - A publisher receives its own publications, and a holder cannot exclude them. Lazy declaration and reliable delivery with
   credits are not implemented. [The decision record](../decisions/zenoh-service.md) gives the reasons.
 
