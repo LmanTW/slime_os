@@ -173,8 +173,9 @@ fn main(_: u32) {
     exit(0)
 }
 
-/// Drives the link: declares the subscription once the session is open, publishes after the peer subscribes,
-/// prints each sample, and closes once it has published every string and heard the peer's CLOSE or the deadline.
+/// Drives the link: declares the subscription once the session is open, publishes after the peer subscribes, and
+/// prints each sample. It returns when the link ends, which is the peer's CLOSE or a refusal. A peer that never
+/// closes ends the node at the deadline as a failure, with no CLOSE written.
 fn run(link: &mut Link<'_, '_>, clock: &TickClock) {
     let handle = link.handle();
     let mut declared = false;
