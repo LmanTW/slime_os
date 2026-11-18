@@ -4,7 +4,7 @@
   componentType = "application";
   version = "1.0.0";
   owner = "root";
-  purpose = "Listens on 127.0.0.1:7447, accepts one connection, runs a Zenoh Profile 0 graph link over it, declares one subscription, publishes four strings once the peer subscribes, and closes when the peer closes.";
+  purpose = "Accepts one connection, runs a Zenoh Profile 0 graph link over it, subscribes to one topic, publishes four strings to a subscribed peer, and closes with it.";
   implementation = {
     provider = "workspace";
     binary = "zenoh-rmw-node";
