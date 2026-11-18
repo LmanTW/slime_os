@@ -1,0 +1,64 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a1edfd-96f2-7589-8f0b-7a85ca6778e6" "zenoh-rmw-peer" "zenoh-transport"
+  "A native peer component dials the rmw_zenoh node, learns its subscription and publishes Puts on the chatter key"
+  "The rmw_zenoh node component runs a graph link and has nothing to talk to. The existing demo nodes are plain Profile 0 nodes, and each is fixed to the `Counter` key with a 12-byte payload. A composition that boots the node needs a native peer on the `chatter` key with a `std_msgs/String`. A plain connector can serve. In a host probe, a plain link completed a session with a graph link and learned its subscription. A Put on the chatter key then reached the node's queue. The peer needs a crate of its own with a 253-byte key and a 32-byte payload, and the registration a composition needs.")
+  with {
+    owns = {
+      "components/applications/zenoh-rmw-peer/**";
+      "contracts/component-spec/v1/components/zenoh-rmw-peer.zti";
+      "Cargo.toml";
+      "Cargo.lock";
+    };
+    depends = { "01a1ed80-b13c-70ad-b27f-69434eccb321"; };
+    nonGoals = {
+      h.nonGoal "A composition, a system spec, a generation manifest, a closure or a QEMU gate that boots the peer. The next item composes the node and the peer." h.agentDefault;
+      h.nonGoal "Running the peer. This item judges that the crate and its registration exist, by file facts, and the plain link it drives is judged by `zenoh_links_check`." h.agentDefault;
+      h.nonGoal "Changing the plain link, the demo nodes or any shared library file. The peer configures the plain link through `Params` and changes nothing in it." h.agentDefault;
+      h.nonGoal "The demo nodes' `Counter` key. The peer uses the chatter key and `std_msgs/String` and leaves the demo nodes as they are." h.agentDefault;
+      h.nonGoal "A token, a query, an INTEREST or a router. The peer is a plain connector and speaks none of them." h.agentDefault;
+    };
+    requirements = {
+      h.req "the-crate-exists"
+        "The crate has a package named `slime-component-zenoh-rmw-peer` and a binary named `zenoh-rmw-peer`. It depends on the component library and the build support crate. It has a `build.rs` that calls `configure`. Its `main.rs` is `#![no_std]` and enters through `slime_rt::entry!`."
+        { "zenoh_rmw_peer_check"; };
+      h.req "the-crate-is-registered"
+        "The root `Cargo.toml` holds a release profile for the package, and `Cargo.lock` names it. A component spec of that name exists with binary `zenoh-rmw-peer` and the test environment `zenoh_rmw_peer_check`."
+        { "zenoh_rmw_peer_check"; };
+      h.req "the-crate-drives-a-plain-link"
+        "`main.rs` names a `LinkOf`, builds it with `with_params` as a connector, dials the node with `connect_ipv4`, and opens the session. It waits for `SubscriberDeclared`, publishes with `publish`, reads `SampleDelivered`, and attaches to the network service."
+        { "zenoh_rmw_peer_check"; };
+      h.req "the-library-calls-exist"
+        "The library exports `zenoh_link`, and that file defines `with_params`, `publish` and `next_notice`."
+        { "zenoh_rmw_peer_check"; };
+      h.req "controls-are-refused"
+        "The judge refuses 25 synthetic file sets, one for each fact, and names the fact it refused."
+        { "zenoh_rmw_peer_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_rmw_peer_check" {
+        h.count "casesObserved" 25;
+        h.count "negativeControlsRefused" 25;
+      };
+    };
+    decisions = {
+      h.decided "a-plain-connector-serves-as-the-native-peer"
+        "The peer is a plain Profile 0 connector with a 253-byte key and a 32-byte payload. It needs no graph session, because the graph link accepts a plain INIT, a plain subscriber declaration and a plain Put."
+        "a host probe showed a plain link and a graph link complete a session. The plain link learned the node's subscription, and its Put reached the node"
+        h.agentDefault
+        { "the-crate-drives-a-plain-link"; };
+      h.decided "a-new-peer-beside-the-demo-nodes"
+        "The peer is a new crate. Each demo node is fixed to the `Counter` key and a 12-byte payload, which a `std_msgs/String` does not fit."
+        "the longest captured string is 22 bytes as classic CDR, and the chatter key is 110 bytes"
+        h.agentDefault
+        { "the-crate-exists"; };
+      h.decided "judged-by-file-facts-like-the-node"
+        "The crate and its registration are judged by patterns over their files, with one synthetic control for each, as the node component is. The booted composition judges what the crate does."
+        "a `no_std` seL4 guest does not run on the host. Its source shows only that the calls exist"
+        h.agentDefault
+        { "the-crate-drives-a-plain-link"; "controls-are-refused"; };
+    };
+  };
+
+item

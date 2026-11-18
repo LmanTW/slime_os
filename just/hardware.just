@@ -125,6 +125,16 @@ zenoh_rmw_data_link_check:
 zenoh_rmw_component_check:
     python3 scripts/check/check-zenoh-profile0.py --slice rmw-component
 
+# Judges that the rmw_zenoh native peer component exists and is registered. The peer is a plain Profile 0 connector
+# that dials the node component, learns its subscription on the chatter key and publishes Puts on it. The judge
+# requires the crate and its manifest, the release profile, the lockfile entry and the component spec, the calls
+# that build a plain link as a connector, dial the node, publish and read samples, and the library calls those
+# stand on. The expectation is scripts/lib/zenoh_rmw_peer_component_exam.py. Nothing here needs a registry. The
+# recipe fails until the component lands.
+[group('hardware')]
+zenoh_rmw_peer_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice rmw-peer
+
 # A Profile 0 graph link: one graph session over a byte stream, with the tokens it receives held in a
 # bounded graph. The three captured sessions of an rmw_zenoh_cpp peer are written to it whole, one byte at
 # a time and all at once, and the bytes the listener writes are judged to the byte: an INIT_ACK of 512
