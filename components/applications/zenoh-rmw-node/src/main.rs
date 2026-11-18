@@ -174,12 +174,15 @@ fn main(_: u32) {
 }
 
 /// Drives the link: declares the subscription once the session is open, publishes after the peer subscribes, and
-/// prints each sample. It returns when the link ends, which is the peer's CLOSE or a refusal. A peer that never
-/// closes ends the node at the deadline as a failure, with no CLOSE written.
+/// prints each sample. Once it has published every string and received as many samples, it closes the session.
+/// The node closes and the peer does not, because the link empties its sample queue when the peer's CLOSE
+/// arrives, and a sample read in the same pump as that CLOSE is gone. A peer that never sends every sample ends the
+/// node at the deadline as a failure, with no CLOSE written.
 fn run(link: &mut Link<'_, '_>, clock: &TickClock) {
     let handle = link.handle();
     let mut declared = false;
     let mut published = 0usize;
+    let mut received = 0usize;
     loop {
         let now = clock.millis(monotonic_read().unwrap_or_else(|_| fail(b"clock read")));
         link.pump(handle, now as u64)
@@ -196,6 +199,7 @@ fn run(link: &mut Link<'_, '_>, clock: &TickClock) {
                 .emit();
         }
         while let Some(sample) = link.pop_sample() {
+            received += 1;
             Line::<128>::new()
                 .bytes(b"[zenoh-rmw-node] received sequence=")
                 .decimal(sample.sequence as u64)
@@ -222,6 +226,13 @@ fn run(link: &mut Link<'_, '_>, clock: &TickClock) {
                 Err(GraphLinkError::Graph(_)) | Err(GraphLinkError::SendBusy) => {}
                 Err(_) => fail(b"put"),
             }
+        }
+        if published == PUBLISHED && received == PUBLISHED && !link.send_pending() {
+            link.close(handle, 0)
+                .unwrap_or_else(|_| fail(b"close session"));
+            Line::<96>::new()
+                .bytes(b"[zenoh-rmw-node] session closing\n")
+                .emit();
         }
         idle(clock);
     }
