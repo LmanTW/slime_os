@@ -36,7 +36,9 @@ COMPONENT_FACTS: tuple[facts.Fact, ...] = (
     ("release-profile", "Cargo.toml", rf"^\[profile\.release\.package\.{PACKAGE}\]$", f"[profile.release.package.{PACKAGE}]"),
     ("lockfile-package", "Cargo.lock", rf'^name = "{PACKAGE}"$', f'name = "{PACKAGE}"'),
     ("uses-plain-link", f"{COMPONENT}/src/main.rs", r"\bLinkOf<", "type Link<'a, 'b> = LinkOf<Stream<Wire<'a, 'b>>, FRAMED, 1, 2, KEY, PAYLOAD, NOTICES>;"),
-    ("uses-link-params", f"{COMPONENT}/src/main.rs", r"\bLink::with_params\(", "        let mut link = Link::with_params(Stream::new(wire), Role::Connector, &config, params, 1)"),
+    ("uses-link-params", f"{COMPONENT}/src/main.rs", r"\bLink::with_params\(", "        let mut link = Link::with_params(Stream::new(wire), &config, params, 1)"),
+    ("builds-a-connector", f"{COMPONENT}/src/main.rs", r"\bRole::Connector\b", "            Role::Connector,"),
+    ("declares-a-subscription", f"{COMPONENT}/src/main.rs", r"\.declare_subscriber\(", "    link.declare_subscriber(handle, SUBSCRIPTION_ID, CHAT_KEY)?;"),
     ("dials-the-node", f"{COMPONENT}/src/main.rs", r"\.connect_ipv4\(", "    let connection = io.connect_ipv4(node::ENDPOINT, node::PORT)"),
     ("opens-the-session", f"{COMPONENT}/src/main.rs", r"\blink\.open\(", "    link.open(handle, now)?;"),
     ("publishes-puts", f"{COMPONENT}/src/main.rs", r"\.publish\(", "    link.publish(handle, CHAT_KEY, &attachment, &payload)?;"),
@@ -90,8 +92,8 @@ def component_controls() -> int:
 
 # What the item fixes, held here as well so the gate stays correct after the item is closed and moved to
 # .tasks/terminal. While the item is open its stored predicates are compared with these. Both are exact.
-PINNED_CASES = 25
-PINNED_CONTROLS = 25
+PINNED_CASES = 27
+PINNED_CONTROLS = 27
 
 
 def item_pins() -> tuple[int, int]:

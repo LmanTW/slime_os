@@ -27,25 +27,25 @@ item :: s.Item = (h.task "01a1edfd-96f2-7589-8f0b-7a85ca6778e6" "zenoh-rmw-peer"
         "The root `Cargo.toml` holds a release profile for the package, and `Cargo.lock` names it. A component spec of that name exists with binary `zenoh-rmw-peer` and the test environment `zenoh_rmw_peer_check`."
         { "zenoh_rmw_peer_check"; };
       h.req "the-crate-drives-a-plain-link"
-        "`main.rs` names a `LinkOf`, builds it with `with_params` as a connector, dials the node with `connect_ipv4`, and opens the session. It waits for `SubscriberDeclared`, publishes with `publish`, reads `SampleDelivered`, and attaches to the network service."
+        "`main.rs` names a `LinkOf`, builds it with `with_params` and `Role::Connector`, dials the node with `connect_ipv4`, and opens the session. It declares its subscription with `declare_subscriber`. It waits for `SubscriberDeclared`, publishes with `publish`, reads `SampleDelivered`, and attaches to the network service."
         { "zenoh_rmw_peer_check"; };
       h.req "the-library-calls-exist"
         "The library exports `zenoh_link`, and that file defines `with_params`, `publish` and `next_notice`."
         { "zenoh_rmw_peer_check"; };
       h.req "controls-are-refused"
-        "The judge refuses 25 synthetic file sets, one for each fact, and names the fact it refused."
+        "The judge refuses 27 synthetic file sets, one for each fact, and names the fact it refused."
         { "zenoh_rmw_peer_check"; };
     };
     acceptance = {
       h.observedWhere "zenoh_rmw_peer_check" {
-        h.count "casesObserved" 25;
-        h.count "negativeControlsRefused" 25;
+        h.count "casesObserved" 27;
+        h.count "negativeControlsRefused" 27;
       };
     };
     decisions = {
       h.decided "a-plain-connector-serves-as-the-native-peer"
         "The peer is a plain Profile 0 connector with a 253-byte key and a 32-byte payload. It needs no graph session, because the graph link accepts a plain INIT, a plain subscriber declaration and a plain Put."
-        "a host probe showed a plain link and a graph link complete a session. The plain link learned the node's subscription, and its Put reached the node"
+        "a host probe showed a plain link and a graph link complete a session in both directions. The plain link learned the node's subscription and its Put reached the node. Its own subscription received four Puts from the node"
         h.agentDefault
         { "the-crate-drives-a-plain-link"; };
       h.decided "a-new-peer-beside-the-demo-nodes"
