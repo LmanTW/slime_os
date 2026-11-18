@@ -649,9 +649,9 @@ ZENOH_SERVICE_CHAINS: tuple[tuple[str, tuple[str, ...]], ...] = (
         r"\[zenoh-service\] holder attached holder=[a-z-]+ rows=[1-9]\d*",
     )),
     ("zenoh-service exchange", (
-        r"\[zenoh-service\] published holder=[a-z-]+ row=\d+ sequence=0 reached=1 peer=none",
+        r"\[zenoh-service\] published holder=[a-z-]+ row=\d+ sequence=0 reached=1 peer=(?:none|sent)",
         r"\[zenoh-service\] delivered holder=[a-z-]+ row=\d+ sequence=0",
-        r"\[zenoh-service\] published holder=[a-z-]+ row=\d+ sequence=3 reached=1 peer=none",
+        r"\[zenoh-service\] published holder=[a-z-]+ row=\d+ sequence=3 reached=1 peer=(?:none|sent)",
         r"\[zenoh-service\] delivered holder=[a-z-]+ row=\d+ sequence=3",
     )),
     ("zenoh-service refusal", (r"\[zenoh-service\] denial class=not-granted holder=[a-z-]+ refused=1",)),

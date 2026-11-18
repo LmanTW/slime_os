@@ -132,6 +132,7 @@ import zenoh_grants_reader_exam
 import zenoh_server_exam
 import zenoh_service_arm
 import zenoh_service_component_exam
+import zenoh_service_peer_exam
 import zenoh_grants_table_exam
 import zenoh_limits_exam
 import zenoh_service_exam
@@ -2838,6 +2839,44 @@ def service_booted_main(controls_only: bool) -> int:
     return 0
 
 
+SERVICE_PEER_CONTROLS = 34
+PEER_LINE = re.compile(r"^\[(?:zenoh-service|zenoh-peer)\] ")
+
+
+def service_peer_main(controls_only: bool) -> int:
+    """A peer that subscribes receives each publication of the publisher holder once. The facts are read first. The
+    arm then boots the image under QEMU, and the judge reads the lines of the service and of the peer."""
+    exam = zenoh_service_peer_exam
+    try:
+        refusals = exam.fact_controls() + exam.controls()
+        if refusals != SERVICE_PEER_CONTROLS:
+            fail(f"service-peer: {refusals} controls, the checker pins {SERVICE_PEER_CONTROLS}")
+        if controls_only:
+            print(f"zenoh profile 0 service-peer judge: refused {refusals} corrupted inputs")
+            return 0
+        cases = exam.check_facts()
+    except exam.PeerExamError as error:
+        fail(f"service-peer: {error}")
+    with tempfile.TemporaryDirectory() as scratch:
+        transcript = _Path(scratch) / "transcript.txt"
+        arm = subprocess.run(
+            [_sys.executable, str(ROOT / "scripts" / "check" / "check-sel4-io-network-plane.py"), "--arm", "zenoh-service", "--transcript", str(transcript)],
+            cwd=ROOT, capture_output=True, text=True, env={**_os.environ},
+        )
+        if arm.returncode != 0:
+            _sys.stderr.write((arm.stdout + arm.stderr)[-4000:])
+            fail(f"service-peer: the zenoh-service arm exited {arm.returncode}")
+        lines = [line.strip() for line in transcript.read_text(encoding="utf-8").splitlines() if PEER_LINE.match(line.strip())]
+    try:
+        declared, received = exam.judge(lines)
+    except exam.PeerExamError as error:
+        fail(f"service-peer: {error}")
+    print(f"[zenoh-profile0] slice=service-peer cases={cases + declared + received} refusals={refusals} controls={refusals}")
+    devloop_observations.record(casesObserved=cases + declared + received, negativeControlsRefused=refusals)
+    print("zenoh profile 0 service-peer check: the peer declared one subscriber and received each publication of alpha once")
+    return 0
+
+
 GRANTS_TABLE_TEST = "every_table_decodes_to_its_rows_or_is_refused"
 TABLE_LINE = re.compile(r"\[zenoh-exam\] (grantstable .*)$")
 
@@ -3059,7 +3098,7 @@ def composition_main(controls_only: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-component", "rmw-peer", "subscribers", "lanes", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "limits", "service-component", "service-booted", "service", "service-link"), required=True)
+    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-component", "rmw-peer", "subscribers", "lanes", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "limits", "service-component", "service-booted", "service-peer", "service", "service-link"), required=True)
     parser.add_argument("--controls-only", action="store_true")
     arguments = parser.parse_args()
     if arguments.slice == "composition":
@@ -3112,6 +3151,8 @@ def main() -> int:
         return service_component_main(arguments.controls_only)
     if arguments.slice == "service-booted":
         return service_booted_main(arguments.controls_only)
+    if arguments.slice == "service-peer":
+        return service_peer_main(arguments.controls_only)
     if arguments.slice == "service":
         return service_main(arguments.controls_only)
     if arguments.slice == "service-link":

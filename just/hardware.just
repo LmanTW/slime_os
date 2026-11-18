@@ -262,6 +262,16 @@ zenoh_service_component_check:
 zenoh_service_booted_check:
     python3 scripts/check/check-zenoh-profile0.py --slice service-booted
 
+# Judges that a peer which subscribes receives what a holder publishes through the Zenoh service. The judge requires the
+# peer's source, its component spec and the system spec to hold the declarations, boots the composition under QEMU
+# through the arm of the network plane checker, and reads the lines of the service and of the peer. The peer must declare
+# one subscriber on the key of `alpha` and receive each of `alpha`'s four publications once. The service must report
+# `peer=sent` for each. The expectation is scripts/lib/zenoh_service_peer_exam.py. The recipe is in no aggregate. It fails
+# until the peer subscribes.
+[group('hardware')]
+zenoh_service_peer_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice service-peer
+
 # Judges the Zenoh service grants table, the form of the grants that the generation carries and the root serves. The
 # judge writes each table again with Python's struct from the schema's layout, requires the encoder, the generated wire
 # records and the Rust decoder to agree with it, and refuses each corruption of a table. The expectation is
