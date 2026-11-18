@@ -296,8 +296,19 @@ The grants-table contract and encoder are release inputs of every closure, so a 
 
 What is shown: one boot of this composition under QEMU, in which `alpha` published four samples, `beta` was delivered all four,
 the service refused `beta`'s publish, and every instance exited with status 0. What is not shown: a second boot, a malformed
-request, a link that stalls, or any sample crossing to a peer that subscribes. The component is built for at most two holders and
-two rows. It refuses a table above that, and it serves a table below it.
+request, a link that stalls, or any sample crossing to a peer that subscribes. The peer in this composition declares no
+subscriber.
+
+Known limits of the component:
+
+- It is built for at most two holders and two rows. It refuses a table above that, and it serves a table below it.
+- No gate grades a holder that faults or a holder that never detaches. The service ends only when every holder has attached and
+  detached.
+- Nobody has computed the stack and memory sizes at real sizes. The composition runs at two holders and two rows.
+- A link configuration cannot declare more than one local subscription. A second declaration needs a new version of
+  `contracts/zenoh-link-limits`.
+- A publisher receives its own publications, and a holder cannot exclude them. Lazy declaration and reliable delivery with
+  credits are not implemented. [The decision record](../decisions/zenoh-service.md) gives the reasons.
 
 ## Link behaviour
 
