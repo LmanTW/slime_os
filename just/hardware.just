@@ -295,6 +295,15 @@ zenoh_service_client_abort_check:
 zenoh_service_link_check:
     python3 scripts/check/check-zenoh-profile0.py --slice service-link
 
+# Judges the stack the Zenoh service needs at a stated size of 4 holders, 6 rows and 64-byte samples, and at the size the
+# component is built for. A Rust test prints the `size_of` of each part and the depth of the call path, which it measures
+# by painting free stack. The judge requires each part within the overhead of contracts/zenoh-service-grants/v1 and the
+# declared STACK_BYTES to cover the need and not exceed the runtime's stack. The expectation is
+# scripts/lib/zenoh_stack_exam.py. Nothing here needs a registry. The recipe fails until the test lands.
+[group('hardware')]
+zenoh_service_stack_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice service-stack
+
 # Judges contracts/frame-store/v1, its Rust reader and its MCAP converter. Converts the LiDAR bag named by
 # SLIME_LIDAR_BAG (refused unless its SHA-256 is the pinned value) twice and compares every payload with the
 # exam's own MCAP reading. The Rust reader must read 70 stores exactly as the exam's decoder does. The

@@ -136,6 +136,7 @@ import zenoh_grants_table_exam
 import zenoh_limits_exam
 import zenoh_service_exam
 import zenoh_service_link_exam
+import zenoh_stack_exam
 import zenoh_stock_peer
 import zenoh_subscribers_exam
 import zenoh_undeclare_exam
@@ -3036,6 +3037,62 @@ def service_link_main(controls_only: bool) -> int:
     return 0
 
 
+SERVICE_STACK_CASES = 12
+SERVICE_STACK_CONTROLS = 92
+SERVICE_STACK_FILTER = "zenoh_service_stack::"
+# The exam's own Rust test, by name: a filter that matches nothing passes silently.
+SERVICE_STACK_TESTS = ("zenoh_service_stack::the_stack_exam",)
+assert len(SERVICE_STACK_TESTS) == 1
+
+
+def run_service_stack() -> list[str]:
+    stdout, output = cargo_tests((SERVICE_STACK_FILTER,), {**_os.environ})
+    passed = tests_passed(output)
+    missing = [name for name in SERVICE_STACK_TESTS if name not in passed]
+    if missing:
+        fail(f"service-stack: the exam's tests did not run and pass ({len(missing)} of {len(SERVICE_STACK_TESTS)}): {', '.join(missing[:4])}")
+    return [line for line in exam_lines(stdout) if line.startswith("stack ")]
+
+
+def service_stack_main(controls_only: bool) -> int:
+    if all(name in tests_passed("") for name in SERVICE_STACK_TESTS):
+        fail("control: a run with the service-stack exam test missing was read as complete")
+    # The stack exam reads the overheads and the stated record through the grants contract, so the contract's own
+    # controls run here as a precondition. Their refusals belong to the grants gate and are not counted.
+    try:
+        zenoh_grants_exam.all_controls()
+    except zenoh_grants_exam.GrantsError as error:
+        fail(str(error))
+    exam = zenoh_stack_exam
+    try:
+        refused_controls = exam.all_controls()
+        item_cases, item_controls = exam.item_pins()
+        cases = exam.judge(exam.good_lines()) + exam.contract_cases()
+    except (exam.StackError, zenoh_grants_exam.GrantsError) as error:
+        fail(str(error))
+    if cases != SERVICE_STACK_CASES:
+        fail(f"service-stack: an honest transcript is {cases} cases, the checker pins {SERVICE_STACK_CASES}")
+    if refused_controls != SERVICE_STACK_CONTROLS:
+        fail(f"service-stack: {refused_controls} controls, the checker pins {SERVICE_STACK_CONTROLS}")
+    if item_cases and item_cases != SERVICE_STACK_CASES:
+        fail(f"service-stack: the item fixes {item_cases} cases, the checker pins {SERVICE_STACK_CASES}")
+    if item_controls and item_controls != SERVICE_STACK_CONTROLS:
+        fail(f"service-stack: the item requires {item_controls} controls, the checker pins {SERVICE_STACK_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 service-stack judge: refused {refused_controls} corrupted records")
+        return 0
+    try:
+        cases = exam.judge(run_service_stack()) + exam.contract_cases()
+    except exam.StackError as error:
+        fail(str(error))
+    if cases != SERVICE_STACK_CASES:
+        fail(f"service-stack: the run observed {cases} cases, the checker pins {SERVICE_STACK_CASES}")
+    print(f"[zenoh-profile0] slice=service-stack cases={cases} controls={refused_controls}")
+    devloop_observations.record(casesObserved=cases, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 service-stack check: the declared stack covers the measured need of the built size and the stated size")
+    return 0
+
+
 def composition_main(controls_only: bool) -> int:
     contract = zenoh_exchange.demo()
     try:
@@ -3059,7 +3116,7 @@ def composition_main(controls_only: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-component", "rmw-peer", "subscribers", "lanes", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "limits", "service-component", "service-booted", "service", "service-link"), required=True)
+    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-component", "rmw-peer", "subscribers", "lanes", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "limits", "service-component", "service-booted", "service", "service-link", "service-stack"), required=True)
     parser.add_argument("--controls-only", action="store_true")
     arguments = parser.parse_args()
     if arguments.slice == "composition":
@@ -3116,6 +3173,8 @@ def main() -> int:
         return service_main(arguments.controls_only)
     if arguments.slice == "service-link":
         return service_link_main(arguments.controls_only)
+    if arguments.slice == "service-stack":
+        return service_stack_main(arguments.controls_only)
     refused_controls = controls(arguments.slice)
     if arguments.controls_only:
         print(f"zenoh profile 0 {arguments.slice} judge: refused {refused_controls} corrupted transcripts")

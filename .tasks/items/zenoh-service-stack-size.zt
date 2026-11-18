@@ -1,0 +1,70 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a1ef67-2110-75db-a6f7-3d5b5addb0f8" "zenoh-service-stack-size" "zenoh-service-core"
+  "The stack the Zenoh service needs at a stated size is measured, and the declared stack covers it"
+  "The Zenoh service component is built for 2 holders and 2 rows, with a declared stack of 32768 bytes. The grants contract counts the core's arrays only. Nobody has measured the link, the tables in the main frame or the call path, at the built size or at a larger one.")
+  with {
+    intent = #planned;
+    owns = {
+      "components/lib/src/zenoh_service_stack*";
+      "components/lib/src/lib.rs";
+    };
+    nonGoals = {
+      h.nonGoal "Changing `STACK_BYTES`, the holder count, the row count or the sample size of the component. The measured need is below the declared stack, so this item changes none of them." h.agentDefault;
+      h.nonGoal "A booted composition with more than 2 holders, or any QEMU gate. The stated size runs on the host only." h.agentDefault;
+      h.nonGoal "The stack that the network attachment (`NetworkIo`, the wire send and receive, the runtime syscalls) uses. A host test cannot reach it." h.agentDefault;
+      h.nonGoal "The `zenoh-service-grants/v1` formula for the required stack. This item grades the declared stack against the measured need and leaves the formula as it is." h.agentDefault;
+      h.nonGoal "The stack depth on seL4. The host runs the call path on a Linux thread, and one run on aarch64 used `qemu-user`. No seL4 boot ran, so the kernel depth is unmeasured." h.agentDefault;
+      h.nonGoal "Page counts for 4 holders. The exam grades the counts for 2 holders against the system spec, because no composition of 4 holders exists." h.agentDefault;
+      h.nonGoal "Samples above 4080 bytes, a heap link or the `large` link configuration. Version 1 of the client protocol refuses them." h.agentDefault;
+    };
+    requirements = {
+      h.req "parts-within-the-contract"
+        "At both sizes, the `size_of` of a slot, a row, a holder and the core's fixed part is at most the matching overhead of `zenoh-service-grants/v1`. The core is at most the contract's bound on its arrays."
+        { "zenoh_service_stack_check"; };
+      h.req "need-is-measured"
+        "For each size the test prints five frames and one depth. The frames are the core, the link, the over-link state, the server and the main frame's tables. The depth is the measured depth of the call path. The need is their sum."
+        { "zenoh_service_stack_check"; };
+      h.req "declared-stack-covers-the-need"
+        "The declared `STACK_BYTES` is at least the need of the built size and of the stated size. It is at most the 65536 bytes that `STACK_SIZE` reserves for one component thread."
+        { "zenoh_service_stack_check"; };
+      h.req "the-contract-accepts-the-stated-record"
+        "The grants contract accepts a record of the stated size, with the stated rows, at the declared stack."
+        { "zenoh_service_stack_check"; };
+      h.req "pages-follow-the-client-contract"
+        "The system spec declares 4 buffers, 4 byte pages, 4 loans and 6 mappings for the instance `zenoh-service`. The client contract's page counts give those numbers for 2 holders."
+        { "zenoh_service_stack_check"; };
+      h.req "the-measurement-reads-what-it-claims"
+        "A frame of 8192 bytes measures between 8192 and 8256 bytes. The transcript names its architecture and its profile, which is debug."
+        { "zenoh_service_stack_check"; };
+      h.req "controls-are-refused"
+        "The judge refuses 92 corrupted transcripts and source files before it judges the real run. Each part, each depth bound and each declared stack bound has a control one byte past it."
+        { "zenoh_service_stack_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_service_stack_check" {
+        h.count "casesObserved" 12;
+        h.count "negativeControlsRefused" 92;
+      };
+    };
+    decisions = {
+      h.decided "the-stated-size-is-four-robot-components"
+        "The stated size is 4 holders, 6 rows, 4 ring slots and 64-byte samples. The holders are the sensor, controller, actuator and supervisor of `sel4-robot-runtime`."
+        "that composition is the largest set of cooperating components in the repository, and 64 bytes is `TelemetrySample`'s encoded bound. The 6 rows are an assumed topology, because that composition routes through the fabric and not through the service"
+        h.agentDefault
+        { "parts-within-the-contract"; "declared-stack-covers-the-need"; };
+      h.decided "depth-is-measured-in-a-debug-build"
+        "The exam measures the call path in a debug build. The components ship with `opt-level = s`."
+        "a debug build measured 16 KiB where a release build measured 3 KiB, so the debug figure bounds the shipped one. Both figures came from the same test"
+        h.agentDefault
+        { "need-is-measured"; "the-measurement-reads-what-it-claims"; };
+      h.decided "the-slice-extends-the-zenoh-checker"
+        "The exam is the slice `--slice service-stack` of `check-zenoh-profile0.py`. It adds one judge module and no top-level checker."
+        "the verification rules say to extend the checker that owns the invariant. The core, the link and the server exams already run there"
+        h.agentDefault
+        { "controls-are-refused"; };
+    };
+  };
+
+item
