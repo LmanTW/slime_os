@@ -226,6 +226,17 @@ zenoh_service_grants_reader_check:
 zenoh_service_server_check:
     python3 scripts/check/check-zenoh-profile0.py --slice server
 
+# Judges three cases of the Zenoh service server half that the booted run does not show, on the host. The Rust
+# test drives the server half over a link pair. It runs a second boot, a set of malformed requests and a stalled
+# link. The judge writes every request and completion again with Python's `struct` from the schema's layout. It
+# requires the second boot to repeat the first. It requires every malformed request to change no ring, session
+# or stream byte. It requires a publication that the link cannot flush to be answered link-closed with no ring
+# changed. The expectation is scripts/lib/zenoh_grading_exam.py. Nothing here boots QEMU or needs a registry. The recipe fails
+# until the test lands.
+[group('hardware')]
+zenoh_service_grading_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice grading
+
 # Judges the generation builder's Zenoh limits record and the system spec admission that runs it. The judge builds the
 # record from a manifest and from a spec, requires the encoder's bytes and the independent struct writer's bytes, holds the
 # rows to the holders, subscriptions and key length the record declares, and refuses each input the contract and the

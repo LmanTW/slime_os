@@ -129,6 +129,7 @@ import zenoh_client_abort_exam
 import zenoh_client_io_exam
 import zenoh_client_wire_exam
 import zenoh_grants_reader_exam
+import zenoh_grading_exam
 import zenoh_server_exam
 import zenoh_service_arm
 import zenoh_service_component_exam
@@ -2700,11 +2701,11 @@ SERVER_PINNED_CASES = 39
 SERVER_PINNED_CONTROLS = 104
 
 
-def server_run_is_scoped(output: str) -> bool:
-    """Whether the run was of the server test alone: it passed, and it is the only result cargo printed. The package
+def server_run_is_scoped(output: str, test: str = zenoh_server_exam.TEST) -> bool:
+    """Whether the run was of one library test alone: it passed, and it is the only result cargo printed. The package
     has an integration test as well, and a run that does not name the library prints a result for each binary."""
     results = re.findall(r"test result: (\w+)\. (\d+) passed; (\d+) failed", output)
-    return tests_passed(output) == {zenoh_server_exam.TEST} and results == [("ok", "1", "0")]
+    return tests_passed(output) == {test} and results == [("ok", "1", "0")]
 
 
 def run_server() -> list[str]:
@@ -2759,6 +2760,66 @@ def server_main(controls_only: bool) -> int:
     print(f"[zenoh-profile0] slice=server cases={positive + refusals} refusals={refusals} controls={refused_controls}")
     devloop_observations.record(casesObserved=positive + refusals, negativeControlsRefused=refused_controls)
     print("zenoh profile 0 server check: the server answers each request with the bytes the schema gives and widens no grant")
+    return 0
+
+
+GRADING_PINNED_CASES = 60
+GRADING_PINNED_CONTROLS = 162
+
+
+def run_grading() -> list[str]:
+    """The component library's test of three cases the booted run does not show, run alone with `--lib` and `--exact`.
+    It drives the server half over a link pair on the host and prints what each request answered and what it changed."""
+    host = subprocess.run(["rustc", "-vV"], capture_output=True, text=True, check=True)
+    target = next(line.split(": ", 1)[1] for line in host.stdout.splitlines() if line.startswith("host: "))
+    command = [
+        "cargo", "test", "--target", target, "-p", "slime-components", "--no-default-features", "--lib",
+        "--", "--exact", zenoh_grading_exam.TEST, "--nocapture", "--test-threads=1",
+    ]
+    result = subprocess.run(command, cwd=ROOT / "components", capture_output=True, text=True, env={**_os.environ})
+    output = result.stdout + result.stderr
+    if result.returncode != 0:
+        _sys.stderr.write(output[-4000:])
+        fail(f"{' '.join(command)} exited {result.returncode}")
+    if not server_run_is_scoped(output, zenoh_grading_exam.TEST):
+        fail(f"grading: the run was not of {zenoh_grading_exam.TEST} alone")
+    return zenoh_grading_exam.exam_lines(result.stdout)
+
+
+def grading_main(controls_only: bool) -> int:
+    """A second boot, a malformed request and a stalled link, judged on the host. The judge reuses the server exam's
+    restatement of the client's rules, so that exam's controls on those rules run first. The exam raises at the first
+    line that differs, so a run that returns has matched every line."""
+    exam = zenoh_grading_exam
+    test = exam.TEST
+    alone = f"test {test} ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored\n"
+    two_tests = f"test {test} ... ok\ntest other ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored\n"
+    server_test = f"test {zenoh_server_exam.TEST} ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored\n"
+    if not server_run_is_scoped(alone, test):
+        fail("control: a run of the grading test alone was read as not scoped")
+    for label, text in (("a run of two tests", two_tests), ("a run of the server exam", server_test), ("an empty run", "")):
+        if server_run_is_scoped(text, test):
+            fail(f"control: {label} was read as the grading run")
+    try:
+        zenoh_server_exam.acceptance_controls()
+        positive, refusals = exam.judge(exam.good_lines())
+        refused_controls = exam.all_controls()
+    except (exam.GradingExamError, zenoh_server_exam.ServerExamError, zenoh_client_wire_exam.WireError) as error:
+        fail(str(error))
+    if positive + refusals != GRADING_PINNED_CASES:
+        fail(f"grading: an honest transcript is {positive + refusals} cases, the checker pins {GRADING_PINNED_CASES}")
+    if refused_controls != GRADING_PINNED_CONTROLS:
+        fail(f"grading: {refused_controls} controls, the checker pins {GRADING_PINNED_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 grading judge: refused {refused_controls} corrupted records")
+        return 0
+    try:
+        positive, refusals = exam.judge(run_grading())
+    except (exam.GradingExamError, zenoh_server_exam.ServerExamError, zenoh_client_wire_exam.WireError) as error:
+        fail(str(error))
+    print(f"[zenoh-profile0] slice=grading cases={positive + refusals} refusals={refusals} controls={refused_controls}")
+    devloop_observations.record(casesObserved=positive + refusals, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 grading check: a second run repeats the first, a malformed request changes nothing and a stalled link is reported closed")
     return 0
 
 
@@ -3059,7 +3120,7 @@ def composition_main(controls_only: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-component", "rmw-peer", "subscribers", "lanes", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "limits", "service-component", "service-booted", "service", "service-link"), required=True)
+    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-component", "rmw-peer", "subscribers", "lanes", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service", "service-link"), required=True)
     parser.add_argument("--controls-only", action="store_true")
     arguments = parser.parse_args()
     if arguments.slice == "composition":
@@ -3106,6 +3167,8 @@ def main() -> int:
         return grants_reader_main(arguments.controls_only)
     if arguments.slice == "server":
         return server_main(arguments.controls_only)
+    if arguments.slice == "grading":
+        return grading_main(arguments.controls_only)
     if arguments.slice == "limits":
         return limits_main(arguments.controls_only)
     if arguments.slice == "service-component":
