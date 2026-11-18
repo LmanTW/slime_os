@@ -153,6 +153,8 @@ PLANES: tuple[tuple[str, str], ...] = (
     ("sel4-zenoh-external", "slime-sel4-zenoh-external.elf"),
     # The shared Zenoh service with its two holders and a peer. Init holds only the two buffer factories.
     ("sel4-zenoh-service", "slime-sel4-zenoh-service.elf"),
+    # The rmw_zenoh node and its native peer over the network service. Init holds only the network service's buffer factory.
+    ("sel4-zenoh-rmw", "slime-sel4-zenoh-rmw.elf"),
 )
 
 # The subset P6.4 replays on x86-64: the resident product graph plus the two

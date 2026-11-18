@@ -116,6 +116,7 @@ import devloop_observations
 import zenoh_exchange
 import zenoh_rmw_exam
 import zenoh_rmw_graph_exam
+import zenoh_rmw_arm
 import zenoh_rmw_component_exam
 import zenoh_rmw_peer_component_exam
 import zenoh_rmw_data_exam
@@ -2256,6 +2257,42 @@ def rmw_peer_main(controls_only: bool) -> int:
     return 0
 
 
+RMW_BOOTED_CONTROLS = 64
+
+
+def rmw_booted_main(controls_only: bool) -> int:
+    """The composition and the booted exchange. The facts are read first. The arm then boots the image under QEMU and
+    judges its marker chains and each component's lines, so a run that returns has seen the node and the peer each
+    publish and receive four samples and the session close."""
+    exam = zenoh_rmw_arm
+    try:
+        refusals = exam.composition_controls() + exam.controls()
+        if refusals != RMW_BOOTED_CONTROLS:
+            fail(f"rmw-booted: {refusals} controls, the checker pins {RMW_BOOTED_CONTROLS}")
+        item_cases, item_controls = exam.item_pins()
+        if item_controls and item_controls != RMW_BOOTED_CONTROLS:
+            fail(f"rmw-booted: the item requires {item_controls} controls, the checker pins {RMW_BOOTED_CONTROLS}")
+        if controls_only:
+            print(f"zenoh profile 0 rmw-booted judge: refused {refusals} corrupted inputs")
+            return 0
+        cases = exam.check_composition()
+    except exam.ArmError as error:
+        fail(f"rmw-booted: {error}")
+    if item_cases and item_cases != cases + 1:
+        fail(f"rmw-booted: the item fixes {item_cases} cases, the facts and the arm give {cases + 1}")
+    arm = subprocess.run(
+        [_sys.executable, str(ROOT / "scripts" / "check" / "check-sel4-io-network-plane.py"), "--arm", "zenoh-rmw"],
+        cwd=ROOT, capture_output=True, text=True, env={**_os.environ},
+    )
+    if arm.returncode != 0:
+        _sys.stderr.write((arm.stdout + arm.stderr)[-4000:])
+        fail(f"rmw-booted: the zenoh-rmw arm exited {arm.returncode}")
+    print(f"[zenoh-profile0] slice=rmw-booted cases={cases + 1} refusals={refusals} controls={refusals}")
+    devloop_observations.record(casesObserved=cases + 1, negativeControlsRefused=refusals)
+    print("zenoh profile 0 rmw-booted check: the node and its peer each published and received four samples and the session closed")
+    return 0
+
+
 def neighbour_controls(*, subscribers: bool) -> None:
     # A slice that runs a neighbour's tests and judges their transcript relies on that judge's
     # negative controls. They run here as a precondition and their refusals are not counted: they
@@ -3059,7 +3096,7 @@ def composition_main(controls_only: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-component", "rmw-peer", "subscribers", "lanes", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "limits", "service-component", "service-booted", "service", "service-link"), required=True)
+    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "lanes", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "limits", "service-component", "service-booted", "service", "service-link"), required=True)
     parser.add_argument("--controls-only", action="store_true")
     arguments = parser.parse_args()
     if arguments.slice == "composition":
@@ -3074,6 +3111,8 @@ def main() -> int:
         return undeclare_main(arguments.controls_only)
     if arguments.slice == "rmw":
         return rmw_main(arguments.controls_only)
+    if arguments.slice == "rmw-booted":
+        return rmw_booted_main(arguments.controls_only)
     if arguments.slice == "rmw-peer":
         return rmw_peer_main(arguments.controls_only)
     if arguments.slice == "rmw-component":

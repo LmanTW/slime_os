@@ -610,6 +610,14 @@
     };
     {
       baseline = "";
+      composition = "sel4-zenoh-rmw";
+      deferralReason = "";
+      owningGate = "zenoh_rmw_booted_check";
+      state = "specNative";
+      systemSpec = "contracts/system-spec/v1/systems/sel4-zenoh-rmw.zti";
+    };
+    {
+      baseline = "";
       composition = "sel4-zenoh-service";
       deferralReason = "";
       owningGate = "zenoh_service_booted_check";

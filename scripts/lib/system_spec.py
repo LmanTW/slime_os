@@ -120,6 +120,7 @@ DERIVED_GENERATION_FIXTURES = {
     "sel4-zenoh": "sel4-zenoh.zti",
     "sel4-zenoh-external": "sel4-zenoh-external.zti",
     "sel4-zenoh-service": "sel4-zenoh-service.zti",
+    "sel4-zenoh-rmw": "sel4-zenoh-rmw.zti",
     "sel4-loan": "sel4-loan.zti",
     "sel4-mavlink": "sel4-mavlink.zti",
     "sel4-operation": "sel4-operation.zti",
