@@ -118,6 +118,8 @@ def judge(lines: list[str]) -> tuple[int, int]:
         _need(not seen or sequence > seen[-1], f"{PEER_NAME}: sequence {sequence} arrived out of order")
         seen.append(sequence)
 
+    delivered_to = [m.group(1) for line in service if (m := arm.DELIVERED.fullmatch(line))]
+    _need(delivered_to == [arm.SUBSCRIBER] * arm.SAMPLES, f"{arm.SERVICE}: deliveries went to {delivered_to}, expected {arm.SAMPLES} to {arm.SUBSCRIBER}")
     published = [m for line in service if (m := arm.PUBLISHED.fullmatch(line)) and m.group(1) == arm.PUBLISHER]
     sequences = [int(m.group(3)) for m in published]
     _need(all(m.group(5) == "sent" for m in published), f"{arm.SERVICE}: a publication by {arm.PUBLISHER} that did not report peer=sent")
@@ -161,6 +163,8 @@ def mutations() -> list[tuple[str, list[str]]]:
         ("a sample with the wrong payload", edited(first_receipt + 1, "first=1", "first=7")),
         ("a peer copy reported as none for one publication", edited(first_publication, "peer=sent", "peer=none")),
         ("a peer copy reported as none for every publication", [line.replace("peer=sent", "peer=none") for line in good]),
+        ("one delivery to alpha instead of beta", edited(first_publication + 1, "delivered holder=beta", "delivered holder=alpha")),
+        ("every delivery to alpha instead of beta", [line.replace("delivered holder=beta", "delivered holder=alpha") for line in good]),
         ("a delivery to beta missing", [line for line in good if "delivered holder=beta row=0 sequence=2" not in line]),
         ("a publication that reached two holders", edited(first_publication, "reached=1", "reached=2")),
     ]

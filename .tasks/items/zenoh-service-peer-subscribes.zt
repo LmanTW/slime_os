@@ -33,19 +33,19 @@ item :: s.Item = (h.task "01a1ef1a-ec52-74c8-8be6-505a372bdbc3" "zenoh-service-p
         "The service prints `peer=sent` for each of the four publications by `alpha`, and the sequences the peer received equal the sequences the service printed."
         { "zenoh_service_peer_check"; };
       h.req "holders-are-unchanged"
-        "Each publication still reaches one holder, and `beta` is delivered all four. The judge of the existing holder arm accepts the service's lines."
+        "Each publication still reaches one holder, and the four deliveries go to `beta` and to no other holder. The judge of the existing holder arm accepts the service's lines."
         { "zenoh_service_peer_check"; };
       h.req "declarations-are-in-the-files"
         "The system spec holds the grant of the key to `alpha`. Its acceptance text names the peer. The peer's source declares the subscriber and reads the delivered sample. The component spec says the peer subscribes to the exchange key."
         { "zenoh_service_peer_check"; };
       h.req "controls-are-refused"
-        "The judge refuses 34 inputs. Six remove one declaration from a synthetic file set. Twenty-eight alter or remove a line of an honest transcript."
+        "The judge refuses 36 inputs. Six remove one declaration from a synthetic file set. Thirty alter or remove a line of an honest transcript."
         { "zenoh_service_peer_check"; };
     };
     acceptance = {
       h.observedWhere "zenoh_service_peer_check" {
         h.count "casesObserved" 11;
-        h.count "negativeControlsRefused" 34;
+        h.count "negativeControlsRefused" 36;
       };
     };
     decisions = {

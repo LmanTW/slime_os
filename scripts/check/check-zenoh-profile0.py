@@ -2839,7 +2839,7 @@ def service_booted_main(controls_only: bool) -> int:
     return 0
 
 
-SERVICE_PEER_CONTROLS = 34
+SERVICE_PEER_CONTROLS = 36
 PEER_LINE = re.compile(r"^\[(?:zenoh-service|zenoh-peer)\] ")
 
 
