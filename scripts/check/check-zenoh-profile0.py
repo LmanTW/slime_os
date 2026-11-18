@@ -90,9 +90,9 @@ own limit and three configurations whose slots do not add up; and the demo's par
 one. The links exam and the stock-peer exam run beside it, since both pin the subscriber limit.
 
 `--slice holder-fault` judges what the Zenoh service does with a holder that faults or never detaches. A reference
-model of the holder roster writes every line of eight scripted scenarios, and the Rust test must print them. The
+model of the holder roster writes every line of eight scripted scenarios, with each publication's reach, peer flag and sample sequence, and the Rust test must print them. The
 service reclaims a holder whose task the root reports dead, expires a holder that has not detached when the wait ends,
-refuses a reclaimed holder every later request, and serves the other holder throughout. Fifteen wrong services are each
+refuses a reclaimed holder every later request, and serves the other holder throughout. Seventeen wrong services are each
 refused. The server half's exam runs beside it.
 
 `--slice composition` judges the derived `sel4-zenoh` composition against the

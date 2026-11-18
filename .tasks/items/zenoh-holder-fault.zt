@@ -21,10 +21,10 @@ item :: s.Item = (h.task "01a1ef07-3784-7699-afef-d10b6a3d5cfe" "zenoh-holder-fa
     };
     requirements = {
       h.req "a-dead-holder-is-reclaimed"
-        "When the root reports a holder's task dead, the service closes that holder's session, and every later request or attach of that holder is denied."
+        "When the root reports a holder's task dead, the service closes that holder's session, and every later request or attach of that holder is denied. A publication reaches no ring of a settled holder."
         { "zenoh_service_holder_fault_check"; };
       h.req "the-others-are-served"
-        "A holder that died or expired changes no answer to another holder, and that holder still attaches, publishes, takes and detaches."
+        "A holder that died or expired changes no answer to another holder. That holder still attaches, publishes, takes and detaches, with the same reach, peer flag and sample sequence."
         { "zenoh_service_holder_fault_check"; };
       h.req "the-wait-is-bounded"
         "A holder that has not detached 30000 ms after the service started is expired, and one millisecond earlier it is not."
@@ -39,13 +39,13 @@ item :: s.Item = (h.task "01a1ef07-3784-7699-afef-d10b6a3d5cfe" "zenoh-holder-fa
         "The component library exports the roster and its test. The server half has a `lose` call. `holders.rs` holds the wait, resolves a supervision binding, polls it, ends on the roster and prints one reclaim line."
         { "zenoh_service_holder_fault_check"; };
       h.req "controls-are-refused"
-        "The judge refuses 428 corrupted inputs. Fifteen of them are wrong services, each of which prints a transcript that the model refuses."
+        "The judge refuses 440 corrupted inputs. Seventeen of them are wrong services, each of which prints a transcript that the model refuses."
         { "zenoh_service_holder_fault_check"; };
     };
     acceptance = {
       h.observedWhere "zenoh_service_holder_fault_check" {
-        h.count "casesObserved" 54;
-        h.count "negativeControlsRefused" 428;
+        h.count "casesObserved" 55;
+        h.count "negativeControlsRefused" 440;
       };
     };
     decisions = {

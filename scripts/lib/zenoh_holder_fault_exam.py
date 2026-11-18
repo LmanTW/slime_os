@@ -11,7 +11,8 @@ of the rules and writes every expected line from it. Nothing here reads the Rust
 
 * which holder is reclaimed, by which cause, and which holder only has its death noted;
 * that a reclaimed holder is refused every later request and cannot attach again;
-* that the other holder is still served: its attach, publish, take and detach answer as before;
+* that the other holder is still served: its attach, publish, take and detach answer as before, and a publication reaches only holders with a session,
+  reports the same reach, the same peer flag and the same sample sequence;
 * that the deadline expires exactly at `DEADLINE_MS`, and one millisecond earlier reclaims nothing;
 * that a holder is settled once, so a late death report changes nothing;
 * when the service is done: only when every holder is settled, whether by detach, death or expiry.
@@ -43,7 +44,7 @@ SCENARIOS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         "fault-after-attach",
         (
-            "attach0", "attach1", "publish0", "death0", "publish0", "take0", "attach0",
+            "attach0", "attach1", "publish0", "death0", "publish0", "take0", "attach0", "detach0",
             "publish1", "take1", "take1", "take1", "detach1",
         ),
     ),
@@ -75,6 +76,9 @@ FLAWS = (
     "survivor-refused",
     "expiry-unlisted",
     "done-on-first-settle",
+    "survivor-reach-dropped",
+    "settled-still-reached",
+    "survivor-ring-cleared",
 )
 
 
@@ -87,7 +91,7 @@ def _need(condition: bool, message: str) -> None:
         raise HolderFaultError(message)
 
 
-def _apply(states: list[str], rings: list[int], event: str, flaw: str | None) -> str:
+def _apply(states: list[str], rings: list, event: str, flaw: str | None) -> str:
     if event.startswith("tick"):
         now = int(event[4:])
         deadline = DEADLINE_MS - 1 if flaw == "early-deadline" else DEADLINE_MS + 1 if flaw == "late-deadline" else DEADLINE_MS
@@ -134,15 +138,24 @@ def _apply(states: list[str], rings: list[int], event: str, flaw: str | None) ->
             live = False
         if not live:
             return "denied"
-        for h in range(HOLDERS):
-            rings[h] = min(RING, rings[h] + 1)
-        return "ok"
+        sequence = rings[HOLDERS]
+        rings[HOLDERS] = sequence + 1
+        live = [h for h in range(HOLDERS) if states[h] == "attached"]
+        targets = list(range(HOLDERS)) if flaw == "settled-still-reached" else live
+        reached = len(targets)
+        if flaw == "survivor-reach-dropped":
+            reached = max(0, reached - 1)
+        for h in targets:
+            rings[h] = (rings[h] + [sequence])[-RING:]
+        if flaw == "survivor-ring-cleared" and "dead" in states:
+            for h in live:
+                rings[h] = []
+        return f"ok:reached={reached}:peer=none"
     if verb == "take":
         if state != "attached" and not (flaw == "dead-takes" and state == "dead"):
             return "denied"
-        if rings[holder] > 0:
-            rings[holder] -= 1
-            return "sample"
+        if rings[holder]:
+            return f"sample:{rings[holder].pop(0)}"
         return "none"
     raise HolderFaultError(f"holder fault model: an event it does not know: {event!r}")
 
@@ -160,7 +173,7 @@ def good_lines(flaw: str | None = None) -> list[str]:
     out: list[str] = []
     for name, events in SCENARIOS:
         states = ["idle"] * HOLDERS
-        rings = [0] * HOLDERS
+        rings: list = [[] for _ in range(HOLDERS)] + [0]
         for number, event in enumerate(events, 1):
             result = _apply(states, rings, event, flaw)
             out.append(f"{MARKER} {name} {number} {event} {result} states {','.join(states)} done {int(_done(states, flaw))}")
@@ -283,8 +296,8 @@ def all_controls() -> int:
 
 # What the item fixes, held here as well so the gate stays correct after the item is closed and moved to
 # .tasks/terminal. While the item is open its stored predicates are compared with these. Both are exact.
-PINNED_CASES = 54
-PINNED_CONTROLS = 428
+PINNED_CASES = 55
+PINNED_CONTROLS = 440
 ITEM = ROOT / ".tasks" / "items" / "zenoh-holder-fault.zt"
 
 
