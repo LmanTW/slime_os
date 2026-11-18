@@ -295,6 +295,16 @@ zenoh_service_client_abort_check:
 zenoh_service_link_check:
     python3 scripts/check/check-zenoh-profile0.py --slice service-link
 
+# Judges what the Zenoh service does with a holder that faults or never detaches. A reference model of the holder roster
+# writes every line of eight scripted scenarios, and the Rust test must print them. The service reclaims a holder whose
+# task the root reports dead, expires a holder that has not detached when the wait ends, refuses a reclaimed holder every
+# later request, and serves the other holder throughout. Fifteen wrong services and every corrupted line are refused. The
+# server half's exam runs beside it. The expectation is scripts/lib/zenoh_holder_fault_exam.py. Nothing here needs a
+# registry. The recipe fails until the roster lands. Loans, buffers and a boot under QEMU are not graded.
+[group('hardware')]
+zenoh_service_holder_fault_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice holder-fault
+
 # Judges contracts/frame-store/v1, its Rust reader and its MCAP converter. Converts the LiDAR bag named by
 # SLIME_LIDAR_BAG (refused unless its SHA-256 is the pinned value) twice and compares every payload with the
 # exam's own MCAP reading. The Rust reader must read 70 stores exactly as the exam's decoder does. The
