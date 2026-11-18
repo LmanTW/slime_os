@@ -105,6 +105,17 @@ zenoh_rmw_graph_check:
 zenoh_rmw_data_check:
     python3 scripts/check/check-zenoh-profile0.py --slice rmw-data
 
+# A Profile 0 graph link that declares its owner's subscription, writes its owner's Puts and holds the samples
+# it receives in a bounded queue. The two captured data sessions of an rmw_zenoh_cpp peer are written to it
+# whole, one byte at a time and all at once. A talker's 11 samples reach the queue in order and 28 other pushes
+# are counted. The bytes the link writes equal what scripts/lib/zenoh_wire.py writes: the subscriber frame, the
+# answer to the peer's INTEREST and 8 Puts. A queue of 4 slots keeps the newest samples. The expected transcript
+# is built by scripts/lib/zenoh_rmw_data_link_exam.py. The link, data, graph and session exams run beside it.
+# Nothing here needs a registry or a ROS install. Fails until the data link exists.
+[group('hardware')]
+zenoh_rmw_data_link_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice rmw-data-link
+
 # A Profile 0 graph link: one graph session over a byte stream, with the tokens it receives held in a
 # bounded graph. The three captured sessions of an rmw_zenoh_cpp peer are written to it whole, one byte at
 # a time and all at once, and the bytes the listener writes are judged to the byte: an INIT_ACK of 512

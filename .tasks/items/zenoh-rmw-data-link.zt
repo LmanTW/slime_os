@@ -1,0 +1,68 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a1ec26-5415-70d1-96fd-4ab9ec1e28f4" "zenoh-rmw-data-link" "zenoh-transport"
+  "A Profile 0 graph link declares its owner's subscription, writes its owner's Puts and holds the samples it receives"
+  "The graph link carries a graph session over a byte stream and keeps a graph of its tokens, and it does nothing with data. It drives `on_batch_visit`, which has no sample callback, so a sample the peer sends is dropped and counted. It has no call that declares a subscription or writes a Put. No component can therefore exchange a topic with an rmw_zenoh peer, although the graph session it wraps can. The link also queues the frame the session writes in answer to the peer's INTEREST, and no test holds that.")
+  with {
+    depends = { "01a1e837-2355-7509-b9bc-ae166ec3b47f"; };
+    owns = {
+      "components/lib/src/zenoh_rmw_data_link*";
+      "components/lib/src/zenoh_rmw_data_link/**";
+      "components/lib/src/zenoh_rmw_link.rs";
+      "components/lib/src/zenoh_rmw_link/**";
+      "components/lib/src/zenoh_rmw_data.rs";
+      "components/lib/src/lib.rs";
+    };
+    nonGoals = {
+      h.nonGoal "A component, a composition, a system spec or a QEMU gate that runs the link. This item judges it on the host over a scripted byte stream." h.agentDefault;
+      h.nonGoal "Declaring a token, answering a query, or any `INTEREST` but the one the graph session already answers." h.agentDefault;
+      h.nonGoal "More than one subscription of the owner, a second INTEREST, and fragmentation. The session limits stay as #1006 left them." h.agentDefault;
+      h.nonGoal "Changing the graph session, the plain link or the plain session. `zenoh_rmw_link.rs` gains calls and a sample queue and keeps every behaviour the link exam pins. `zenoh_rmw_data.rs` changes only to make its captured fixtures visible to this item's test." h.agentDefault;
+      h.nonGoal "Delivering a sample to more than one owner, or matching a sample to a QoS. The queue is the owner's alone." h.agentDefault;
+      h.nonGoal "A router, a client INIT, best-effort QoS as a distinct path, or a type other than `std_msgs/String`." h.agentDefault;
+    };
+    requirements = {
+      h.req "replays-both-data-sessions-three-ways"
+        "Each captured data session, written to a link as whole batches, one byte at a time and all at once, leaves the link open until a local close. The talker's session leaves 11 samples in the queue in order, with sequence numbers 1 to 11, and the link counts 28 pushes it dropped. The listener's session leaves none and the link counts 22."
+        { "zenoh_rmw_data_link_check"; };
+      h.req "writes-what-the-session-asks-for"
+        "For the talker's session the link writes the handshake, the owner's subscriber frame and the answer to the peer's INTEREST, in that order. For the listener's it writes the handshake, the answer and 8 Puts. Every byte equals what `scripts/lib/zenoh_wire.py` writes and what the captured Slime side wrote, in every way of writing the session."
+        { "zenoh_rmw_data_link_check"; };
+      h.req "bounds-the-sample-queue"
+        "A queue of 4 slots that the owner does not drain keeps the newest 4 of the talker's 11 samples, with sequence numbers 8 to 11, and counts the 7 it dropped. A Put whose payload is over the 32-byte slot is counted and dropped, the next Put is kept, and the link stays open."
+        { "zenoh_rmw_data_link_check"; };
+      h.req "empties-the-queue-when-the-link-ends"
+        "A local close writes a CLOSE with reason 0 behind what the link already wrote, and leaves the queue with 0 samples and the link with no subscription."
+        { "zenoh_rmw_data_link_check"; };
+      h.req "refuses-what-it-must"
+        "A second subscription is `subscriber-limit`. A declaration or a Put while the send slot is busy is `send-busy`. A Put before the peer subscribes or on another key is `undeclared-key`. A payload over the bound is `over-bound`. A handle of an earlier generation is `stale-handle`, and a call after close is `send-after-close`."
+        { "zenoh_rmw_data_link_check"; };
+      h.req "controls-are-refused"
+        "The judge refuses 143 corrupted records before it judges the real run."
+        { "zenoh_rmw_data_link_check"; };
+      h.req "neighbours-pass-unchanged"
+        "The link exam, the data exam, the graph exam and the session exam pass unchanged beside the data link slice."
+        { "zenoh_rmw_data_link_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_rmw_data_link_check" {
+        h.count "casesObserved" 71;
+        h.count "negativeControlsRefused" 143;
+      };
+    };
+    decisions = {
+      h.decided "the-link-closes-a-captured-session-locally"
+        "The exam writes each captured session up to its last FRAME, because the capture stopped the peer and never recorded a CLOSE, and then closes the link locally. The CLOSE it judges is the link's own, with reason 0."
+        "the two data captures end in a FRAME, so the peer's CLOSE is not part of the bytes the exam replays"
+        h.agentDefault
+        { "replays-both-data-sessions-three-ways"; "empties-the-queue-when-the-link-ends"; };
+      h.decided "a-full-queue-keeps-the-newest-samples"
+        "A queue with no free slot drops its oldest sample, keeps the new one and counts the drop. A payload over the slot is dropped and counted, and the link stays open."
+        "the service core's ring keeps the newest samples and says so once, and the owner of a stale sample would read a topic that moved on"
+        h.agentDefault
+        { "bounds-the-sample-queue"; };
+    };
+  };
+
+item

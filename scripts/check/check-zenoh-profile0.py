@@ -117,6 +117,7 @@ import zenoh_exchange
 import zenoh_rmw_exam
 import zenoh_rmw_graph_exam
 import zenoh_rmw_data_exam
+import zenoh_rmw_data_link_exam
 import zenoh_rmw_link_exam
 import zenoh_links_exam
 import zenoh_grants_exam
@@ -2125,6 +2126,79 @@ def rmw_data_main(controls_only: bool) -> int:
     return 0
 
 
+RMW_DATA_LINK_FILTER = "zenoh_rmw_data_link::"
+# The exam's own Rust tests, by name: a filter that matches nothing passes silently.
+RMW_DATA_LINK_TESTS = tuple(f"zenoh_rmw_data_link::{name}" for name in (
+    "the_data_link_exam",
+))
+
+
+def exam_lines_data_link(output: str) -> list[str]:
+    """The `[zenoh-exam] datalink ...` lines of a run, with the marker removed."""
+    return [line for line in exam_lines(output) if line.startswith("datalink ")]
+
+
+def run_rmw_data_link() -> list[str]:
+    # The data exam and the link exam run first and are judged on this path: a data link built on a session or a
+    # link whose own exam no longer passes proves nothing.
+    try:
+        zenoh_rmw_data_exam.judge(run_rmw_data())
+        zenoh_rmw_link_exam.judge(run_rmw_link())
+    except (zenoh_rmw_data_exam.DataExamError, zenoh_rmw_link_exam.LinkExamError) as error:
+        fail(str(error))
+    environment = {
+        **_os.environ,
+        "ZENOH_RMW_FIXTURES": str(RMW_FIXTURES),
+        "ZENOH_RMW_GRAPH_FIXTURES": str(RMW_GRAPH_FIXTURES),
+        "ZENOH_RMW_DATA_FIXTURES": str(RMW_DATA_FIXTURES),
+    }
+    stdout, output = cargo_tests((RMW_DATA_LINK_FILTER,), environment)
+    passed = tests_passed(output)
+    missing = [name for name in RMW_DATA_LINK_TESTS if name not in passed]
+    if missing:
+        fail(f"rmw-data-link: the exam's tests did not run and pass ({len(missing)} of {len(RMW_DATA_LINK_TESTS)}): {', '.join(missing[:4])}")
+    return exam_lines_data_link(stdout)
+
+
+def rmw_data_link_main(controls_only: bool) -> int:
+    try:
+        zenoh_rmw_exam.all_controls()
+        zenoh_rmw_graph_exam.all_controls()
+        zenoh_rmw_link_exam.all_controls()
+        zenoh_rmw_data_exam.all_controls()
+    except (zenoh_rmw_exam.RmwError, zenoh_rmw_graph_exam.GraphExamError, zenoh_rmw_link_exam.LinkExamError, zenoh_rmw_data_exam.DataExamError) as error:
+        fail(str(error))
+    sample = "\n".join(f"test {name} ... ok" for name in RMW_DATA_LINK_TESTS[1:])
+    if all(name in tests_passed(sample) for name in RMW_DATA_LINK_TESTS):
+        fail("control: a run with an rmw-data-link exam test missing was read as complete")
+    exam = zenoh_rmw_data_link_exam
+    try:
+        refused_controls = exam.all_controls()
+        item_cases, item_controls = exam.item_pins()
+        positive, refusals = exam.judge(exam.good_lines())
+    except exam.DataLinkExamError as error:
+        fail(str(error))
+    if positive + refusals != exam.PINNED_CASES:
+        fail(f"rmw-data-link: an honest transcript is {positive + refusals} cases, the checker pins {exam.PINNED_CASES}")
+    if refused_controls != exam.PINNED_CONTROLS:
+        fail(f"rmw-data-link: {refused_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if item_cases and item_cases != exam.PINNED_CASES:
+        fail(f"rmw-data-link: the item fixes {item_cases} cases, the checker pins {exam.PINNED_CASES}")
+    if item_controls and item_controls != exam.PINNED_CONTROLS:
+        fail(f"rmw-data-link: the item requires {item_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 rmw-data-link judge: refused {refused_controls} corrupted records")
+        return 0
+    try:
+        cases, refusals = exam.judge(run_rmw_data_link())
+    except exam.DataLinkExamError as error:
+        fail(str(error))
+    print(f"[zenoh-profile0] slice=rmw-data-link cases={cases} refusals={refusals} controls={refused_controls}")
+    devloop_observations.record(casesObserved=cases + refusals, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 rmw-data-link check: the graph link delivered the samples of an rmw_zenoh talker and wrote the subscription and Puts a listener asked for")
+    return 0
+
+
 def neighbour_controls(*, subscribers: bool) -> None:
     # A slice that runs a neighbour's tests and judges their transcript relies on that judge's
     # negative controls. They run here as a precondition and their refusals are not counted: they
@@ -2867,7 +2941,7 @@ def composition_main(controls_only: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "subscribers", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "limits", "service-component", "service-booted", "service", "service-link"), required=True)
+    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "subscribers", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "limits", "service-component", "service-booted", "service", "service-link"), required=True)
     parser.add_argument("--controls-only", action="store_true")
     arguments = parser.parse_args()
     if arguments.slice == "composition":
@@ -2882,6 +2956,8 @@ def main() -> int:
         return undeclare_main(arguments.controls_only)
     if arguments.slice == "rmw":
         return rmw_main(arguments.controls_only)
+    if arguments.slice == "rmw-data-link":
+        return rmw_data_link_main(arguments.controls_only)
     if arguments.slice == "rmw-data":
         return rmw_data_main(arguments.controls_only)
     if arguments.slice == "rmw-graph":
