@@ -116,6 +116,15 @@ zenoh_rmw_data_check:
 zenoh_rmw_data_link_check:
     python3 scripts/check/check-zenoh-profile0.py --slice rmw-data-link
 
+# Judges that the rmw_zenoh node component exists and is registered. The judge requires the crate and its
+# manifest, the release profile, the lockfile entry and the component spec, and the calls that run a graph link
+# over the network service, declare the one subscription, write Puts and drain the samples. It requires the
+# library calls those stand on. The expectation is scripts/lib/zenoh_rmw_component_exam.py. Nothing here needs a
+# registry. The recipe fails until the component lands.
+[group('hardware')]
+zenoh_rmw_component_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice rmw-component
+
 # A Profile 0 graph link: one graph session over a byte stream, with the tokens it receives held in a
 # bounded graph. The three captured sessions of an rmw_zenoh_cpp peer are written to it whole, one byte at
 # a time and all at once, and the bytes the listener writes are judged to the byte: an INIT_ACK of 512

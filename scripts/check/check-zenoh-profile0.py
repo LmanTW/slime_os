@@ -116,6 +116,7 @@ import devloop_observations
 import zenoh_exchange
 import zenoh_rmw_exam
 import zenoh_rmw_graph_exam
+import zenoh_rmw_component_exam
 import zenoh_rmw_data_exam
 import zenoh_rmw_data_link_exam
 import zenoh_rmw_link_exam
@@ -2199,6 +2200,33 @@ def rmw_data_link_main(controls_only: bool) -> int:
     return 0
 
 
+def rmw_component_main(controls_only: bool) -> int:
+    """The crate that drives the graph link and its registration: declarations the files must hold. The controls run
+    on synthetic file sets."""
+    exam = zenoh_rmw_component_exam
+    try:
+        refusals = exam.component_controls()
+        item_cases, item_controls = exam.item_pins()
+        if refusals != exam.PINNED_CONTROLS:
+            fail(f"rmw-component: {refusals} controls, the checker pins {exam.PINNED_CONTROLS}")
+        if item_cases and item_cases != exam.PINNED_CASES:
+            fail(f"rmw-component: the item fixes {item_cases} cases, the checker pins {exam.PINNED_CASES}")
+        if item_controls and item_controls != exam.PINNED_CONTROLS:
+            fail(f"rmw-component: the item requires {item_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+        if controls_only:
+            print(f"zenoh profile 0 rmw-component judge: refused {refusals} corrupted file sets")
+            return 0
+        cases = exam.check_component()
+    except exam.ComponentExamError as error:
+        fail(f"rmw-component: {error}")
+    if cases != exam.PINNED_CASES:
+        fail(f"rmw-component: {cases} facts held, the checker pins {exam.PINNED_CASES}")
+    print(f"[zenoh-profile0] slice=rmw-component cases={cases} refusals={refusals} controls={refusals}")
+    devloop_observations.record(casesObserved=cases, negativeControlsRefused=refusals)
+    print("zenoh profile 0 rmw-component check: the crate, its registration and the library calls it stands on are in place")
+    return 0
+
+
 def neighbour_controls(*, subscribers: bool) -> None:
     # A slice that runs a neighbour's tests and judges their transcript relies on that judge's
     # negative controls. They run here as a precondition and their refusals are not counted: they
@@ -2941,7 +2969,7 @@ def composition_main(controls_only: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "subscribers", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "limits", "service-component", "service-booted", "service", "service-link"), required=True)
+    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-component", "subscribers", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "limits", "service-component", "service-booted", "service", "service-link"), required=True)
     parser.add_argument("--controls-only", action="store_true")
     arguments = parser.parse_args()
     if arguments.slice == "composition":
@@ -2956,6 +2984,8 @@ def main() -> int:
         return undeclare_main(arguments.controls_only)
     if arguments.slice == "rmw":
         return rmw_main(arguments.controls_only)
+    if arguments.slice == "rmw-component":
+        return rmw_component_main(arguments.controls_only)
     if arguments.slice == "rmw-data-link":
         return rmw_data_link_main(arguments.controls_only)
     if arguments.slice == "rmw-data":
