@@ -33,13 +33,13 @@ item :: s.Item = (h.task "01a1ed80-b13c-70ad-b27f-69434eccb321" "zenoh-rmw-compo
         "The library exports `zenoh_rmw_link`, and that file defines `pop_sample`, `declare_subscriber` and `send_put`."
         { "zenoh_rmw_component_check"; };
       h.req "controls-are-refused"
-        "The judge refuses 22 synthetic file sets, one for each fact, and names the fact it refused."
+        "The judge refuses 23 synthetic file sets, one for each fact, and names the fact it refused."
         { "zenoh_rmw_component_check"; };
     };
     acceptance = {
       h.observedWhere "zenoh_rmw_component_check" {
-        h.count "casesObserved" 22;
-        h.count "negativeControlsRefused" 22;
+        h.count "casesObserved" 23;
+        h.count "negativeControlsRefused" 23;
       };
     };
     decisions = {

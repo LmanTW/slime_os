@@ -29,6 +29,7 @@ COMPONENT_FACTS: tuple[facts.Fact, ...] = (
     ("crate-package", f"{COMPONENT}/Cargo.toml", rf'^name = "{PACKAGE}"$', f'name = "{PACKAGE}"'),
     ("crate-binary", f"{COMPONENT}/Cargo.toml", rf'^name = "{BINARY}"$', f'name = "{BINARY}"'),
     ("crate-library", f"{COMPONENT}/Cargo.toml", r'^slime-components = \{ path = "\.\./\.\./lib" \}$', 'slime-components = { path = "../../lib" }'),
+    ("crate-build-dependency", f"{COMPONENT}/Cargo.toml", r'^slime-build-support = \{ path = "\.\./\.\./build-support" \}$', 'slime-build-support = { path = "../../build-support" }'),
     ("crate-build", f"{COMPONENT}/build.rs", r"^    slime_build_support::configure\(\);$", "    slime_build_support::configure();"),
     ("crate-entry", f"{COMPONENT}/src/main.rs", r"^slime_rt::entry!\(main\);$", "slime_rt::entry!(main);"),
     ("crate-no-std", f"{COMPONENT}/src/main.rs", r"^#!\[no_std\]$", "#![no_std]"),
@@ -87,8 +88,8 @@ def component_controls() -> int:
 
 # What the item fixes, held here as well so the gate stays correct after the item is closed and moved to
 # .tasks/terminal. While the item is open its stored predicates are compared with these. Both are exact.
-PINNED_CASES = 22
-PINNED_CONTROLS = 22
+PINNED_CASES = 23
+PINNED_CONTROLS = 23
 
 
 def item_pins() -> tuple[int, int]:
