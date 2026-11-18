@@ -5,6 +5,7 @@ item :: s.Item = (h.task "01a1ec26-5415-70d1-96fd-4ab9ec1e28f4" "zenoh-rmw-data-
   "A Profile 0 graph link declares its owner's subscription, writes its owner's Puts and holds the samples it receives"
   "The graph link carries a graph session over a byte stream and keeps a graph of its tokens, and it does nothing with data. It drives `on_batch_visit`, which has no sample callback, so a sample the peer sends is dropped and counted. It has no call that declares a subscription or writes a Put. No component can therefore exchange a topic with an rmw_zenoh peer, although the graph session it wraps can. The link also queues the frame the session writes in answer to the peer's INTEREST, and no test holds that.")
   with {
+    intent = #active;
     depends = { "01a1e837-2355-7509-b9bc-ae166ec3b47f"; };
     owns = {
       "components/lib/src/zenoh_rmw_data_link*";
