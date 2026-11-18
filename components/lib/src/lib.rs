@@ -43,6 +43,8 @@ pub mod zenoh_profile0;
 mod zenoh_rmw;
 #[cfg(test)]
 mod zenoh_rmw_data;
+#[cfg(test)]
+mod zenoh_rmw_data_link;
 pub mod zenoh_rmw_graph;
 pub mod zenoh_rmw_link;
 pub mod zenoh_service;

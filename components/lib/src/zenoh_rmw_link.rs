@@ -1,6 +1,12 @@
 //! A Profile 0 graph link: one [`GraphSessionOf`] over a [`ByteLink`], feeding the liveliness tokens it
 //! receives into a bounded [`Graph`].
 //!
+//! The link also serves its owner's one subscription. `declare_subscriber` writes the declaration and
+//! `send_put` writes a Put on a key the peer subscribed to. A Put the peer sends on the owner's key waits in a
+//! queue of `Q` slots of `S` bytes. A full queue drops its oldest sample, and a payload over a slot is dropped.
+//! Both are counted, and the owner drains the queue with `pop_sample`. The defaults of `Q` and `S` are 0, so
+//! a link that is not given a queue drops and counts every sample, as it did before the queue existed.
+//!
 //! The plain link (`zenoh_link`) matches the plain session's `Event` exhaustively, and a graph session emits
 //! none, so this is a separate type. It reuses the byte stream, the stream framer and the encoder, and repeats
 //! the plain link's single send slot, its retry limit and its rule that a refusal ends the link.
@@ -12,7 +18,7 @@
 
 use crate::zenoh_link::{ByteLink, LinkError, MAX_RETRIES, PumpReport};
 use crate::zenoh_profile0::encode::{self, EncodeError};
-use crate::zenoh_profile0::graph::{GraphError, GraphSessionOf, Kind as DeclKind};
+use crate::zenoh_profile0::graph::{GraphError, GraphSessionOf, Kind as DeclKind, Sample};
 use crate::zenoh_profile0::session::{Config, Params, Role, SessionError, State};
 use crate::zenoh_profile0::{Refusal, STREAM_LENGTH_BYTES, StreamFramerOf};
 use crate::zenoh_rmw_graph::Graph;
@@ -78,6 +84,85 @@ impl From<EncodeError> for GraphLinkError {
     }
 }
 
+/// A sample a link holds for its owner: the Put's sequence number, timestamp and payload.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LinkSample<const S: usize> {
+    pub subscription: u32,
+    pub sequence: i64,
+    pub timestamp: i64,
+    len: usize,
+    payload: [u8; S],
+}
+
+impl<const S: usize> LinkSample<S> {
+    pub fn payload(&self) -> &[u8] {
+        self.payload.get(..self.len).unwrap_or(&[])
+    }
+}
+
+/// `Q` samples of up to `S` payload bytes, oldest first.
+struct SampleQueue<const Q: usize, const S: usize> {
+    slots: [Option<LinkSample<S>>; Q],
+    head: usize,
+    len: usize,
+    dropped: u32,
+}
+
+impl<const Q: usize, const S: usize> SampleQueue<Q, S> {
+    const fn new() -> Self {
+        Self {
+            slots: [None; Q],
+            head: 0,
+            len: 0,
+            dropped: 0,
+        }
+    }
+
+    /// Keeps `sample`. A payload over a slot is dropped. A queue with no free slot drops its oldest sample first.
+    fn push(&mut self, sample: &Sample<'_>) {
+        if Q == 0 || sample.payload.len() > S {
+            self.dropped += 1;
+            return;
+        }
+        if self.len == Q {
+            self.head = (self.head + 1) % Q;
+            self.len -= 1;
+            self.dropped += 1;
+        }
+        let mut payload = [0u8; S];
+        if let Some(dst) = payload.get_mut(..sample.payload.len()) {
+            dst.copy_from_slice(sample.payload);
+        }
+        let at = (self.head + self.len) % Q;
+        if let Some(slot) = self.slots.get_mut(at) {
+            *slot = Some(LinkSample {
+                subscription: sample.subscription,
+                sequence: sample.sequence,
+                timestamp: sample.timestamp,
+                len: sample.payload.len(),
+                payload,
+            });
+            self.len += 1;
+        }
+    }
+
+    fn pop(&mut self) -> Option<LinkSample<S>> {
+        if self.len == 0 {
+            return None;
+        }
+        let sample = self.slots.get_mut(self.head)?.take();
+        self.head = (self.head + 1) % Q;
+        self.len -= 1;
+        sample
+    }
+
+    fn clear(&mut self) {
+        self.slots = [None; Q];
+        self.head = 0;
+        self.len = 0;
+    }
+}
+
 /// Proof that a caller holds the link of one generation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GraphHandle {
@@ -86,7 +171,7 @@ pub struct GraphHandle {
 
 /// A graph link over a byte stream. `FRAMED` is the batch the link announces with its stream length, `A`
 /// and `D` the aliases and declarations its session holds, `B` the longest key and `N` the entities its
-/// graph holds.
+/// graph holds. `Q` and `S` are the samples its queue holds and the payload bytes of each.
 pub struct GraphLinkOf<
     L: ByteLink,
     const FRAMED: usize,
@@ -94,10 +179,13 @@ pub struct GraphLinkOf<
     const D: usize,
     const B: usize,
     const N: usize,
+    const Q: usize = 0,
+    const S: usize = 0,
 > {
     io: L,
     session: GraphSessionOf<A, D, B>,
     graph: Graph<N>,
+    queue: SampleQueue<Q, S>,
     framer: StreamFramerOf<FRAMED>,
     send: [u8; FRAMED],
     send_len: usize,
@@ -116,7 +204,9 @@ impl<
     const D: usize,
     const B: usize,
     const N: usize,
-> GraphLinkOf<L, FRAMED, A, D, B, N>
+    const Q: usize,
+    const S: usize,
+> GraphLinkOf<L, FRAMED, A, D, B, N, Q, S>
 {
     /// A link in its generation, declared by `params`, whose graph serves `domain`.
     pub fn new(
@@ -134,6 +224,7 @@ impl<
             io,
             session: GraphSessionOf::new(role, config, params)?,
             graph: Graph::new(domain),
+            queue: SampleQueue::new(),
             framer: StreamFramerOf::new(),
             send: [0; FRAMED],
             send_len: 0,
@@ -166,6 +257,32 @@ impl<
 
     pub fn io_mut(&mut self) -> &mut L {
         &mut self.io
+    }
+
+    /// Takes the oldest sample the peer sent on the owner's subscription, or `None` when the queue is empty.
+    pub fn pop_sample(&mut self) -> Option<LinkSample<S>> {
+        self.queue.pop()
+    }
+
+    /// Samples waiting in the queue.
+    pub const fn queued(&self) -> usize {
+        self.queue.len
+    }
+
+    /// Samples the queue dropped: the oldest of a full queue, and a payload over a slot.
+    pub const fn queue_dropped(&self) -> u32 {
+        self.queue.dropped
+    }
+
+    /// Pushes the session accepted and dropped, because they named a key the owner did not subscribe to.
+    pub fn dropped_pushes(&self) -> u32 {
+        let counts = self.session.counts();
+        counts.push - counts.delivered
+    }
+
+    /// The id of the owner's subscription, once declared and while the link is open.
+    pub fn subscription(&self) -> Option<u32> {
+        self.session.local_subscription().map(|(id, _)| id)
     }
 
     /// Tokens the graph refused or had no room for, dropped and counted.
@@ -223,6 +340,42 @@ impl<
         self.queue(outcome.batch(&body))
     }
 
+    /// Queues the declaration of the owner's one subscription on `key`. Refused with
+    /// [`GraphLinkError::SendBusy`], changing nothing, while a batch is waiting to be sent.
+    pub fn declare_subscriber(
+        &mut self,
+        handle: GraphHandle,
+        id: u32,
+        key: &str,
+    ) -> Result<(), GraphLinkError> {
+        self.check(handle)?;
+        if self.send_len != 0 {
+            return Err(GraphLinkError::SendBusy);
+        }
+        let mut body = [0u8; FRAMED];
+        let outcome = self.session.send_declare_subscriber(id, key, &mut body)?;
+        self.queue(outcome.batch(&body))
+    }
+
+    /// Queues a Put on `key`, which the peer must have declared a subscriber for. `attachment` is from
+    /// [`encode::attachment`]. Refused with [`GraphLinkError::SendBusy`], changing nothing, while a batch is
+    /// waiting to be sent.
+    pub fn send_put(
+        &mut self,
+        handle: GraphHandle,
+        key: &str,
+        attachment: &[u8],
+        payload: &[u8],
+    ) -> Result<(), GraphLinkError> {
+        self.check(handle)?;
+        if self.send_len != 0 {
+            return Err(GraphLinkError::SendBusy);
+        }
+        let mut body = [0u8; FRAMED];
+        let outcome = self.session.send_put(key, attachment, payload, &mut body)?;
+        self.queue(outcome.batch(&body))
+    }
+
     /// Queues CLOSE and ends the link. Refused with [`GraphLinkError::SendBusy`], changing nothing, while a
     /// batch is still waiting to be sent. The free slot is checked first, and a CLOSE is two bytes, so
     /// `queue` cannot then refuse it at any batch size the profile allows.
@@ -234,6 +387,7 @@ impl<
         let mut body = [0u8; FRAMED];
         let outcome = self.session.close(reason, &mut body)?;
         self.graph.clear();
+        self.queue.clear();
         self.queue(outcome.batch(&body))?;
         self.closed = true;
         self.close_reason = Some(reason);
@@ -250,6 +404,7 @@ impl<
             }
         }
         self.graph.clear();
+        self.queue.clear();
         self.closed = true;
         self.close_reason = Some(0);
         error
@@ -320,6 +475,7 @@ impl<
             }
             if let Some(reason) = outcome.closed {
                 self.graph.clear();
+                self.queue.clear();
                 self.closed = true;
                 self.close_reason = Some(reason);
             }
@@ -389,9 +545,12 @@ impl<
             let mut reply = [0u8; FRAMED];
             let graph = &mut self.graph;
             let refused = &mut self.refused_tokens;
-            let applied = self
-                .session
-                .on_batch_visit(body, now_ms, &mut reply, &mut |change| {
+            let queue = &mut self.queue;
+            let applied = self.session.on_batch_samples(
+                body,
+                now_ms,
+                &mut reply,
+                &mut |change| {
                     if change.kind != DeclKind::Token {
                         return;
                     }
@@ -403,13 +562,16 @@ impl<
                     if outcome.is_err() {
                         *refused += 1;
                     }
-                });
+                },
+                &mut |sample| queue.push(&sample),
+            );
             let outcome = match applied {
                 Ok(outcome) => outcome,
                 Err(error) => return Err(self.fail(GraphLinkError::Graph(error))),
             };
             if let Some(reason) = outcome.closed {
                 self.graph.clear();
+                self.queue.clear();
                 self.closed = true;
                 self.close_reason = Some(reason);
             }

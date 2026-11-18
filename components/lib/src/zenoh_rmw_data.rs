@@ -7,7 +7,7 @@
 //! the captured bytes and `zenoh_wire`, and owns what each line must be, in what order, and which class each
 //! refusal is.
 
-mod fixtures;
+pub(crate) mod fixtures;
 
 use crate::zenoh_profile0::encode::{self, FrameEncoder};
 use crate::zenoh_profile0::graph::{
