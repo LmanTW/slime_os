@@ -5,6 +5,7 @@ item :: s.Item = (h.task "01a1edfd-96f2-7589-8f0b-7a85ca6778e6" "zenoh-rmw-peer"
   "A native peer component dials the rmw_zenoh node, learns its subscription and publishes Puts on the chatter key"
   "The rmw_zenoh node component runs a graph link and has nothing to talk to. The existing demo nodes are plain Profile 0 nodes, and each is fixed to the `Counter` key with a 12-byte payload. A composition that boots the node needs a native peer on the `chatter` key with a `std_msgs/String`. A plain connector can serve. In a host probe, a plain link completed a session with a graph link and learned its subscription. A Put on the chatter key then reached the node's queue. The peer needs a crate of its own with a 253-byte key and a 32-byte payload, and the registration a composition needs.")
   with {
+    intent = #active;
     owns = {
       "components/applications/zenoh-rmw-peer/**";
       "contracts/component-spec/v1/components/zenoh-rmw-peer.zti";

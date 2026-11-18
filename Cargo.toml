@@ -678,6 +678,11 @@ opt-level = "s"
 codegen-units = 1
 debug = false
 
+[profile.release.package.slime-component-zenoh-rmw-peer]
+opt-level = "s"
+codegen-units = 1
+debug = false
+
 [profile.release.package.slime-component-entropy-probe]
 opt-level = "s"
 codegen-units = 1
