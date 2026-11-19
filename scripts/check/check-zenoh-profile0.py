@@ -2267,7 +2267,7 @@ def rmw_peer_main(controls_only: bool) -> int:
     return 0
 
 
-RMW_BOOTED_CONTROLS = 64
+RMW_BOOTED_CONTROLS = 65
 
 
 def rmw_booted_main(controls_only: bool) -> int:

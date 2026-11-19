@@ -39,8 +39,8 @@ from sel4_plane import run_plane, verify_image_identity  # noqa: E402
 # silently weaken a gate. Boot-layout fixture equality is controlled separately.
 GATES: tuple[tuple[str, str, int], ...] = (
     ("sel4_channel_plane", "check/check-sel4-channel-plane.py", 18),
-    # 261 before the rmw_zenoh arm, which declares 16: one admission, a 7-line chain for each of the node and the peer, and one health marker.
-    ("sel4_io_network_plane", "check/check-sel4-io-network-plane.py", 277),
+    # 261 before the rmw_zenoh arm, which declares 24: one admission, a 3-line chain for each of the node and the peer, 16 sample lines and one health marker.
+    ("sel4_io_network_plane", "check/check-sel4-io-network-plane.py", 285),
     # 109 for the product, pwm and mavlink arms, plus the serial arm's 40-marker
     # chain, its probe's 11-line chain and its 2 markers no other arm declares.
     ("sel4_component_graph", "check/check-sel4-component-graph.py", 162),

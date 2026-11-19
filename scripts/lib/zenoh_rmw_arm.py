@@ -27,8 +27,6 @@ from itertools import zip_longest
 import zenoh_facts as facts
 from harness import ROOT
 
-GENERATION = 173
-CLOSURE = "sel4-zenoh-rmw"
 NODE = "zenoh-rmw-node"
 PEER = "zenoh-rmw-peer"
 COMPONENTS = (NODE, PEER)
@@ -146,8 +144,9 @@ def _check(component: str, texts: list[str]) -> None:
         _need(texts.index(OPEN) < texts.index(DECLARED), f"rmw arm: {component} declared before its session was open")
     if component == NODE:
         _need(texts.count(CLOSING) == 1, f"rmw arm: {component} printed {texts.count(CLOSING)} {CLOSING} lines, expected one")
-        done = [text for text in texts if PUBLISHED.fullmatch(text) or RECEIVED.fullmatch(text)]
-        _need(texts.index(CLOSING) > max(texts.index(text) for text in done), f"rmw arm: {component} closed before the exchange was done")
+        done = [i for i, text in enumerate(texts) if PUBLISHED.fullmatch(text) or RECEIVED.fullmatch(text)]
+        _need(bool(done), f"rmw arm: {component} printed no sample line before it closed")
+        _need(texts.index(CLOSING) > max(done), f"rmw arm: {component} closed before the exchange was done")
     for kind, label in ((PUBLISHED, "published"), (RECEIVED, "received")):
         numbers = [int(m.group(1)) for text in texts if (m := kind.fullmatch(text))]
         _need(numbers == list(range(1, SAMPLES + 1)), f"rmw arm: {component} {label} sequences {numbers}, expected 1 to {SAMPLES} once each in order")
@@ -205,6 +204,7 @@ def mutations() -> list[tuple[str, list[str]]]:
         ("the node closed before it was closing", swap(good, _text(NODE, CLOSING), _text(NODE, CLOSED))),
         ("the peer closed before its last reception", swap(good, _text(PEER, CLOSED), _text(PEER, "received sequence=4"))),
         ("a line repeated", [*good[:1], *good]),
+        ("a node that closed with no sample line at all", [line for line in good if not ("zenoh-rmw-node" in line and ("published sequence=" in line or "received sequence=" in line))]),
         ("a second close of the node", [*good[: len(node)], _text(NODE, CLOSED), *good[len(node) :]]),
     ]
     for index, line in enumerate(good):
@@ -260,7 +260,7 @@ def controls() -> int:
 # What the item fixes, held here as well so the gate stays correct after the item is closed and moved to
 # .tasks/terminal. While the item is open its stored predicates are compared with these. Both are exact.
 PINNED_CASES = 17
-PINNED_CONTROLS = 64
+PINNED_CONTROLS = 65
 ITEM_PATH = ".tasks/items/zenoh-rmw-booted.zt"
 
 

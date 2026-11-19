@@ -36,13 +36,13 @@ item :: s.Item = (h.task "01a1ee87-954c-76f6-9700-b117aabc1863" "zenoh-rmw-boote
         "The judge accepts the honest transcript in four interleavings of the two components' lines and orders each component's lines against its own only."
         { "zenoh_rmw_booted_check"; };
       h.req "controls-are-refused"
-        "The judge refuses 64 corrupted inputs before it boots: 16 synthetic file sets, one for each fact, and 48 mutated transcripts."
+        "The judge refuses 65 corrupted inputs before it boots: 16 synthetic file sets, one for each fact, and 49 mutated transcripts."
         { "zenoh_rmw_booted_check"; };
     };
     acceptance = {
       h.observedWhere "zenoh_rmw_booted_check" {
         h.count "casesObserved" 17;
-        h.count "negativeControlsRefused" 64;
+        h.count "negativeControlsRefused" 65;
       };
     };
     decisions = {

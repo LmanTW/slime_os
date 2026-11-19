@@ -662,30 +662,34 @@ ZENOH_SERVICE_CHAINS: tuple[tuple[str, tuple[str, ...]], ...] = (
     )),
 )
 
-# The rmw_zenoh node and its native peer, over the network service's loopback. Each component is a task of its own, so
-# these chains order each component's lines against its own and none against the other's. The boot plane gate held lines
-# of separate tasks to one order and failed 2 of 10 boots on it. The last line of each chain is the component's close,
-# which only a finished exchange prints.
+# The rmw_zenoh node and its native peer, over the network service's loopback. Each component is a task of its own, and
+# inside one component the loop that publishes also reads, so a publication and a reception have no fixed order, even
+# against each other. The boot plane gate held lines of separate tasks to one order and failed 2 of 10 boots on it. These
+# chains therefore hold only the orders the components guarantee: a component's setup before its close. Each sample line is
+# a chain of one marker, which the gate requires and orders against nothing. `zenoh_rmw_arm.judge` holds the order of the
+# sequence numbers and the close after the exchange.
+def _rmw_sample_markers() -> tuple[tuple[str, tuple[str, ...]], ...]:
+    markers = []
+    for component in zenoh_rmw_arm.COMPONENTS:
+        for kind in ("published", "received"):
+            for number in range(1, zenoh_rmw_arm.SAMPLES + 1):
+                markers.append((f"zenoh-rmw {component} sample", (rf"\[{component}\] {kind} sequence={number}\b",)))
+    return tuple(markers)
+
+
 ZENOH_RMW_CHAINS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("zenoh-rmw admission", (rf"SLIME_ROOT generation admitted number={zenoh_rmw_arm.GENERATION} executables=\d+ instances=\d+ grants=\d+ ",)),
     ("zenoh-rmw node", (
         r"\[zenoh-rmw-node\] subscription declared",
-        r"\[zenoh-rmw-node\] published sequence=1",
-        r"\[zenoh-rmw-node\] received sequence=1",
-        r"\[zenoh-rmw-node\] published sequence=4",
-        r"\[zenoh-rmw-node\] received sequence=4",
         r"\[zenoh-rmw-node\] session closing",
         r"\[zenoh-rmw-node\] session closed",
     )),
     ("zenoh-rmw peer", (
         r"\[zenoh-rmw-peer\] session open",
         r"\[zenoh-rmw-peer\] subscription declared",
-        r"\[zenoh-rmw-peer\] published sequence=1",
-        r"\[zenoh-rmw-peer\] received sequence=1",
-        r"\[zenoh-rmw-peer\] published sequence=4",
-        r"\[zenoh-rmw-peer\] received sequence=4",
         r"\[zenoh-rmw-peer\] session closed",
     )),
+    *_rmw_sample_markers(),
     ("zenoh-rmw success", (rf"SLIME_GRAPH HEALTHY generation={zenoh_rmw_arm.GENERATION} required=\d+ live=0 completed=\d+ failed=0",)),
 )
 
