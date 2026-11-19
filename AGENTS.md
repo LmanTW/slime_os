@@ -38,7 +38,7 @@ rows are expanded into checklists in
 
 ### Generated-code rule
 
-Files beginning with `@generated`, files under `boot-contracts/src/generated/`, every manifest named in `DERIVED_GENERATION_FIXTURES` (`scripts/lib/system_spec.py`), the system specs named in `COMPUTED_SYSTEM_SOURCES` (`scripts/lib/system_spec.py`),
+Files beginning with `@generated`, files under `boot-contracts/src/generated/`, every manifest that a system spec in `contracts/system-spec/v1/systems/` derives (`DERIVED_GENERATION_FIXTURES` in `scripts/lib/system_spec.py` reads that directory), the system specs named in `COMPUTED_SYSTEM_SOURCES` (`scripts/lib/system_spec.py`),
 and every closure source under `contracts/system-image-closure/v3/closures/` plus every negative case under `contracts/system-image-closure/v2/negative/` are outputs, not sources. Change the matching `contracts/.../schema.zt`, `gen_rust.zt`, or system-spec authoring source (`sources/*.zt` for mapped outputs, otherwise
 `systems/*.zti`), then run the matching `scripts/generate/generate-bindings.py <name>` (a row of `scripts/lib/zutai_bindings.py`), remaining `scripts/generate/generate-*-bindings.py` / `just *_gen` / `generate-generation-from-spec.py` / `generate-system-image-closures.py`. `components/build-support` generates nothing from a manifest: B70 replaced build-time command tables and the per-plane fabric profile with root-served runtime queries, so a component reads its composition, ceilings, and graph rows from the authenticated generation it is running inside.
 

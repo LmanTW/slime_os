@@ -111,7 +111,7 @@ zenoh_rmw_data_check:
 # are counted. The bytes the link writes equal what scripts/lib/zenoh_wire.py writes: the subscriber frame, the
 # answer to the peer's INTEREST and 8 Puts. A queue of 4 slots keeps the newest samples. The expected transcript
 # is built by scripts/lib/zenoh_rmw_data_link_exam.py. The link, data, graph and session exams run beside it.
-# Nothing here needs a registry or a ROS install. Fails until the data link exists.
+# Nothing here needs a registry or a ROS install.
 [group('hardware')]
 zenoh_rmw_data_link_check:
     python3 scripts/check/check-zenoh-profile0.py --slice rmw-data-link
@@ -120,7 +120,7 @@ zenoh_rmw_data_link_check:
 # manifest, the release profile, the lockfile entry and the component spec, and the calls that run a graph link
 # over the network service, declare the one subscription, write Puts and drain the samples. It requires the
 # library calls those stand on. The expectation is scripts/lib/zenoh_rmw_component_exam.py. Nothing here needs a
-# registry. The recipe fails until the component lands.
+# registry.
 [group('hardware')]
 zenoh_rmw_component_check:
     python3 scripts/check/check-zenoh-profile0.py --slice rmw-component
@@ -129,8 +129,7 @@ zenoh_rmw_component_check:
 # that dials the node component, learns its subscription on the chatter key and publishes Puts on it. The judge
 # requires the crate and its manifest, the release profile, the lockfile entry and the component spec, the calls
 # that build a plain link as a connector, dial the node, publish and read samples, and the library calls those
-# stand on. The expectation is scripts/lib/zenoh_rmw_peer_component_exam.py. Nothing here needs a registry. The
-# recipe fails until the component lands.
+# stand on. The expectation is scripts/lib/zenoh_rmw_peer_component_exam.py. Nothing here needs a registry.
 [group('hardware')]
 zenoh_rmw_peer_check:
     python3 scripts/check/check-zenoh-profile0.py --slice rmw-peer
@@ -520,8 +519,7 @@ duo_gate_control_check:
 # spec, the manifest derived from it, the composition inventory row, the test-run record and the arm of the network plane
 # checker, and then runs that arm under QEMU. The arm requires each component to publish and receive the sequence numbers
 # 1 to 4 and the node to close the session once the exchange is done. The expectation is scripts/lib/zenoh_rmw_arm.py and
-# the marker chains in scripts/check/check-sel4-io-network-plane.py. The recipe is in no aggregate. It fails until the
-# composition lands.
+# the marker chains in scripts/check/check-sel4-io-network-plane.py. The recipe is in no aggregate.
 [group('hardware')]
 zenoh_rmw_booted_check:
     python3 scripts/check/check-zenoh-profile0.py --slice rmw-booted

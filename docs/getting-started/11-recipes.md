@@ -88,8 +88,8 @@ Follow [Write a contract](09-write-a-contract.md). Short form: `schema.zt` →
 ## Add a marker gate or a scenario arm
 
 [Add a gate](07-add-a-gate.md). Decide extend / arm / new plane in that
-order. A new plane touches: components + specs, system spec +
-`DERIVED_GENERATION_FIXTURES`, closure, checker, recipe in `just/planes-*.just`,
+order. A new plane touches: components + specs, system spec,
+closure, checker, recipe in `just/planes-*.just`,
 `GATES` row in `check-sel4-gate-controls.py`.
 
 ## Change a component's stack, threads, or memory budget

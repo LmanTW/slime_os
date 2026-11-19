@@ -34,17 +34,17 @@ launch-context behavior.
 | A system composition | [`contracts/system-spec/v1/systems/*.zti`](../../contracts/system-spec/v1/systems/) | A system spec selects components, placement, authority, budgets, and graph records from which a generation manifest is derived. |
 
 All manifests under `contracts/generation-manifest/v1/compositions/` are
-generated outputs, not editable composition sources. The explicit derivation
-map, `DERIVED_GENERATION_FIXTURES` in
-[`scripts/lib/system_spec.py`](../../scripts/lib/system_spec.py), is shared by
-the generator and the system-spec gate:
+generated outputs, not editable composition sources. The derivation map,
+`DERIVED_GENERATION_FIXTURES` in
+[`scripts/lib/system_spec.py`](../../scripts/lib/system_spec.py), is built from the
+spec files in `contracts/system-spec/v1/systems/`. The generator and the system-spec
+gate share it:
 
 - `contracts/system-spec/v1/systems/reference.zti` derives
   `contracts/generation-manifest/v1/fixtures/valid.zti`.
 - `contracts/system-spec/v1/systems/sel4.zti` derives the default product's
   `contracts/generation-manifest/v1/compositions/sel4.zti`.
-- The other composition manifests are derived from their corresponding system
-  specs in the same map.
+- Every other system spec `<name>.zti` derives `<name>.zti` under `compositions/`.
 
 Editing `reference.zti` alone does **not** change `just run`. To change the
 default product, edit `contracts/system-spec/v1/systems/sel4.zti` and regenerate

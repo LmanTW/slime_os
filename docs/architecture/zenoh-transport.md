@@ -397,6 +397,32 @@ wrote of what its own subscriber delivered. The guest's batches are held to
 recipe is explicit and in no aggregate. See the
 [decision](../decisions/zenoh-external-listener.md).
 
+## rmw_zenoh node and native peer
+
+Two components exercise the graph link and the data path in one composition, `sel4-zenoh-rmw`. The
+composition holds the network service, the node and the peer. It has no Zenoh service, grants table or limits.
+
+| Component | Link | Role |
+| --- | --- | --- |
+| `zenoh-rmw-node` | Graph link, 512-byte batch | Listens on 127.0.0.1:7447, declares one subscription and publishes four Puts. |
+| `zenoh-rmw-peer` | Plain Profile 0 link | Dials the node, declares one subscription and publishes four Puts. |
+
+Both use the chatter key of 253 bytes and a payload of 32 bytes. The graph session answers the peer's one
+`INTEREST` with a `DeclareFinal`, because an `rmw_zenoh` peer waits about 10 seconds without it.
+
+Each component prints `published sequence=N` and `received sequence=N` for N from 1 to 4. The node
+closes the session after it has published 4 and received 4. One side's close ends the session for both, and the node's link
+empties its sample queue when the peer closes. The peer does not close.
+
+The two components are separate tasks. A component's publications and receptions have no fixed order, and the boot gate
+holds no order between the two components' lines. `scripts/lib/zenoh_rmw_arm.py` judges each component's lines against its own order only.
+
+Known limits:
+
+- The composition has no row in `check-sel4-boot-layout.py`, so its initial capability layout is not frozen.
+- The node drops samples that arrive in the same pump as a peer `CLOSE`. The boot closes after four of each, so it does not reach that case.
+- No live `rmw_zenoh` peer runs in this composition. The exchange is between two Slime components over loopback.
+
 ## Limitations
 
 - `sel4-zenoh` crosses the loopback backend, so there is no packet capture there. The
@@ -480,6 +506,8 @@ recipe is explicit and in no aggregate. See the
   closures. It fetches them from a registry, so the recipe is explicit and not in CI;
   `cargo deny` run on that crate reports `paste` as unmaintained (RUSTSEC-2024-0436) and
   Zlib-licensed transitive crates, which the root `deny.toml` does not allow;
+- `just zenoh_rmw_booted_check` — the `sel4-zenoh-rmw` boot: 17 cases and 65 controls, and the arm under QEMU;
+  explicit, not part of `all`;
 - `just rpi5_ros2_zenoh_check` — the QEMU exchange; explicit, not part of `all`;
 - `just zenoh_external_check` — the guest connecting out to a stock listener, judged
   from the composition, a packet capture and the listener's record; explicit, not part
