@@ -309,7 +309,8 @@ The peer received all four once. The service refused `beta`'s publish, and every
 What is shown on the host only: a host test of the server half runs a second server, core and link after the first run ended.
 It also sends 28 malformed requests and stalls the link. A second run repeats the first. A malformed request changes no ring,
 session or stream byte. A publication that the stream does not take is answered `link-closed`. A stream that takes one byte in
-two offers leaves the link open after 16 refused offers. A later pump still delivers the queued frame. A host test of the roster replays
+two offers leaves the link open after 16 refused offers. The holder is told the publication failed, although the frame stays
+queued. No test shows whether a later pump delivers it. A host test of the roster replays
 eight scripted scenarios of a holder that dies, never attaches or never detaches. A host test measures the stack. At the built
 size of 2 holders and 2 rows the need is about 23100 bytes. At 4 holders, 6 rows and 64-byte samples it is about 26100 bytes.
 The declared stack is 32768 bytes. The measured depth of the call path varies by tens of bytes between runs, and the judge
