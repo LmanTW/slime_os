@@ -17,14 +17,14 @@ use slime_proto::zenoh_service_client as wire;
 use slime_proto::zenoh_service_client_wire::WireServiceRequest;
 use std::string::String;
 
-type Holders = Core<'static, 3, 2, 12, 4>;
+pub(super) type Holders = Core<'static, 3, 2, 12, 4>;
 
-const KEYS: [&str; 2] = ["0/slime_demo/server/first", "0/slime_demo/server/second"];
-const GID: [u8; 16] = [0xe0; 16];
-const START: i64 = 100;
-const PAGE: usize = 4096;
+pub(super) const KEYS: [&str; 2] = ["0/slime_demo/server/first", "0/slime_demo/server/second"];
+pub(super) const GID: [u8; 16] = [0xe0; 16];
+pub(super) const START: i64 = 100;
+pub(super) const PAGE: usize = 4096;
 
-fn rows() -> [Row<'static>; 4] {
+pub(super) fn rows() -> [Row<'static>; 4] {
     [
         Row {
             holder: 0,
@@ -53,7 +53,7 @@ fn rows() -> [Row<'static>; 4] {
     ]
 }
 
-fn params() -> Params {
+pub(super) fn params() -> Params {
     crate::zenoh_service::exam::params()
 }
 
@@ -61,11 +61,11 @@ fn line(text: &str) {
     println!("[zenoh-exam] server {text}");
 }
 
-fn hex(bytes: &[u8]) -> String {
+pub(super) fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-fn request(op: i64, row: u16, sequence: i64) -> [u8; 32] {
+pub(super) fn request(op: i64, row: u16, sequence: i64) -> [u8; 32] {
     WireServiceRequest {
         magic: wire::SERVICE_MAGIC as u32,
         version: wire::FORMAT_VERSION as u16,

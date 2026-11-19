@@ -5,7 +5,7 @@ item :: s.Item = (h.task "01a1ef34-0852-7698-9239-8c901559b322" "zenoh-service-g
   "Grade a second run, a malformed request and a stalled link of the Zenoh service server half on the host"
   "The booted `sel4-zenoh-service` run shows one boot, one exchange and one refusal. It shows no second boot, no malformed request and no stalled link. The server half, the core and the link build on the host, so a host test can drive all three. No gate grades them today.")
   with {
-    intent = #planned;
+    intent = #active;
     owns = {
       "components/lib/src/zenoh_service_server/**";
       "components/lib/src/zenoh_service_server.rs";
