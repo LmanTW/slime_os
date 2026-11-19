@@ -5,7 +5,7 @@ item :: s.Item = (h.task "01a1ee8a-6ef8-73ab-8725-b6c0481587c3" "zenoh-fragment-
   "A Profile 0 link takes the priorities, the best-effort traffic and the several open fragmented messages of a stock peer"
   "A stock eclipse-zenoh peer keeps one sequence counter and one reassembly buffer for each pair of a priority and a reliability. Profile 0 keeps one counter and one run, and it refuses a best-effort fragment, a fragment with an extension and a second message. A link that negotiates QoS with a stock peer would meet all three, and it never offers QoS today, so no peer sends a priority.")
   with {
-    intent = #planned;
+    intent = #active;
     owns = {
       "components/lib/src/zenoh_lanes*";
       "components/lib/src/zenoh_lanes/**";

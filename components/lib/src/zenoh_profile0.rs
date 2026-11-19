@@ -22,6 +22,7 @@ mod tests;
 pub mod encode;
 pub mod fragment;
 pub mod graph;
+pub mod lane_limits;
 pub mod limits;
 pub mod reassembly;
 pub mod session;
