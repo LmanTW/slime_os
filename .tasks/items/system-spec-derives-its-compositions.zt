@@ -6,14 +6,16 @@ item :: s.Item = (h.task "01a1f25f-3745-7346-9b78-ab7444258c55" "system-spec-der
   "Adding a composition changes two lists in files that grade 30 and 5 bound targets, 27 and 3 of them bound by promises. `DERIVED_GENERATION_FIXTURES` in `scripts/lib/system_spec.py` names each system spec, and `SPEC_NATIVE_SYSTEMS` in `scripts/check/check-system-spec.py` names the 29 of them authored as specs. The devloop refuses both changes. V1 allows one class for a pull request. V3 keeps a grader change out of an implementation pull request. V4 asks for a new item. A planning pull request that adds the name leaves `main` red. Two required CI jobs then look for a spec file that does not exist. No order of two pull requests lands a composition.")
   with {
     owns = {
-      "contracts/composition-inventory/v1/inventory.zti";
+      "scripts/lib/system_spec.py";
+      "scripts/check/check-system-spec.py";
     };
     nonGoals = {
       h.nonGoal "Adding a composition. This item changes how the checkers find one, and the next composition proves it." h.agentDefault;
       h.nonGoal "Changing what any checker asserts about a composition, or the 78 specs, the 49 frozen baselines or the 29 spec-native names that exist today." h.agentDefault;
       h.nonGoal "The documents and `AGENTS.md` that tell a contributor to register a name in `DERIVED_GENERATION_FIXTURES`. A planning pull request carries no `docs/` path, so a process pull request updates them." h.agentDefault;
       h.nonGoal "`COMPUTED_SYSTEM_SOURCES`, which maps six specs to their computed sources and is a different list." h.agentDefault;
-      h.nonGoal "An implementation path of its own. The two script edits are grader changes and ride in this planning pull request. `owns` names the one authored file a later composition changes, because the generators write the others and V2 does not map them to an item." h.agentDefault;
+      h.nonGoal "The paths a later composition adds: its spec, manifest and inventory row, which are implementation paths, and its closure source and test-run record, which are derived. That composition's own item owns them." h.agentDefault;
+      h.nonGoal "An implementation pull request of this item. The two script edits are grader changes, so they ride in this planning pull request. `owns` names the two scripts, as the repairs of the zenoh exams did." h.agentDefault;
     };
     requirements = {
       h.req "the-table-is-the-directory"
