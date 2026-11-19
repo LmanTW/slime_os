@@ -37,6 +37,7 @@ For how the planes work and how to add one, read
 | `just generation_check` | Build the product seL4 generation twice and verify identical admitted bytes. |
 | `just riscv64_qemu_check` | The marker chain this platform's transcript must satisfy. |
 | `just riscv64_qemu_image_check` | P3 replays the architecture-neutral corpus on the pinned RV64 reference. |
+| `just riscv64_sel4_root_boot_check` | The RISC-V root boot claim alone: the root-fixture image boots on `qemu-riscv-virt`, in the same shape as `x86_64_sel4_root_boot_check`. |
 | `just run` | Build the product image (`sel4_product_image`) and boot it under the pinned QEMU AArch64 machine with serial on stdio; quit with `Ctrl-A x`. |
 | `just run_release` | Same as `run`. |
 | `just sel4_boot_check` | P5.4.9/C8.10 gate: the full C8 graph in one seL4 generation. |

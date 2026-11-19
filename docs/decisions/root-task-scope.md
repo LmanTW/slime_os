@@ -76,7 +76,7 @@ The fixture role holds two parts, and they leave at different times.
 
 | Part | Lines | What it is | When it leaves |
 |---|---|---|---|
-| `slime-root/child/` | 390 | the program of the fixture's child task. It is a crate of its own and runs without the root's authority. | first: the crate moves to `components/root-child/` |
+| `slime-root/child/` | 390 | the program of the fixture's child task. It is a crate of its own and runs without the root's authority. | first: the crate moved to `components/root-child/` in PR 1053 |
 | `slime-root/src/fixture_runtime.rs` | 560 | the root side of the fixture. It runs with the root's authority. | after decision 4 holds |
 
 The child crate cannot move to `components/testkit/`. `just

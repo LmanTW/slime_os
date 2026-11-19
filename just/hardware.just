@@ -226,6 +226,17 @@ zenoh_service_grants_reader_check:
 zenoh_service_server_check:
     python3 scripts/check/check-zenoh-profile0.py --slice server
 
+# Judges three cases of the Zenoh service server half that the booted run does not show, on the host. The Rust
+# test drives the server half over a link pair. It runs a second boot, a set of malformed requests and a stalled
+# link. The judge writes every request and completion again with Python's `struct` from the schema's layout. It
+# requires the second boot to repeat the first. It requires every malformed request to change no ring, session
+# or stream byte. It requires a publication that the link cannot flush to be answered link-closed with no ring
+# changed. The expectation is scripts/lib/zenoh_grading_exam.py. Nothing here boots QEMU or needs a registry. The recipe fails
+# until the test lands.
+[group('hardware')]
+zenoh_service_grading_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice grading
+
 # Judges the generation builder's Zenoh limits record and the system spec admission that runs it. The judge builds the
 # record from a manifest and from a spec, requires the encoder's bytes and the independent struct writer's bytes, holds the
 # rows to the holders, subscriptions and key length the record declares, and refuses each input the contract and the
@@ -304,6 +315,16 @@ zenoh_service_client_abort_check:
 [group('hardware')]
 zenoh_service_link_check:
     python3 scripts/check/check-zenoh-profile0.py --slice service-link
+
+# Judges what the Zenoh service does with a holder that faults or never detaches. A reference model of the holder roster
+# writes every line of eight scripted scenarios, and the Rust test must print them. The service reclaims a holder whose
+# task the root reports dead, expires a holder that has not detached when the wait ends, refuses a reclaimed holder every
+# later request, and serves the other holder throughout. Eighteen wrong services and every corrupted line are refused. The
+# server half's exam runs beside it. The expectation is scripts/lib/zenoh_holder_fault_exam.py. Nothing here needs a
+# registry. The recipe fails until the roster lands. Loans, buffers and a boot under QEMU are not graded.
+[group('hardware')]
+zenoh_service_holder_fault_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice holder-fault
 
 # Judges contracts/frame-store/v1, its Rust reader and its MCAP converter. Converts the LiDAR bag named by
 # SLIME_LIDAR_BAG (refused unless its SHA-256 is the pinned value) twice and compares every payload with the

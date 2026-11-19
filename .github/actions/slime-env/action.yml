@@ -191,23 +191,11 @@ runs:
         # workspaces, the shared base rust-sel4 checkout, and one per patched
         # physical platform's independent loader submodule
         # (`sel4/pins.toml`'s `[rust_sel4_<platform>]` tables).
-        # The root fixture's child crate is a workspace of its own, and the
-        # work item `root-child-crate` moves it. This step runs from the head
-        # under test, so it must find the crate on either side of that move.
-        child=""
-        for candidate in components/root-child slime-root/child; do
-          if [ -f "$candidate/Cargo.toml" ]; then
-            child="$candidate/Cargo.toml"
-            break
-          fi
-        done
-        if [ -z "$child" ]; then
-          echo "no manifest for the root fixture's child crate" >&2
-          exit 1
-        fi
+        # The root fixture's child crate, `components/root-child`, is a
+        # workspace of its own.
         for manifest in \
           Cargo.toml \
-          "$child" \
+          components/root-child/Cargo.toml \
           deps/rust-sel4/Cargo.toml \
           deps/rust-sel4-bcm2712-rpi5/Cargo.toml \
           deps/rust-sel4-cv1800b-duo/Cargo.toml \
