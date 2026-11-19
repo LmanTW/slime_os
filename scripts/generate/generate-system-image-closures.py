@@ -53,15 +53,6 @@ PREFIXES = {
     "qemu-riscv-virt": INPUT_ROOT / "sel4-riscv64-prefix",
 }
 
-# The root fixture's child crate, at the place this checkout holds it. The work
-# item `root-child-crate` moves the crate, and a closure source must name the
-# tree that exists in its own checkout.
-ROOT_CHILD = (
-    "components/root-child"
-    if (ROOT / "components" / "root-child" / "Cargo.toml").is_file()
-    else "slime-root/child"
-)
-
 # The shared workspace inputs `resolve_closure` requires of every closure, as
 # `(name, repository-relative path, kind)`. The target specification is added
 # from `component_sdk.PROFILE_PLATFORMS` below because it varies by profile.
@@ -78,7 +69,7 @@ RELEASE_INPUTS: tuple[tuple[str, str, str], ...] = (
     ("image-builder", "scripts/build/build-sel4.py", "file"),
     ("elf-delivery", "scripts/lib/elf_delivery.py", "file"),
     ("interface-schema-contract", "contracts/interface-schema/v1", "tree"),
-    ("root-child", ROOT_CHILD, "tree"),
+    ("root-child", "components/root-child", "tree"),
     ("workspace-manifest", "Cargo.toml", "file"),
     ("zenoh-grants-table-contract", "contracts/zenoh-service-grants-table/v1", "tree"),
     ("zenoh-grants-table-encoder", "scripts/lib/zenoh_grants_table.py", "file"),

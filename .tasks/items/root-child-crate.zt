@@ -48,7 +48,7 @@ item :: s.Item = (h.task "01a1ed2c-6a01-7d68-84f5-f3057766f1ab" "root-child-crat
         h.atMost "seriesCodeLines" 34010;
       };
       h.observed "sel4_root_boot_check";
-      h.observed "x86_64_sel4_root_boot_check";
+      h.advisory (h.observed "x86_64_sel4_root_boot_check");
       h.observed "riscv64_sel4_root_boot_check";
       h.observed "image_builder_closures_check";
     };
@@ -83,6 +83,11 @@ item :: s.Item = (h.task "01a1ed2c-6a01-7d68-84f5-f3057766f1ab" "root-child-crat
         "riscv64_qemu_check runs four more plane gates and the portability check after the root boot, and its wait-set arm boots an AArch64 closure on qemu-riscv-virt, so the recipe cannot pass today. The fixture is the subject of the root boot alone. The bug item root-probe-below-spent-tails added the recipe"
         (h.fromHuman "1045 和 1043 都接受，RISC-V 改綁照做，其餘三個 plane 先不處理" "Claude Code session session_01Udthew69PFkRyDtWmFtXKa, 2026-11-18")
         { "fixture-boots-on-riscv64"; };
+      h.decided "x86-boot-is-advisory"
+        "The acceptance on x86_64_sel4_root_boot_check is advisory. The Evidence workflow records it, and it does not block the done witness."
+        "the Evidence workflow runs on an AArch64 host. The image build for qemu-pc99 links a C component through the host gcc, which refuses -m64, and the dev shell of that host has no OVMF and no GRUB for x86-64. The first record of the target, at ba33e0a, failed in that link step before QEMU started. The recipe passes on an x86-64 host, on the head of pull request 1053. A build of x86-64 images on an AArch64 host is work of its own"
+        (h.acceptedDefault "Claude Code session session_01Udthew69PFkRyDtWmFtXKa, 2026-11-19: the owner accepted the proposed option of three, which were advisory, a human acceptance, or an x86-64 build on the AArch64 runner")
+        { "fixture-boots-on-x86-64"; };
       h.decided "a-task-not-a-milestone"
         "This item is a task."
         "it moves one crate and changes no behavior. The owner confirmed four items in place of one testability milestone in the session of 2026-11-18. The kind of this one is the agent's choice"

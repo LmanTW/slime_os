@@ -25,19 +25,48 @@ series total covers. The `harness` role holds the build script and the two
 `slime_*` cfg compiles each qualification scenario into its own root role
 image. The role has its own ceiling and is outside the series total.
 
+The script also walks the module tree from each crate root. A walk reads every
+`mod name;` declaration of a file and follows it into the file that holds the
+module. It reads the file with comments and literals blanked, so text inside
+them declares nothing.
+
+The walk from `src/main.rs` finds what only the binary compiles. Host tests
+build the library, so they cannot name those lines. The count is reported as
+`binaryOnlyCodeLines`, with the count of those files as `binaryOnlyFiles`, and
+`BINARY_ONLY_CEILING` bounds the lines.
+
+The walk from `src/lib.rs` finds what the library compiles under a condition.
+A file is conditional when a `#[cfg(...)]` attribute stands on its declaration
+or on the declaration of a module above it, or when the file holds an inner
+`#![cfg(...)]` attribute. A build that does not meet the condition skips the
+file, so the host build may not compile it. The count is reported as
+`libraryConditionalCodeLines`, with `libraryConditionalFiles`, and
+`LIBRARY_CONDITIONAL_CEILING` bounds the lines. Test files are in neither
+count.
+
+A walk refuses what it cannot follow: a `path` attribute on a declaration, a
+declaration inside an inline module, and a declaration that no file or two
+files hold. The script also refuses a file that neither walk reaches, other
+than the build script and test files, because no build compiles it.
+
 A role may name a file that does not exist. A planning pull request assigns a
 file before the implementation creates it, and an entry stays after its file
 is deleted.
 
 Known limits. The script counts `slime-root/` only. Code that moves into a
 crate the root links leaves the count. `DEPENDENCIES` pins which crates those
-are, so a new one is a grader change. A role holds whole files:
+are, so a new one is a grader change. A walk reads the `cfg` on a module
+declaration and on a whole file. It does not read a `cfg` on an item inside a
+file, so an item that the host build skips still counts as compiled. A walk
+does not expand macros, so a module that a macro declares is not followed. A
+role holds whole files:
 `src/object_allocator/qualification.rs` also holds two methods that the
 product image calls, and the `harness` role counts them.
 """
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 import tomllib
@@ -53,6 +82,16 @@ from harness import ROOT  # noqa: E402
 CRATE = "slime-root"
 MANIFEST = ROOT / CRATE / "Cargo.toml"
 TEST_ATTRIBUTE = "#[cfg(test)]"
+BINARY_ROOT = "src/main.rs"
+LIBRARY_ROOT = "src/lib.rs"
+BUILD_SCRIPT = "build.rs"
+# `mod name;` with the outer attributes that stand on it, in blanked text.
+MODULE_DECLARATION = re.compile(
+    r"(?<![A-Za-z0-9_])((?:#\[[^\]]*\]\s*)*)(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+([A-Za-z_][A-Za-z0-9_]*)\s*;"
+)
+CFG_ATTRIBUTE = re.compile(r"#\[\s*cfg\s*\(")
+INNER_CFG_ATTRIBUTE = re.compile(r"#!\[\s*cfg\s*\(")
+PATH_ATTRIBUTE = re.compile(r"\bpath\b")
 
 
 @dataclass(frozen=True)
@@ -67,7 +106,9 @@ class Role:
 
 
 # Each role ceiling is the role's count on the commit that landed this script,
-# rounded up to a multiple of 50.
+# rounded up to a multiple of 50. Two are newer. `fixture` is 600 since its
+# child crate left `slime-root/`. `boot` is 6050, which leaves room for the
+# 5984 lines it holds once `src/boot.rs` carries the boot sequence of `main`.
 ROLES: dict[str, Role] = {
     # Kernel-object allocation, address spaces, tasks, faults and the graph.
     "core": Role(
@@ -96,9 +137,10 @@ ROLES: dict[str, Role] = {
     ),
     # Runs once, before the first component: admission, launch, boot media.
     "boot": Role(
-        ceiling=5900,
+        ceiling=6050,
         files=(
             "src/main.rs",
+            "src/boot.rs",
             "src/generation.rs",
             "src/graph_runtime.rs",
             "src/graph_runtime/platform.rs",
@@ -152,11 +194,10 @@ ROLES: dict[str, Role] = {
         ceiling=1350,
         files=("src/timer.rs", "src/platform_timer.rs", "src/clock.rs"),
     ),
-    # The fixture root and its child image.
+    # The root side of the fixture. Its child program is `components/root-child`.
     "fixture": Role(
-        ceiling=950,
+        ceiling=600,
         files=("src/fixture_runtime.rs",),
-        trees=("child/",),
     ),
     # Root diagnostics and the console endpoint.
     "console": Role(
@@ -180,8 +221,16 @@ ROLES: dict[str, Role] = {
 }
 
 SERIES = ("core", "boot", "ioResource", "sharedBuffer", "dispatch", "policy", "timer", "fixture", "console")
-# The series held 34294 code lines on the commit that landed this script.
-SERIES_CEILING = 34400
+# The series held 34294 code lines on the commit that landed this script, and
+# 33941 after the fixture's child crate left `slime-root/`.
+SERIES_CEILING = 34100
+# The binary alone compiled 9301 code lines, in 13 files, on the commit that
+# landed this ceiling.
+BINARY_ONLY_CEILING = 9350
+# The library compiled 2443 code lines under a `cfg`, in 6 files, on the same
+# commit: the boot selector, the boot framebuffer of x86-64 and one
+# qualification module.
+LIBRARY_CONDITIONAL_CEILING = 2450
 
 # Every crate `slime-root/Cargo.toml` names in a dependency table.
 DEPENDENCIES = frozenset({"boot-contracts", "sel4", "slime-proto", "sel4-root-task", "object"})
@@ -198,6 +247,7 @@ class Lexed:
     code: list[bool]  # the line holds a character outside whitespace and comments
     depth: list[int]  # delimiter depth before the line's first character
     ends: list[bool]  # the line holds a `;` or `}` that leaves the depth at 0
+    text: str = ""  # the file with every comment and literal replaced by spaces
 
 
 def lex(text: str) -> Lexed:
@@ -206,6 +256,7 @@ def lex(text: str) -> Lexed:
     out = Lexed([False] * lines, [0] * lines, [False] * lines)
     line = depth = index = 0
     size = len(text)
+    blanked = list(text)
 
     def span(end: int, held: bool) -> int:
         """Pass a comment or a literal that ends before `end`; a literal's text is code."""
@@ -214,7 +265,9 @@ def lex(text: str) -> Lexed:
             if text[position] == "\n":
                 line += 1
                 out.depth[line] = depth
-            elif held and not text[position].isspace():
+                continue
+            blanked[position] = " "
+            if held and not text[position].isspace():
                 out.code[line] = True
         return min(end, size)
 
@@ -224,7 +277,9 @@ def lex(text: str) -> Lexed:
             index = span(index + 1, False)
         elif text.startswith("//", index):
             end = text.find("\n", index)
-            index = size if end < 0 else end
+            end = size if end < 0 else end
+            blanked[index:end] = " " * (end - index)
+            index = end
         elif text.startswith("/*", index):
             nesting, end = 1, index + 2
             while end < size and nesting:
@@ -255,6 +310,7 @@ def lex(text: str) -> Lexed:
             if char in ";}" and depth == 0:
                 out.ends[line] = True
             index += 1
+    out.text = "".join(blanked)
     return out
 
 
@@ -325,6 +381,35 @@ def sources() -> list[str]:
     return sorted(path[len(prefix):] for path in listed if path.endswith(".rs") and (ROOT / path).is_file())
 
 
+def modules(files: list[str], root: str) -> dict[str, bool]:
+    """Every file that `root` declares, transitively, and whether it is conditional."""
+    known = set(files)
+    found: dict[str, bool] = {}
+    pending = [(root, False)]
+    while pending:
+        relative, conditional = pending.pop()
+        if relative in found:
+            fail(f"{CRATE}/{relative} holds a module that two declarations name")
+        lexed = lex((ROOT / CRATE / relative).read_text(encoding="utf-8"))
+        conditional = conditional or INNER_CFG_ATTRIBUTE.search(lexed.text) is not None
+        found[relative] = conditional
+        name = relative.rsplit("/", 1)[-1]
+        base = relative.rsplit("/", 1)[0] if name in ("main.rs", "lib.rs", "mod.rs") else relative.removesuffix(".rs")
+        for declared in MODULE_DECLARATION.finditer(lexed.text):
+            attributes, module = declared.group(1), declared.group(2)
+            if PATH_ATTRIBUTE.search(attributes):
+                fail(f"{CRATE}/{relative} declares module {module} with a path attribute; a walk finds a module by its name")
+            before = lexed.text[: declared.start(2)]
+            if sum(before.count(opened) for opened in "{([") != sum(before.count(closed) for closed in "})]"):
+                fail(f"{CRATE}/{relative} declares module {module} inside an inline module; a walk does not follow it")
+            candidates = [f"{base}/{module}.rs", f"{base}/{module}/mod.rs"]
+            holders = [candidate for candidate in candidates if candidate in known]
+            if len(holders) != 1:
+                fail(f"{CRATE}/{relative} declares module {module}, and {len(holders)} of {candidates} hold it")
+            pending.append((holders[0], conditional or CFG_ATTRIBUTE.search(attributes) is not None))
+    return found
+
+
 def dependencies() -> set[str]:
     manifest = tomllib.loads(MANIFEST.read_text(encoding="utf-8"))
     tables = [manifest]
@@ -361,6 +446,25 @@ def main() -> int:
         code[owners[0]] += code_lines
         test_lines += tested
 
+    for root in (BINARY_ROOT, LIBRARY_ROOT):
+        if root not in files:
+            fail(f"{CRATE}/{root} is missing; a walk starts there")
+    binary_tree = modules(files, BINARY_ROOT)
+    library_tree = modules(files, LIBRARY_ROOT)
+    for relative in sorted(set(binary_tree) & set(library_tree)):
+        problems.append(f"{CRATE}/{relative} is a module of the binary and of the library")
+    for relative in files:
+        if relative not in binary_tree and relative not in library_tree and relative != BUILD_SCRIPT and not is_test_file(relative):
+            problems.append(f"{CRATE}/{relative} is a module of neither the binary nor the library; no build compiles it")
+
+    def code_lines(tree: list[str]) -> int:
+        return sum(count((ROOT / CRATE / relative).read_text(encoding="utf-8"))[0] for relative in tree)
+
+    binary = sorted(relative for relative in binary_tree if not is_test_file(relative))
+    conditional = sorted(relative for relative, gated in library_tree.items() if gated and not is_test_file(relative))
+    binary_lines = code_lines(binary)
+    conditional_lines = code_lines(conditional)
+
     series = sum(code[name] for name in SERIES)
     for name, role in ROLES.items():
         print(f"[root-size] {name:<13} {code[name]:>6} / {role.ceiling}")
@@ -368,6 +472,14 @@ def main() -> int:
             problems.append(f"role {name} holds {code[name]} code lines, above its ceiling of {role.ceiling}")
     print(f"[root-size] {'series':<13} {series:>6} / {SERIES_CEILING}")
     print(f"[root-size] files={len(files)} testLines={test_lines}")
+    print(f"[root-size] {'binaryOnly':<13} {binary_lines:>6} / {BINARY_ONLY_CEILING} in {len(binary)} file(s)")
+    if binary_lines > BINARY_ONLY_CEILING:
+        problems.append(f"the binary alone compiles {binary_lines} code lines, above its ceiling of {BINARY_ONLY_CEILING}")
+    print(f"[root-size] {'conditional':<13} {conditional_lines:>6} / {LIBRARY_CONDITIONAL_CEILING} in {len(conditional)} file(s)")
+    if conditional_lines > LIBRARY_CONDITIONAL_CEILING:
+        problems.append(
+            f"the library compiles {conditional_lines} code lines under a cfg, above its ceiling of {LIBRARY_CONDITIONAL_CEILING}"
+        )
     if series > SERIES_CEILING:
         problems.append(f"the series holds {series} code lines, above its ceiling of {SERIES_CEILING}")
 
@@ -383,9 +495,13 @@ def main() -> int:
         seriesCodeLines=series,
         harnessCodeLines=code["harness"],
         filesObserved=len(files),
+        binaryOnlyCodeLines=binary_lines,
+        binaryOnlyFiles=len(binary),
+        libraryConditionalCodeLines=conditional_lines,
+        libraryConditionalFiles=len(conditional),
         **{f"{name}CodeLines": code[name] for name in SERIES},
     )
-    print("root size check: every file has one role, and every role and the series are within their ceilings")
+    print("root size check: every file has one role, and every role, the series and both walks are within their ceilings")
     return 0
 
 

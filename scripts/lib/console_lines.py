@@ -38,6 +38,10 @@ DEFINITIONS = frozenset(
     }
 )
 C_RUNTIME_ROOTS = ("components/runtime/c/", "components/runtime/include/")
+# Under `components/` and no component: the child program of the root fixture.
+# It prints through the kernel's debug sink, one byte for each call, and this
+# audit claims nothing about it. The caller leaves these paths out.
+NOT_COMPONENTS = ("components/root-child/",)
 LIFECYCLE_ROOTS = ("components/system/", "components/services/", "components/applications/", "components/testkit/")
 REQUIRED_SINK = "components/lib/src/console_line.rs"
 
@@ -142,6 +146,9 @@ def audit(sources: Mapping[str, str]) -> dict[str, int]:
     `sources` maps every tracked `components/**/*.rs`, `*.c` and `*.h` path to
     its text.
     """
+    outside = sorted(path for path in sources if path.startswith(NOT_COMPONENTS))
+    if outside:
+        raise AuditError(f"{outside[0]} is no component; the summary counts component sources only")
     rust = {path: text for path, text in sources.items() if path.endswith(".rs")}
     c = {path: text for path, text in sources.items() if path.endswith((".c", ".h"))}
     for root in LIFECYCLE_ROOTS:
@@ -209,6 +216,7 @@ def controls() -> int:
         ("sink outside the declared files", lambda: audit(_with("components/lib/src/console_line2.rs", "pub fn emit(r: &[u8]) { slime_rt::debug_write(r); }\n"))),
         ("C component calls the writer", lambda: audit(_with("components/slisp/main.c", "void f(void) { slime_debug_write(p, n); }\n"))),
         ("C component header calls the writer", lambda: audit({**_HONEST, "components/slisp/out.h": "static inline void w(void) { slime_debug_write(p, n); }\n"})),
+        ("a source that is no component", lambda: audit(_with("components/root-child/src/main.rs", "fn main() {}\n"))),
         ("no system source", lambda: audit(_without("components/system/"))),
         ("no testkit source", lambda: audit(_without("components/testkit/"))),
         ("no record sink", lambda: audit({path: text for path, text in _HONEST.items() if path != REQUIRED_SINK})),

@@ -530,7 +530,7 @@ def check_transcript(transcript: str, platform: str) -> None:
 # would sit below every RV64 ordinary address and assert nothing, so RV64
 # declares none and the root reports `beyond_legacy=0`. pc99 likewise never had
 # one: its ordinary memory comes from the x86 E820/Multiboot map, so it also
-# declares none, matching `TARGET_PROFILE`'s arm in `slime-root/src/main.rs`.
+# declares none, matching the arm of `TARGET_PROFILE` in `slime-root`.
 LEGACY_PLATFORM_RAM_END = {
     "qemu-arm-virt": 0x8000_0000,
     "qemu-riscv-virt": None,

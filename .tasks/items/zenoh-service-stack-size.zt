@@ -35,17 +35,20 @@ item :: s.Item = (h.task "01a1ef67-2110-75db-a6f7-3d5b5addb0f8" "zenoh-service-s
       h.req "pages-follow-the-client-contract"
         "The system spec declares 4 buffers, 4 byte pages, 4 loans and 6 mappings for the instance `zenoh-service`. The client contract's page counts give those numbers for 2 holders."
         { "zenoh_service_stack_check"; };
+      h.req "the-test-restates-the-component"
+        "The judge reads `HOLDERS`, `ROWS`, `SLOTS`, `PAYLOAD`, `PAGE_ROWS`, the `Link` type and the arrays of the main frame from `main.rs`. It refuses a component that differs from what the test measured."
+        { "zenoh_service_stack_check"; };
       h.req "the-measurement-reads-what-it-claims"
         "A frame of 8192 bytes measures between 8192 and 8256 bytes. The transcript names its architecture and its profile, which is debug."
         { "zenoh_service_stack_check"; };
       h.req "controls-are-refused"
-        "The judge refuses 92 corrupted transcripts and source files before it judges the real run. Each part, each depth bound and each declared stack bound has a control one byte past it."
+        "The judge refuses 113 corrupted transcripts and source files before it judges the real run. Each part, each depth bound and each declared stack bound has a control one byte past it."
         { "zenoh_service_stack_check"; };
     };
     acceptance = {
       h.observedWhere "zenoh_service_stack_check" {
         h.count "casesObserved" 12;
-        h.count "negativeControlsRefused" 92;
+        h.count "negativeControlsRefused" 113;
       };
     };
     decisions = {

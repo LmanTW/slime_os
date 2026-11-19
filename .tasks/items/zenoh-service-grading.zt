@@ -1,0 +1,68 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a1ef34-0852-7698-9239-8c901559b322" "zenoh-service-grading" "zenoh-service-core"
+  "Grade a second run, a malformed request and a stalled link of the Zenoh service server half on the host"
+  "The booted `sel4-zenoh-service` run shows one boot, one exchange and one refusal. It shows no second boot, no malformed request and no stalled link. The server half, the core and the link build on the host, so a host test can drive all three. No gate grades them today.")
+  with {
+    intent = #planned;
+    owns = {
+      "components/lib/src/zenoh_service_server/**";
+      "components/lib/src/zenoh_service_server.rs";
+    };
+    nonGoals = {
+      h.nonGoal "A second boot of the QEMU image, a malformed request from a holder component, or a stalled link under QEMU. Each needs a new image or a new fault control. The booted run stays as `zenoh_service_booted_check` judges it." h.agentDefault;
+      h.nonGoal "Changing the server half, the core, the link or the component. The implementation adds a test module and changes no behavior." h.agentDefault;
+      h.nonGoal "Telling the retry limit from the pump bound. The exam pins both constants and one run for each stall. A change to either refuses the transcript and does not name which one changed." h.agentDefault;
+      h.nonGoal "A stalled stream that takes bytes again. The frame stays in the send slot and the holder has been told it failed. The decision record states that the peer and the holders may still receive it." h.agentDefault;
+      h.nonGoal "A holder that faults or never detaches. The decision record lists it as a known limit of the component." h.agentDefault;
+      h.nonGoal "Lazy declaration, credits, and excluding a holder's own publications. The decision record fixes them." (h.fromDecision "docs/decisions/zenoh-service.md");
+    };
+    requirements = {
+      h.req "second-run-repeats-the-first"
+        "A server, core and link built a second time give the first run's nine answers and states, in the same order. Both runs attach two holders, publish once, take twice and detach twice. Each run then closes the link and prints its state."
+        { "zenoh_service_grading_check"; };
+      h.req "malformed-request-changes-nothing"
+        "A request outside the protocol is refused with the status and the echoed operation, row and length that the schema gives. After each of 28 such requests, both rings hold what they held and no byte reaches the stream or the peer. The link stays open and both sessions stay attached."
+        { "zenoh_service_grading_check"; };
+      h.req "served-after-refusals"
+        "After the 28 refusals, each holder takes the sample that sat in its ring, and a new publication reaches both rings and the peer."
+        { "zenoh_service_grading_check"; };
+      h.req "stalled-link-is-closed"
+        "A publication that the stream does not take is answered `link-closed`. A stream that takes nothing ends the link after four refused offers. A stream that takes one byte in two offers leaves the link open after 16 refused offers. In both, no ring holds the sample when the holder is answered."
+        { "zenoh_service_grading_check"; };
+      h.req "judge-is-independent"
+        "The judge writes every request and completion again with `struct` from the schema's layout and reads no Rust. It refuses 162 corrupted inputs before it judges the run. The run is the one named test, run alone."
+        { "zenoh_service_grading_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_service_grading_check" {
+        h.count "casesObserved" 60;
+        h.count "negativeControlsRefused" 162;
+      };
+    };
+    decisions = {
+      h.decided "host-evidence-grades-the-three-cases"
+        "The three cases are graded by a host test of the server half over a link pair. No QEMU run is added."
+        "the server half, the core and the link are plain Rust that builds on the host. A QEMU boot would need a second image, a malformed-request holder and a stall control, and it would show the same server code"
+        h.agentDefault
+        { "second-run-repeats-the-first"; "malformed-request-changes-nothing"; "stalled-link-is-closed"; };
+      h.decided "the-slice-extends-the-owning-checker"
+        "The exam is the slice `--slice grading` of `check-zenoh-profile0.py`, with the judge `scripts/lib/zenoh_grading_exam.py`. It reuses the server exam's restatement of the client's rules."
+        "the server slice already owns the request and completion layouts and the client's acceptance rules. A new top-level checker would copy them"
+        h.agentDefault
+        { "judge-is-independent"; };
+      h.decided "a-second-run-is-a-second-server-in-one-process"
+        "A second boot is a second server, core and link in one test process, started after the first run ended and its link closed."
+        "a boot starts the service component with fresh state, and the server half holds none outside its `Server`, `Core` and `OverLink`. The test cannot show that the component's loans and rings are released and mapped again"
+        h.agentDefault
+        { "second-run-repeats-the-first"; };
+      h.decided "the-slow-stream-answers-link-closed-and-leaves-the-link-open"
+        "The server answers `link-closed` for a stream that takes one byte in two offers, although the link stays open and the frame stays queued. The exam pins that answer."
+        "a probe showed it. After 16 refused offers the bound ended, the answer was `link-closed`, and a later pump delivered the queued frame to both rings and the peer. The holder was told the publication failed, and the peer and the holders received it"
+        h.agentDefault
+        { "stalled-link-is-closed"; };
+    };
+  };
+
+item

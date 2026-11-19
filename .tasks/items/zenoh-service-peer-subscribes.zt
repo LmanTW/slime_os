@@ -1,0 +1,75 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a1ef1a-ec52-74c8-8be6-505a372bdbc3" "zenoh-service-peer-subscribes" "zenoh-service-core"
+  "The peer of the Zenoh service composition subscribes, and each publication by alpha reaches it once"
+  "The peer in `sel4-zenoh-service` declares no subscriber. A publication by `alpha` therefore reaches the holders and not the peer, and the service core reports the peer's copy as not subscribed. The booted gate prints `peer=none` for each publication. No gate shows a sample crossing the link to a peer that subscribes.")
+  with {
+    intent = #planned;
+    owns = {
+      "components/applications/zenoh-peer/**";
+      "contracts/component-spec/v1/components/zenoh-peer.zti";
+      "contracts/system-spec/v1/systems/sel4-zenoh-service.zti";
+      "contracts/generation-manifest/v1/compositions/sel4-zenoh-service.zti";
+      "contracts/boot-layout/v1/fixtures/sel4-zenoh-service.layout";
+    };
+    nonGoals = {
+      h.nonGoal "A second boot, a malformed request, a stalled link, or a holder that faults. The grading of those cases belongs to a separate item." h.agentDefault;
+      h.nonGoal "Lazy declaration, reliable delivery with credits, and a per-row option that excludes a holder's own publications. The decision record lists each as not taken." h.agentDefault;
+      h.nonGoal "A sample from the peer to a holder. The peer only receives in this item." h.agentDefault;
+      h.nonGoal "A change to the service component, the service core, the link or any file of `components/lib`. The service already reports `peer=sent` when the peer declared the key." h.agentDefault;
+      h.nonGoal "A new instance, grant, notification or network row in the system spec. The peer, its listener and its notifications exist already." h.agentDefault;
+      h.nonGoal "A NIC, a stock peer or a second boot. The peer shares the composition and the loopback backend, so the slice shows a sample crossing the Zenoh link and nothing on a wire." h.agentDefault;
+      h.nonGoal "More than one peer, more than one key, a wildcard key, and a stock peer." h.agentDefault;
+    };
+    requirements = {
+      h.req "peer-declares-the-exchange-key"
+        "In the booted run, the peer prints one line after its session opens that declares one subscriber on the key `0/slime_service/exchange`."
+        { "zenoh_service_peer_check"; };
+      h.req "peer-receives-each-publication-once"
+        "The peer prints one receipt for each of sequences 0 to 3, in order. Each receipt carries 12 bytes whose first byte equals the sequence."
+        { "zenoh_service_peer_check"; };
+      h.req "service-reports-the-peer-copy"
+        "The service prints `peer=sent` for each of the four publications by `alpha`, and the sequences the peer received equal the sequences the service printed."
+        { "zenoh_service_peer_check"; };
+      h.req "holders-are-unchanged"
+        "Each publication still reaches one holder, and the four deliveries go to `beta` and to no other holder. The judge of the existing holder arm accepts the service's lines."
+        { "zenoh_service_peer_check"; };
+      h.req "declarations-are-in-the-files"
+        "The system spec holds the grant of the key to `alpha`. Its acceptance text names the peer. The peer's source declares the subscriber and reads the delivered sample. The component spec says the peer subscribes to the exchange key."
+        { "zenoh_service_peer_check"; };
+      h.req "controls-are-refused"
+        "The judge refuses 36 inputs. Six remove one declaration from a synthetic file set. Thirty alter or remove a line of an honest transcript."
+        { "zenoh_service_peer_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_service_peer_check" {
+        h.count "casesObserved" 11;
+        h.count "negativeControlsRefused" 36;
+      };
+    };
+    decisions = {
+      h.decided "extend-the-service-slice-family"
+        "The judge is a slice of `check-zenoh-profile0.py`, named `service-peer`, with its expectation in `scripts/lib/zenoh_service_peer_exam.py`. It runs the existing `zenoh-service` arm of the network plane checker."
+        "the verification discipline asks for an extended checker, and the arm already boots this composition"
+        h.agentDefault
+        { "peer-receives-each-publication-once"; "controls-are-refused"; };
+      h.decided "the-arm-accepts-either-peer-word"
+        "The marker chains of the network plane checker accept `peer=none` or `peer=sent` on a publication. The holder arm judge was written for `peer=none` and already accepts both."
+        "the existing booted gate must stay valid while the peer does not yet subscribe, and the new slice requires `peer=sent`"
+        h.agentDefault
+        { "holders-are-unchanged"; };
+      h.decided "peer-lines-are-read-from-the-arm-transcript"
+        "The slice asks the arm for its transcript and reads the lines of `[zenoh-peer]` and `[zenoh-service]` from it. The slice boots the image once through the arm."
+        "the peer's receipt is judged against the service's own lines, so both must come from one boot"
+        h.agentDefault
+        { "service-reports-the-peer-copy"; };
+    };
+    invariants = {
+      h.invariant "derived-files-regenerate-in-the-implementation"
+        "The implementation PR runs `python3 scripts/generate/generate-generation-from-spec.py` and regenerates the manifest and the boot layout only if `--check` reports drift. It runs `python3 scripts/generate/generate-system-image-closures.py --check`. No closure input set changes, so no closure source changes. No test-run record changes, because no plane gate's execution inputs change."
+        h.agentDefault;
+    };
+  };
+
+item

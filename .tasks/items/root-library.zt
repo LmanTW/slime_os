@@ -1,0 +1,138 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.milestone "01a1f136-14af-768c-bb13-2917ec15696b" "root-library" "planes-mechanism"
+  "The library compiles the root's graph runtime and boot sequence"
+  "slime-root/src/main.rs declares graph_runtime and fixture_runtime as modules of the binary. On main at 6531425 the binary alone compiles 9301 code lines in 13 files, of the 33941 in the series. just test_sel4_root builds the library, so no host test can name those lines. main is one function of 1058 lines, and it runs every boot phase from the object allocator to the launch of the first component.")
+  with {
+    supersedes = {
+      "01a1ed2c-6a01-7d68-84f5-f3057766f1ab/series-without-the-child";
+    };
+    depends = {
+      "01a1ed2c-6a01-7d68-84f5-f3057766f1ab";
+    };
+    owns = {
+      "slime-root/src/**";
+      "just/quality.just";
+    };
+    nonGoals = {
+      h.nonGoal "A change to what the root does. Code moves between files of one crate, and items become public. No record, no order of allocation and no capability changes." h.agentDefault;
+      h.nonGoal "An error type in place of fatal!. The macro moves to the library with its text unchanged, and its 201 call sites stay. The next root item replaces them." h.agentDefault;
+      h.nonGoal "A host test of the boot sequence or of the launch. The allocator and the task table call seL4 directly, and a host cannot invoke seL4. The next root item adds the seam." h.agentDefault;
+      h.nonGoal "Shorter functions. The moved boot phases are one function of the library, and launch_instance_graph keeps its length. The next root item splits them." h.agentDefault;
+      h.nonGoal "Explicit imports in the nine child modules of graph_runtime. Each keeps its use super::*. Only slime-root/src/graph_runtime.rs names what it imports." h.agentDefault;
+      h.nonGoal "The root side of the fixture, slime-root/src/fixture_runtime.rs. The binary still compiles it, and the product root still links it. It leaves when the fixture is a root binary of its own." h.agentDefault;
+      h.nonGoal "An exam for the boot selector, Milk-V Duo S, Raspberry Pi 5 and product UART configurations. The evidence branch holds no record of a target that builds them." h.agentDefault;
+      h.nonGoal "A measure of a cfg attribute on an item inside a file. The size checker reads the attribute on a module declaration and on a whole file. An item that the host build skips still counts as compiled." h.agentDefault;
+      h.nonGoal "A ceiling on the binary-only count below 9350 in scripts/check/check-root-size.py. The checker grades promises, so it changes only with a new item (V4). The planning pull request of the next root item lowers it." h.agentDefault;
+      h.nonGoal "The pages under docs/ that name slime-root/src/main.rs or fatal!. docs/ is a process path, and a process pull request follows the implementation." h.agentDefault;
+    };
+    requirements = {
+      h.req "the-binary-compiles-the-entry-only"
+        "root_size_check counts at most 1200 code lines that only the binary compiles, in at most 2 files. It reports them as binaryOnlyCodeLines and binaryOnlyFiles."
+        { "root_size_check"; };
+      h.req "series-with-the-library-seam"
+        "root_size_check counts at most 34100 code lines in the nine series roles, and reports the count as seriesCodeLines."
+        { "root_size_check"; };
+      h.req "no-cfg-on-the-moved-modules"
+        "root_size_check counts at most 2450 code lines that the library compiles under a cfg attribute, and reports them as libraryConditionalCodeLines. main holds 2443 such lines, so the library declares graph_runtime, boot and every module below them without one."
+        { "root_size_check"; };
+      h.req "host-tests-pass-with-the-moved-code"
+        "test_sel4_root passes: the host build of the library succeeds with the moved modules in it, and every host test passes."
+        { "test_sel4_root"; };
+      h.req "fixture-boots-on-aarch64"
+        "sel4_root_boot_check passes: the root fixture boots on qemu-arm-virt through the library's boot function."
+        { "sel4_root_boot_check"; };
+      h.req "fixture-boots-on-riscv64"
+        "riscv64_sel4_root_boot_check passes: the root fixture boots on qemu-riscv-virt through the library's boot function."
+        { "riscv64_sel4_root_boot_check"; };
+      h.req "fixture-boots-on-x86-64"
+        "x86_64_sel4_root_boot_check passes: the root fixture boots on qemu-pc99 through the library's boot function."
+        { "x86_64_sel4_root_boot_check"; };
+      h.req "product-graph-boots"
+        "sel4_boot_check passes: the product root launches its component graph from the library's graph runtime."
+        { "sel4_boot_check"; };
+      h.req "console-install-stays-in-main"
+        "root_console_check passes: main installs the root's console UART once, before the first record, and the console record audit accepts the root's sources."
+        { "root_console_check"; };
+      h.req "console-audit-counts-components-only"
+        "The console line audit refuses a source under components/root-child/. That crate is the child program of the root fixture and no component."
+        { "sel4_gate_control_check"; };
+    };
+    acceptance = {
+      h.observedWhere "root_size_check" {
+        h.atMost "binaryOnlyCodeLines" 1200;
+        h.atMost "binaryOnlyFiles" 2;
+        h.atMost "seriesCodeLines" 34100;
+        h.atMost "libraryConditionalCodeLines" 2450;
+      };
+      h.observed "test_sel4_root";
+      h.observed "sel4_root_boot_check";
+      h.observed "riscv64_sel4_root_boot_check";
+      h.advisory (h.observed "x86_64_sel4_root_boot_check");
+      h.observed "sel4_boot_check";
+      h.observed "root_console_check";
+      h.observed "sel4_gate_control_check";
+    };
+    invariants = {
+      h.invariant "main-keeps-the-first-two-phases"
+        "main initializes the object allocator and installs the root's console before it calls the library's boot function. scripts/lib/root_console.py and scripts/lib/console_record_controls.py read slime-root/src/main.rs, and this item changes neither."
+        h.agentDefault;
+      h.invariant "the-boot-function-takes-what-it-uses"
+        "The library's boot function receives the boot info, the object allocator and the embedded images as arguments. The library names no static of the binary."
+        h.agentDefault;
+      h.invariant "fatal-stops-the-root-as-before"
+        "fatal! prints one record and stops the root. Its definition moves to the library, and its expansion does not change."
+        h.agentDefault;
+      h.invariant "every-configuration-still-builds"
+        "The boot selector, Milk-V Duo S, Raspberry Pi 5 and product UART configurations of the root still build. The implementation pull request reports each build as observed or not observed."
+        h.agentDefault;
+      h.invariant "the-first-item-closes-first"
+        "The implementation pull request merges after the item root-child-crate is terminal. That item bounds the series at 34010 while it is open, and the moved code holds about 34037 lines."
+        h.agentDefault;
+    };
+    decisions = {
+      h.decided "three-scope-choices"
+        "fatal! keeps its form in this item. main keeps the allocator and the console install. The exam is the binary-only count, the host build and the boots."
+        "a function that returns errors needs a decision for each of 201 call sites, and that is the next item. The two console audits read main, so a move of the install changes two graders. No host test can run the moved code before a seam for the kernel exists, so the exam measures what the library compiles"
+        (h.acceptedDefault "Claude Code session session_01Udthew69PFkRyDtWmFtXKa, 2026-11-18: the owner accepted the three proposals named in this decision")
+        { "the-binary-compiles-the-entry-only"; "no-cfg-on-the-moved-modules"; "host-tests-pass-with-the-moved-code"; "console-install-stays-in-main"; };
+      h.decided "bounds-from-a-measured-draft"
+        "The bound on binaryOnlyCodeLines is 1200, and the bound on binaryOnlyFiles is 2."
+        "a draft of the move, on a branch that no pull request carries, leaves 1117 lines in slime-root/src/main.rs and slime-root/src/fixture_runtime.rs. 1200 is that count rounded up to a multiple of 50, plus 50. The draft passed test_sel4_root, sel4_root_boot_check, riscv64_sel4_root_boot_check, x86_64_sel4_root_boot_check and sel4_boot_check in one development container"
+        h.agentDefault
+        { "the-binary-compiles-the-entry-only"; };
+      h.decided "series-bound-replaces-34010"
+        "The series bound is 34100, and it replaces the bound of 34010 that the item root-child-crate set."
+        "the move adds imports, two structures and one function signature: the draft holds 34037 lines, against 33941 on main. The checker's series ceiling falls from 34400 to 34100 in the planning pull request of this item. The judge reads a terminal item's targets and not its bounds, so the checker's ceiling is the bound that lasts"
+        (h.acceptedDefault "Claude Code session session_01Udthew69PFkRyDtWmFtXKa, 2026-11-19: the owner accepted the proposal to replace the series bound with a measured one")
+        { "series-with-the-library-seam"; };
+      h.decided "x86-boot-is-advisory"
+        "The acceptance on x86_64_sel4_root_boot_check is advisory."
+        "the Evidence workflow runs on an AArch64 runner, and the build for qemu-pc99 fails there before QEMU starts. The one record of the target on the evidence branch failed. The implementation pull request reports a run on an x86-64 host"
+        (h.acceptedDefault "Claude Code session session_01Udthew69PFkRyDtWmFtXKa, 2026-11-19: the owner accepted the proposal that this item's x86-64 acceptance is advisory from its start")
+        { "fixture-boots-on-x86-64"; };
+      h.decided "mandatory-targets-have-passing-records"
+        "Every mandatory acceptance binds a target that the evidence branch records as passed."
+        "on the evidence branch at f860baa every record of these targets passed: root_size_check 4, test_sel4_root 12, sel4_root_boot_check 1, riscv64_sel4_root_boot_check 1, sel4_boot_check 4, root_console_check 5, sel4_gate_control_check 4. The item root-child-crate bound a target that the Evidence runner cannot build, and could not close"
+        h.agentDefault
+        { "host-tests-pass-with-the-moved-code"; "product-graph-boots"; "console-install-stays-in-main"; };
+      h.decided "a-count-of-conditional-modules"
+        "The size checker walks the module tree from slime-root/src/lib.rs and counts the files behind a cfg attribute. The item bounds the count at what main holds."
+        "a passing host build does not show that it compiled the moved code: a module declared under cfg(target_os = \"none\") leaves the binary-only count low, the host tests green and the boots unchanged. With the two counts bounded, a moved file is a module of the library with no condition on its declaration"
+        h.agentDefault
+        { "no-cfg-on-the-moved-modules"; };
+      h.decided "graders-change-in-the-planning-pull-request"
+        "The planning pull request of this item changes four graders. The size checker counts what only the binary compiles and what the library compiles under a cfg, lowers two ceilings and raises the boot role's. The closure generator names the child crate at its one place. The console line audit leaves the child crate out. A comment in the root boot gate no longer names a file."
+        "each file is in the grader set of a target that a promise binds, so it changes only in a pull request that adds an item (V4). The item root-child-crate left the generator's second place and the lower ceilings to this pull request"
+        h.agentDefault
+        { "the-binary-compiles-the-entry-only"; "series-with-the-library-seam"; "console-audit-counts-components-only"; };
+      h.decided "the-boot-role-ceiling-rises"
+        "The boot role's ceiling rises from 5900 to 6050, and the role gains slime-root/src/boot.rs."
+        "the boot phases stay in the boot role when they move from main to the new file, and the draft's role holds 5984 lines against 5879 on main. The series ceiling falls by 300 in the same change"
+        h.agentDefault
+        { "series-with-the-library-seam"; };
+    };
+  };
+
+item

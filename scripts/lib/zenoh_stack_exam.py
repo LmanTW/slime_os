@@ -83,6 +83,45 @@ def declared_stack(text: str | None = None) -> int:
     return int(found.group(1))
 
 
+LINK_ALIAS = "pub type Link<'a, 'b> = LinkOf<Stream<Wire<'a, 'b>>, 514, 1, 5, 129, PAYLOAD, 8, 4>;"
+FRAME_ARRAYS = (
+    "let mut record = [0u8; limits_wire::RECORD_LEN];",
+    "let mut object = [0u8; TABLE_BYTES];",
+    "let mut names = [[0u8; grants::HOLDER_NAME_BYTES]; HOLDERS];",
+    "let mut name_lens = [0usize; HOLDERS];",
+    "let mut keys = [[0u8; grants::MAX_KEY_BYTES]; ROWS];",
+    "let mut key_lens = [0usize; ROWS];",
+    "let mut stored: [(usize, bool, bool); ROWS] = [(0, false, false); ROWS];",
+    "let mut page = [0u8; PAGE_ROWS * grants::ENTRY_BYTES];",
+)
+
+
+def built_binding(text: str | None = None) -> None:
+    """The built size and the tables the test restates, read from the component.
+
+    The test restates the `Link` type and the arrays of the main frame. This binds each to `main.rs`, so a change to
+    the component that the restatement does not follow is refused.
+    """
+    body = _read(MAIN, text)
+    _, holders, slots, payload, rows = CONFIGS[0]
+    for name, value in (("HOLDERS", holders), ("ROWS", rows), ("SLOTS", slots), ("PAYLOAD", payload), ("PAGE_ROWS", 6)):
+        found = re.search(rf"^(?:pub )?const {name}: usize = (\d+);$", body, re.M)
+        _need(found is not None, f"the component does not declare {name} as `const {name}: usize = <n>;`")
+        _need(
+            int(found.group(1)) == value,
+            f"stack: the component declares {name} = {found.group(1)}, the exam measured {value}",
+        )
+    _need(
+        body.count(LINK_ALIAS) == 1,
+        "stack: the component's `Link` type is not the one the exam measured",
+    )
+    arrays = re.findall(r"^\s*(let mut [a-z_]+(?:: [^=]+)? = \[.*\];)$", body, re.M)
+    _need(
+        tuple(arrays) == FRAME_ARRAYS,
+        f"stack: the arrays in the component's main frame are {arrays}, the exam measured {list(FRAME_ARRAYS)}",
+    )
+
+
 def runtime_stack(text: str | None = None) -> int:
     """`STACK_SIZE`, the stack the runtime reserves for one component thread."""
     found = re.search(r"^pub const STACK_SIZE: usize = (\d+) \* 1024;$", _read(RUNTIME, text), re.M)
@@ -235,6 +274,7 @@ def judge(
         matches.append(found)
     declared = declared_stack(main)
     real = runtime_stack(runtime)
+    built_binding(main)
     cases = 0
     calibration = int(matches[2].group(1))
     _need(
@@ -444,6 +484,36 @@ def source_controls() -> int:
             r"STACK_SIZE: usize = \d+ \* 1024;",
             f"STACK_SIZE: usize = {declared // 1024 - 1} * 1024;",
             runtime,
+        ),
+    )
+    for name in ("HOLDERS", "ROWS", "SLOTS", "PAYLOAD", "PAGE_ROWS"):
+        refused += _refused(
+            f"a component with another {name}",
+            good,
+            main=re.sub(rf"(const {name}: usize = )(\d+);", lambda m: f"{m.group(1)}{int(m.group(2)) + 1};", main),
+        )
+        refused += _refused(
+            f"a component with no {name}",
+            good,
+            main=main.replace(f"const {name}: usize", f"const {name}S: usize"),
+        )
+    refused += _refused(
+        "a component with another Link type",
+        good,
+        main=main.replace(LINK_ALIAS, LINK_ALIAS.replace("514, 1, 5, 129", "514, 1, 5, 130")),
+    )
+    refused += _refused(
+        "a component with no Link alias",
+        good,
+        main=main.replace(LINK_ALIAS, ""),
+    )
+    for array in FRAME_ARRAYS:
+        refused += _refused(f"a component without `{array}`", good, main=main.replace(array, ""))
+    refused += _refused(
+        "a component with one more array in its main frame",
+        good,
+        main=main.replace(
+            FRAME_ARRAYS[0], FRAME_ARRAYS[0] + "\n    let mut extra = [0u8; 4096];"
         ),
     )
     service_line = next(line for line in spec.splitlines() if 'name = "zenoh-service";' in line)

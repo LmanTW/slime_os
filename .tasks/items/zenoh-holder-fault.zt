@@ -1,0 +1,75 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a1ef07-3784-7699-afef-d10b6a3d5cfe" "zenoh-holder-fault" "zenoh-service-core"
+  "The Zenoh service reclaims a holder that faults, expires a holder that never detaches, and keeps serving the others"
+  "The service ends only when every holder has attached and detached, and no gate grades a holder that does neither. A holder that faults leaves its ring, its data page and its loans in the service, and the service never ends. A holder that stays alive and never detaches has the same effect. `network-service` reclaims a dead client through a supervision handle. The Zenoh service does not poll one. The service runs one session for all holders, so one lost holder must not stop the others.")
+  with {
+    owns = {
+      "components/services/zenoh-service/**";
+      "components/lib/src/lib.rs";
+      "components/lib/src/zenoh_service_server.rs";
+      "components/lib/src/zenoh_service_server/**";
+      "components/lib/src/zenoh_service_server_roster.rs";
+    };
+    nonGoals = {
+      h.nonGoal "A system spec, a manifest or a QEMU boot in which a holder faults. The composition has no supervision binding for a holder, and a later item adds one." h.agentDefault;
+      h.nonGoal "Grading the loans, the ring and the data page. The host test grades the roster and the server half. The service's calls that release them stay as they are." h.agentDefault;
+      h.nonGoal "Restart of a holder. A reclaimed holder never attaches again in the same run." h.agentDefault;
+      h.nonGoal "A new wire record, status or operation in `contracts/zenoh-service-client/v1`. A reclaimed holder gets the statuses the protocol already has." h.agentDefault;
+      h.nonGoal "The link, the session and the peer. They stay open until every holder has settled." h.agentDefault;
+    };
+    requirements = {
+      h.req "a-dead-holder-is-reclaimed"
+        "When the root reports a holder's task dead, the service closes that holder's session, and every later request or attach of that holder is denied. A publication reports the core's reach, which no settled holder changes."
+        { "zenoh_service_holder_fault_check"; };
+      h.req "the-others-are-served"
+        "A holder that died or expired changes no answer to another holder. That holder still attaches, publishes, takes and detaches, with the same reach, peer flag and sample sequence."
+        { "zenoh_service_holder_fault_check"; };
+      h.req "the-wait-is-bounded"
+        "A holder that has not detached 30000 ms after the service started is expired, and one millisecond earlier it is not."
+        { "zenoh_service_holder_fault_check"; };
+      h.req "the-service-ends-when-all-are-settled"
+        "The service is done when every holder has detached, died or expired, and it is not done while one holder is still idle or attached."
+        { "zenoh_service_holder_fault_check"; };
+      h.req "a-holder-settles-once"
+        "A death report for a holder that already detached or expired changes nothing. A death before an attach is noted, with no session to reclaim."
+        { "zenoh_service_holder_fault_check"; };
+      h.req "the-service-files-hold-the-calls"
+        "The component library exports the roster and its test. The server half has a `lose` call. `holders.rs` holds the wait, resolves a supervision binding, polls it, ends on the roster and prints one reclaim line."
+        { "zenoh_service_holder_fault_check"; };
+      h.req "controls-are-refused"
+        "The judge refuses 440 corrupted inputs. Eighteen of them are wrong services, each of which prints a transcript that the model refuses."
+        { "zenoh_service_holder_fault_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_service_holder_fault_check" {
+        h.count "casesObserved" 55;
+        h.count "negativeControlsRefused" 440;
+      };
+    };
+    decisions = {
+      h.decided "follow-the-network-service-client-death-pattern"
+        "The service polls one supervision handle for each holder. A dead holder has its session closed and its holder settled. The other holders and the link stay up. This follows the client-death handling of `network-service`."
+        "the owner chose the network service as the pattern for the client interface. Its client-death handling reclaims one client and serves the rest"
+        h.agentDefault
+        { "a-dead-holder-is-reclaimed"; "the-others-are-served"; };
+      h.decided "bound-the-wait-with-a-fixed-deadline"
+        "A holder that has not detached 30000 ms after the service started is expired. Expiry closes its session as death does. Alternative: no deadline, as in `network-service`, which treats a live client that abandons its adapter as no evidence of death."
+        "the item must bound the wait, and a silent holder has no supervision signal. The cost of the alternative is a service that never ends, which is today's limit. A deadline since service start is the smallest bound, and it needs no per-holder timer"
+        h.agentDefault
+        { "the-wait-is-bounded"; "the-service-ends-when-all-are-settled"; };
+      h.decided "a-holder-without-a-binding-is-bounded-by-the-wait-only"
+        "A holder with no supervision binding in the generation is not polled. The deadline still bounds it. The composition sel4-zenoh-service has no such binding today."
+        "adding minted bindings and a supervising owner changes the system spec and the manifest. A planning PR cannot carry them, and the host exam does not need them"
+        h.agentDefault
+        { "a-dead-holder-is-reclaimed"; "the-wait-is-bounded"; };
+      h.decided "judged-by-a-model-on-the-host"
+        "A reference model of the roster writes every expected line. The Rust test replays eight scripted scenarios on the roster and the server half, and the judge compares the lines."
+        "the root's supervision status and the loan release need a seL4 boot. The roster's rules need none, and a model can state them without reading the Rust"
+        h.agentDefault
+        { "controls-are-refused"; "the-service-files-hold-the-calls"; };
+    };
+  };
+
+item

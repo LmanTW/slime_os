@@ -3215,7 +3215,11 @@ def check_console_lines() -> None:
         check=True,
         stdout=subprocess.PIPE,
     ).stdout.decode()
-    sources = {path: (ROOT / path).read_text(encoding="utf-8") for path in listed.split("\0") if path}
+    sources = {
+        path: (ROOT / path).read_text(encoding="utf-8")
+        for path in listed.split("\0")
+        if path and not path.startswith(console_lines.NOT_COMPONENTS)
+    }
     try:
         counts = console_lines.audit(sources)
     except console_lines.AuditError as error:
