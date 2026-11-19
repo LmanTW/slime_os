@@ -638,6 +638,11 @@ def contract_cases() -> list[tuple[str, list[dict], int, bool]]:
         ("a heap link with 2 runs and the heap of 1", with_heap(dict(heap2, heapBytes=v2_heap(heap1))), 2, False),
         ("a heap link with 2 runs and the stack of 1", with_heap(dict(heap2, stackBytes=links.required_stack(heap1))), 2, False),
         ("a heap link with 16 runs, exact", with_heap(v2_config(heap, 16)), 2, True),
+        ("a heap link with 2 runs and a batch of 90, the largest INIT_ACK with the extension and its stream length", with_heap(v2_config(heap, 2, batchBytes=90, keyBytes=1)), 2, True),
+        ("a heap link with 2 runs and a batch of 89, one byte short of it", with_heap(v2_config(heap, 2, batchBytes=89, keyBytes=1)), 2, False),
+        ("a heap link with 1 run and a batch of 89, which writes no extension", with_heap(v2_config(heap, 1, batchBytes=89, keyBytes=1)), 2, True),
+        ("a heap link with 16 runs and a batch of 89", with_heap(v2_config(heap, 16, batchBytes=89, keyBytes=1)), 2, False),
+        ("a heap link with 16 runs and a batch of 90", with_heap(v2_config(heap, 16, batchBytes=90, keyBytes=1)), 2, True),
         ("a heap link with 17 runs, exact", with_heap(v2_config(heap, 17)), 2, False),
         ("a heap link with 0 runs", with_heap(dict(heap, maxRuns=0)), 2, False),
         ("a heap link with -1 runs", with_heap(dict(heap, maxRuns=-1)), 2, False),
@@ -819,9 +824,9 @@ def all_controls() -> int:
 # .tasks/terminal. While the item is open its stored predicates are compared with these. Both are exact.
 PINNED_TRANSCRIPT_CASES = 23
 PINNED_REFUSALS = 20
-PINNED_CONTRACT = 17
+PINNED_CONTRACT = 22
 PINNED_CASES = PINNED_TRANSCRIPT_CASES + PINNED_REFUSALS + PINNED_CONTRACT
-PINNED_CONTROLS = 468
+PINNED_CONTROLS = 473
 
 
 def item_pins() -> tuple[int, int]:

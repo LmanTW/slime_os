@@ -52,16 +52,16 @@ item :: s.Item = (h.task "01a1ee8a-6ef8-73ab-8725-b6c0481587c3" "zenoh-fragment-
         "A link with 1 run refuses a best-effort frame and fragment as `unsupported-message`. It refuses a QoS extension as `unsupported-extension`. The links and stock-peer exams pass beside it unchanged."
         { "zenoh_lanes_check"; };
       h.req "limits-v2-declares-runs"
-        "The contract `contracts/zenoh-link-limits/v2` adds `maxRuns` to a configuration. It takes 4 records and refuses 13 at the boundaries of the runs, the stack and the heap. It refuses a v1 record and a record with no `maxRuns`."
+        "The contract `contracts/zenoh-link-limits/v2` adds `maxRuns` to a configuration. It takes 7 records and refuses 15 at the boundaries of the runs, the batch, the stack and the heap. A heap link with several runs needs a batch of 90. It refuses a v1 record and a record with no `maxRuns`."
         { "zenoh_lanes_check"; };
       h.req "controls-are-refused"
-        "The judge refuses 468 corrupted records before it judges the real run."
+        "The judge refuses 473 corrupted records before it judges the real run."
         { "zenoh_lanes_check"; };
     };
     acceptance = {
       h.observedWhere "zenoh_lanes_check" {
-        h.count "casesObserved" 60;
-        h.count "negativeControlsRefused" 468;
+        h.count "casesObserved" 65;
+        h.count "negativeControlsRefused" 473;
       };
     };
     decisions = {
