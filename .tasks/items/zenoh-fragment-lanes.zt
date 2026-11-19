@@ -17,6 +17,7 @@ item :: s.Item = (h.task "01a1ee8a-6ef8-73ab-8725-b6c0481587c3" "zenoh-fragment-
       "components/proto/src/zenoh_link_limits*";
       "contracts/zenoh-link-limits/v2/**";
       "scripts/generate/generate-zenoh-link-limits-bindings.py";
+      "verification/zenoh-xcheck/**";
     };
     nonGoals = {
       h.nonGoal "A component, a composition, a system spec or a QEMU gate that runs a link with several runs. This item judges the link on the host." h.agentDefault;
