@@ -5,6 +5,7 @@ item :: s.Item = (h.task "01a1ee87-954c-76f6-9700-b117aabc1863" "zenoh-rmw-boote
   "A seL4 composition boots the rmw_zenoh node and its native peer, and each publishes and receives four samples before the session closes"
   "The node and the peer are judged by file facts and by the data link's exam, and nothing runs them together. Two defects reached `main` because of that. A peer built as a listener passed every fact. A pair in which neither side closed the session exchanged all eight samples and then idled to the deadline. A host probe of the two loops found both. No file fact or type check could. Only a boot that judges how the exchange ends can pin the pair. The service composition shows the form. It has a system spec, a derived manifest, an inventory row and a test-run record. It also has an arm of the network plane checker with marker chains.")
   with {
+    intent = #active;
     owns = {
       "contracts/system-spec/v1/systems/sel4-zenoh-rmw.zti";
       "contracts/generation-manifest/v1/compositions/sel4-zenoh-rmw.zti";
