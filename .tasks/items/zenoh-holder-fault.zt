@@ -5,6 +5,7 @@ item :: s.Item = (h.task "01a1ef07-3784-7699-afef-d10b6a3d5cfe" "zenoh-holder-fa
   "The Zenoh service reclaims a holder that faults, expires a holder that never detaches, and keeps serving the others"
   "The service ends only when every holder has attached and detached, and no gate grades a holder that does neither. A holder that faults leaves its ring, its data page and its loans in the service, and the service never ends. A holder that stays alive and never detaches has the same effect. `network-service` reclaims a dead client through a supervision handle. The Zenoh service does not poll one. The service runs one session for all holders, so one lost holder must not stop the others.")
   with {
+    intent = #active;
     owns = {
       "components/services/zenoh-service/**";
       "components/lib/src/lib.rs";

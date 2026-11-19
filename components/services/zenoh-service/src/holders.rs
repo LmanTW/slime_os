@@ -10,6 +10,7 @@ use slime_components::zenoh_service::{OverLink, Settled};
 use slime_components::zenoh_service_server::{
     Answer, REQUEST_BYTES, Server, denied, exchange_line,
 };
+use slime_components::zenoh_service_server_roster::{Death, Roster};
 use slime_proto::io_queue::{self, REQUEST_PAYLOAD_BYTES};
 use slime_proto::io_queue_ring::{Outstanding, Queue, QueueError};
 use slime_proto::zenoh_service_client as wire;
@@ -30,6 +31,8 @@ const QUEUE_SLOTS: usize = wire::QUEUE_SLOTS as usize;
 const MAGIC: u32 = wire::SERVICE_MAGIC as u32;
 const VERSION: u16 = wire::FORMAT_VERSION as u16;
 const SUFFIXES: [&[u8]; 2] = [b"-zenoh-control", b"-zenoh-provision"];
+/// A holder that has not detached this long after the service started is expired.
+const HOLDER_WAIT_MS: i64 = 30000;
 
 pub struct Names {
     pub bytes: [[u8; 32]; crate::HOLDERS],
@@ -183,6 +186,47 @@ fn endpoints(name: &[u8]) -> Endpoints {
     }
 }
 
+/// The supervision handle the generation declares for `holder`, or `None` when it declares none. A holder with no
+/// handle is not polled, and only the wait bounds it.
+fn supervision(holder: &[u8]) -> Option<u32> {
+    let prefix = b"minted:";
+    let suffix = b"-supervision";
+    let mut name = [0u8; 64];
+    let end = prefix.len() + holder.len() + suffix.len();
+    if end > name.len() {
+        return None;
+    }
+    name[..prefix.len()].copy_from_slice(prefix);
+    name[prefix.len()..prefix.len() + holder.len()].copy_from_slice(holder);
+    name[prefix.len() + holder.len()..end].copy_from_slice(suffix);
+    slime_rt::resolve_binding(&name[..end]).ok()
+}
+
+/// Ends a lost holder's session, refuses the holder every later request, and says why.
+fn reclaim(
+    server: &mut Server<{ crate::HOLDERS }>,
+    session: &mut Option<Session>,
+    end: &mut Option<Endpoints>,
+    index: usize,
+    name: &[u8],
+    cause: &[u8],
+) {
+    server.lose(index);
+    if let Some(open) = session.take()
+        && !open.close()
+    {
+        fail(b"session release");
+    }
+    *end = None;
+    Line::<128>::new()
+        .bytes(b"[zenoh-service] holder reclaimed holder=")
+        .bytes(name)
+        .bytes(b" cause=")
+        .bytes(cause)
+        .bytes(b"\n")
+        .emit();
+}
+
 fn say(holder: &[u8], what: &[u8]) {
     Line::<128>::new()
         .bytes(b"[zenoh-service] holder ")
@@ -210,15 +254,17 @@ pub fn serve<'k>(
 ) {
     let mut ends: [Option<Endpoints>; crate::HOLDERS] = core::array::from_fn(|_| None);
     let mut sessions: [Option<Session>; crate::HOLDERS] = core::array::from_fn(|_| None);
-    let mut attached = 0usize;
-    let mut detached = 0usize;
+    let mut supervised: [Option<u32>; crate::HOLDERS] = [None; crate::HOLDERS];
+    let mut roster = Roster::<{ crate::HOLDERS }>::new(names.count, HOLDER_WAIT_MS);
     for (index, end) in ends.iter_mut().enumerate().take(names.count) {
-        *end = Some(endpoints(&names.bytes[index][..names.lens[index]]));
+        let name = &names.bytes[index][..names.lens[index]];
+        *end = Some(endpoints(name));
+        supervised[index] = supervision(name);
     }
     let mut epoch = 1u64;
-    // The service ends once every holder the grants name has attached and detached, so a holder that attaches late is
-    // still served.
-    while attached < names.count || detached < attached {
+    // The service ends once every holder the grants name has detached, died or expired, so a holder that attaches late
+    // is still served and a holder that faults or never detaches cannot keep the service running.
+    while !roster.done() {
         // `millis` takes the counter as the root returns it and subtracts its own base.
         let ticks = monotonic_read().unwrap_or_else(|_| fail(b"clock read"));
         let now = clock.millis(ticks);
@@ -230,6 +276,42 @@ pub fn serve<'k>(
         while over.declare_next(core, link, handle).unwrap_or(false) {
             let _ = link.pump(handle, now as u64);
             let _ = over.settle(core, link);
+        }
+        for index in 0..names.count {
+            let name = &names.bytes[index][..names.lens[index]];
+            if let Some(slot) = supervised[index] {
+                match slime_rt::supervision_status(slot) {
+                    Ok(Some(_)) => {
+                        supervised[index] = None;
+                        if roster.death(index) != Death::Ignored {
+                            reclaim(
+                                server,
+                                &mut sessions[index],
+                                &mut ends[index],
+                                index,
+                                name,
+                                b"dead",
+                            );
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(_) => fail(b"holder supervision"),
+                }
+            }
+        }
+        let expired = roster.expire(now);
+        for index in 0..names.count {
+            if expired[index] {
+                let name = &names.bytes[index][..names.lens[index]];
+                reclaim(
+                    server,
+                    &mut sessions[index],
+                    &mut ends[index],
+                    index,
+                    name,
+                    b"expired",
+                );
+            }
         }
         for index in 0..names.count {
             let Some(end) = ends[index].as_ref() else {
@@ -251,12 +333,14 @@ pub fn serve<'k>(
                         end.provision,
                         &bytes[..REQUEST_BYTES],
                         &mut epoch,
-                        &mut attached,
                         name,
                     );
                     reply(&answer, end.control);
                     let accepted = WireServiceCompletion::decode(&answer.completion)
                         .is_some_and(|completion| completion.status == 0);
+                    if i64::from(op) == wire::OP_ATTACH && accepted {
+                        roster.attach(index);
+                    }
                     let teardown =
                         i64::from(op) == wire::OP_DETACH || i64::from(op) == wire::OP_ABORT;
                     if teardown
@@ -267,7 +351,7 @@ pub fn serve<'k>(
                             fail(b"session release");
                         }
                         ends[index] = None;
-                        detached += 1;
+                        roster.detach(index);
                         say(name, b"detached");
                     }
                 }
@@ -301,7 +385,6 @@ fn control(
     provision: u32,
     bytes: &[u8],
     epoch: &mut u64,
-    attached: &mut usize,
     name: &[u8],
 ) -> Answer {
     let answer = server.control(core, index, bytes);
@@ -313,7 +396,6 @@ fn control(
         match Session::open(index, provision, *epoch) {
             Ok(opened) => {
                 *session = Some(opened);
-                *attached += 1;
                 let rows = core.row_count(index);
                 Line::<128>::new()
                     .bytes(b"[zenoh-service] holder attached holder=")

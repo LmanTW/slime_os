@@ -542,6 +542,14 @@ impl<const H: usize> Server<H> {
         self.phases.get(holder) == Some(&Phase::Attached)
     }
 
+    /// Ends `holder`'s session whatever it was. The host calls it for a holder that died or expired. The holder is
+    /// refused every later request and cannot attach again in this run, and no other holder changes.
+    pub fn lose(&mut self, holder: usize) {
+        if let Some(phase) = self.phases.get_mut(holder) {
+            *phase = Phase::Ended;
+        }
+    }
+
     /// Puts `holder` back to having no session. The host calls it when it could not give an attached holder its
     /// buffers, so the holder may attach again and is not left counted as attached.
     pub fn unattach(&mut self, holder: usize) {

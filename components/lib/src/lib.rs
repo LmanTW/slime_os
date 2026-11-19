@@ -53,6 +53,7 @@ pub mod zenoh_service_client;
 #[cfg(test)]
 mod zenoh_service_link;
 pub mod zenoh_service_server;
+pub mod zenoh_service_server_roster;
 #[cfg(test)]
 mod zenoh_service_stack;
 #[cfg(test)]
