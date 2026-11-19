@@ -282,29 +282,50 @@ up to eight times, and a link that has not flushed by then is reported as closed
 The component (`components/services/zenoh-service`) reads its grants, attaches to the network service and opens the link. It
 lends each holder a ring and a data page as shared-buffer loans, and serves them with the server half. A detach or an abort counts
 only when the server accepted it. A holder whose buffers could not be created is put back to having no session. The service
-ends when every holder the grants name has attached and detached. It then closes the link, gives the link bounded pumps to flush
+ends when every holder the grants name has detached, died or expired. It then closes the link, gives the link bounded pumps to flush
 its CLOSE, and closes its connection through the network service.
+
+`zenoh_service_server_roster.rs` holds where each holder stands: idle, attached, detached, dead or expired. A holder settles once.
+The component resolves a supervision binding for each holder and polls it, as `network-service` does for a client. When the root
+reports a holder's task dead, the service closes that holder's session and calls `Server::lose`. The server then refuses that
+holder every later request and attach. A holder that has not detached 30000 ms after the service read its clock base expires the
+same way. The other holders, the link and the session stay up. The wait includes the time the service spends in `connect`, which
+it bounds at 20000 ms. A holder with no supervision binding is bounded by the wait alone.
 
 The service prints one line for a publication, a taken sample and a publication refused for a row the holder may not publish.
 `exchange_line` in the server half builds them from the request and the answer, and a host test drives it. The booted exchange is
 judged on these lines.
 
 The composition `sel4-zenoh-service` (generation 171) runs the service, a peer, and two holders named `alpha` and `beta`. The
-peer listens on 127.0.0.1:7447 over the network service's loopback backend and declares no subscriber, so a publication reaches
-the holders and not the peer. `alpha` may publish the key and `beta` may subscribe to it. `beta` then asks to publish and is refused.
+peer listens on 127.0.0.1:7447 over the network service's loopback backend. It declares one subscriber on the exchange key once
+its session is open and its send slot is free. It prints one line for each sample it receives. A publication therefore
+reaches the holders and the peer. `alpha` may publish the key and `beta` may subscribe to it. `beta` then asks to publish and is refused.
 The grants-table contract and encoder are release inputs of every closure, so a change to either changes each closure identity.
 
-What is shown: one boot of this composition under QEMU, in which `alpha` published four samples, `beta` was delivered all four,
-the service refused `beta`'s publish, and every instance exited with status 0. What is not shown: a second boot, a malformed
-request, a link that stalls, or any sample crossing to a peer that subscribes. The peer in this composition declares no
-subscriber.
+What is shown under QEMU: one boot of this composition. In it `alpha` published four samples and `beta` was delivered all four.
+The peer received all four once. The service refused `beta`'s publish, and every instance exited with status 0.
+`just zenoh_service_peer_check` judges the peer's lines beside the service's.
+
+What is shown on the host only: a host test of the server half runs a second server, core and link after the first run ended.
+It also sends 28 malformed requests and stalls the link. A second run repeats the first. A malformed request changes no ring,
+session or stream byte. A publication that the stream does not take is answered `link-closed`. A stream that takes one byte in
+two offers leaves the link open after 16 refused offers. A later pump still delivers the queued frame. A host test of the roster replays
+eight scripted scenarios of a holder that dies, never attaches or never detaches. A host test measures the stack. At the built
+size of 2 holders and 2 rows the need is about 23100 bytes. At 4 holders, 6 rows and 64-byte samples it is about 26100 bytes.
+The declared stack is 32768 bytes. The measured depth of the call path varies by tens of bytes between runs, and the judge
+bounds it and does not pin it. The measurement is a debug build on x86_64 and covers the frames of the core, the link, the
+server and the arrays of `main`.
+
+What is not shown: a second boot, a malformed request from a holder component, or a stalled link under QEMU. No boot has a
+holder that faults, because the composition declares no supervision binding for a holder. The release of a reclaimed holder's
+loans, ring and data page is not graded. The stack depth on seL4 is not measured, and neither is the stack of the network
+attachment, `holders::serve` or `holders::drive`.
 
 Known limits of the component:
 
 - It is built for at most two holders and two rows. It refuses a table above that, and it serves a table below it.
-- No gate grades a holder that faults or a holder that never detaches. The service ends only when every holder has attached and
-  detached.
-- Nobody has computed the stack and memory sizes at real sizes. The composition runs at two holders and two rows.
+- A live holder that expired gets no answer on its control endpoint, because the loop stops reading it. A request it sends there
+  blocks. The planning record said such a holder is denied.
 - A configuration judged by `contracts/zenoh-link-limits/v1` cannot declare more than one local subscription. A second
   declaration needs a new version of that contract. The component does not use that path: it opens its link with
   `Params { local: 3 }`.
