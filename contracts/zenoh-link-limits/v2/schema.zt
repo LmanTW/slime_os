@@ -211,10 +211,12 @@ noticeBytes :: Config -> Int
   = c => noticesPerSample * c.outstandingSamples
     * (noticeOverheadBytes + (if c.mode == modeFixed then c.payloadBytes else 0));
 
--- The memory the owning component declares for the link's fixed storage.
+-- The lane state of a link with several runs. It is evaluated only for a run count `commonOk` has bounded, so
+-- the product cannot overflow the contract's 63-bit integers.
 laneBytes :: Config -> Int
   = c => if c.maxRuns > 1 then (c.maxRuns - 1) * runOverheadBytes + laneCounterBytes else 0;
 
+-- The memory the owning component declares for the link's fixed storage.
 requiredStack :: Config -> Int
   = c => stackFactor * c.batchBytes + sessionFixedBytes + slotBytes c + noticeBytes c + laneBytes c;
 
@@ -227,6 +229,7 @@ commonOk :: Config -> Bool
     && c.maxKeys >= 1 && c.maxKeys <= aliasIds
     && c.maxSubscribers >= 1 && c.maxSubscribers <= c.maxKeys
     && c.outstandingSamples >= 1 && c.outstandingSamples <= maxOutstandingSamples
+    && c.maxRuns <= maxRunsLimit
     && c.stackBytes >= requiredStack c;
 
 -- No heap: the message is one batch, so there is nothing to reassemble.
@@ -249,7 +252,7 @@ heapNeeded :: Config -> Int
 heapOk :: Config -> Bool
   = c => c.batchBytes > fragmentFramingBytes
     && c.reassemblyTimeoutMs >= 1
-    && c.maxRuns >= 1 && c.maxRuns <= maxRunsLimit
+    && c.maxRuns >= 1
     && c.heapBytes >= heapNeeded c;
 
 configOk :: Config -> Bool
