@@ -40,7 +40,8 @@ PARTS = ("slot", "row", "holder", "fixed")
 FRAMES = ("core", "link", "over", "server", "locals")
 NAMES = (*PARTS, *FRAMES)
 HEADER = 3
-BLOCK = 1 + len(NAMES) + 1
+BLOCK = 3 + len(NAMES) + 1
+SIZES_AT = 3
 ARCHES = ("x86_64", "aarch64")
 CALIBRATION_BYTES = 8192
 CALIBRATION_TOLERANCE = 64
@@ -94,6 +95,19 @@ FRAME_ARRAYS = (
     "let mut stored: [(usize, bool, bool); ROWS] = [(0, false, false); ROWS];",
     "let mut page = [0u8; PAGE_ROWS * grants::ENTRY_BYTES];",
 )
+
+
+def link_line(label: str, payload: int) -> str:
+    """The `Link` parameters the component builds, as the test must print them, from the alias in `main.rs`."""
+    found = re.search(r"LinkOf<Stream<Wire<'a, 'b>>, ([^>]*)>;", LINK_ALIAS)
+    parameters = found.group(1).replace("PAYLOAD", str(payload))
+    return f"stack link {label} {parameters}"
+
+
+def frame_line(label: str) -> str:
+    """The arrays of the main frame, in order, as the test must print them."""
+    names = [re.match(r"let mut ([a-z_]+)", array).group(1) for array in FRAME_ARRAYS]
+    return f"stack frame {label} {' '.join(names)}"
 
 
 def built_binding(text: str | None = None) -> None:
@@ -230,6 +244,8 @@ def good_lines() -> list[str]:
     for label, holders, slots, payload, rows in CONFIGS:
         value = HONEST[label]
         out.append(f"stack config {label} {holders} {slots} {payload} {rows}")
+        out.append(link_line(label, payload))
+        out.append(frame_line(label))
         out += [f"stack size {label} {name} {value[name]}" for name in NAMES]
         out.append(f"stack depth {label} {value['depth']}")
     return out
@@ -243,6 +259,8 @@ def _shapes() -> list[re.Pattern[str]]:
     ]
     for label, holders, slots, payload, rows in CONFIGS:
         shapes.append(re.compile(f"stack config {label} {holders} {slots} {payload} {rows}"))
+        shapes.append(re.compile(re.escape(link_line(label, payload))))
+        shapes.append(re.compile(re.escape(frame_line(label))))
         shapes += [re.compile(f"stack size {label} {name} {NUMBER}") for name in NAMES]
         shapes.append(re.compile(f"stack depth {label} {NUMBER}"))
     return shapes
@@ -289,7 +307,7 @@ def judge(
     cases += 1
     limit = bounds()
     for number, (label, holders, slots, payload, rows) in enumerate(CONFIGS):
-        start = HEADER + number * BLOCK + 1
+        start = HEADER + number * BLOCK + SIZES_AT
         value = {name: int(matches[start + offset].group(1)) for offset, name in enumerate(NAMES)}
         value["depth"] = int(matches[start + len(NAMES)].group(1))
         for name in PARTS:
@@ -371,7 +389,7 @@ def transcript_controls() -> int:
     declared = declared_stack()
     for number, (label, holders, slots, payload, rows) in enumerate(CONFIGS):
         base = HEADER + number * BLOCK
-        sizes = base + 1
+        sizes = base + SIZES_AT
         depth_at = sizes + len(NAMES)
         for offset, name in enumerate(PARTS):
             refused += _refused(
@@ -398,6 +416,30 @@ def transcript_controls() -> int:
         )
         refused += _refused(
             f"a {label} depth that is negative", _replace(good, depth_at, f"stack depth {label} -1")
+        )
+        link_at, frame_at = base + 1, base + 2
+        refused += _refused(
+            f"a {label} link with a smaller batch",
+            _replace(good, link_at, good[link_at].replace("514", "256")),
+        )
+        refused += _refused(
+            f"a {label} link with another payload",
+            _replace(good, link_at, good[link_at].replace(f" {payload},", f" {payload + 1},")),
+        )
+        refused += _refused(f"a {label} link line missing", good[:link_at] + good[link_at + 1 :])
+        for array in FRAME_ARRAYS:
+            name = re.match(r"let mut ([a-z_]+)", array).group(1)
+            refused += _refused(
+                f"a {label} frame without {name}",
+                _replace(good, frame_at, good[frame_at].replace(f" {name}", "", 1)),
+            )
+        refused += _refused(
+            f"a {label} frame with an array more",
+            _replace(good, frame_at, good[frame_at] + " extra"),
+        )
+        refused += _refused(
+            f"a {label} frame in another order",
+            _replace(good, frame_at, "stack frame " + label + " " + " ".join(reversed(good[frame_at].split()[3:]))),
         )
         refused += _refused(
             f"a {label} config of another size",
@@ -434,7 +476,7 @@ def transcript_controls() -> int:
     refused += _refused("a release build", _replace(good, 1, "stack profile release"))
     refused += _refused("an unknown architecture", _replace(good, 0, "stack arch riscv64"))
     swapped = list(good)
-    swapped[HEADER + 1], swapped[HEADER + 2] = swapped[HEADER + 2], swapped[HEADER + 1]
+    swapped[HEADER + SIZES_AT], swapped[HEADER + SIZES_AT + 1] = swapped[HEADER + SIZES_AT + 1], swapped[HEADER + SIZES_AT]
     refused += _refused("two size lines swapped", swapped)
     blocks = list(good)
     blocks[HEADER : HEADER + BLOCK], blocks[HEADER + BLOCK :] = (

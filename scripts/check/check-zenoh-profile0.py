@@ -3145,7 +3145,7 @@ def service_link_main(controls_only: bool) -> int:
 
 
 SERVICE_STACK_CASES = 12
-SERVICE_STACK_CONTROLS = 113
+SERVICE_STACK_CONTROLS = 147
 SERVICE_STACK_FILTER = "zenoh_service_stack::"
 # The exam's own Rust test, by name: a filter that matches nothing passes silently.
 SERVICE_STACK_TESTS = ("zenoh_service_stack::the_stack_exam",)
