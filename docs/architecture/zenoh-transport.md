@@ -407,8 +407,9 @@ composition holds the network service, the node and the peer. It has no Zenoh se
 | `zenoh-rmw-node` | Graph link, 512-byte batch | Listens on 127.0.0.1:7447, declares one subscription and publishes four Puts. |
 | `zenoh-rmw-peer` | Plain Profile 0 link | Dials the node, declares one subscription and publishes four Puts. |
 
-Both use the chatter key of 253 bytes and a payload of 32 bytes. The graph session answers the peer's one
-`INTEREST` with a `DeclareFinal`, because an `rmw_zenoh` peer waits about 10 seconds without it.
+Both links are built for a key of at most 253 bytes and a payload of at most 32 bytes. The chatter key is 110 bytes, and a sample is at most 22 bytes.
+The graph session answers an `rmw_zenoh` peer's one `INTEREST` with a `DeclareFinal`, because that peer waits about 10 seconds without it.
+The native peer is a plain link and sends no `INTEREST`, so this boot does not perform that answer.
 
 Each component prints `published sequence=N` and `received sequence=N` for N from 1 to 4. The node
 closes the session after it has published 4 and received 4. One side's close ends the session for both, and the node's link
