@@ -19,18 +19,23 @@ use super::fragment::{
     FragmentError, PutMessage, PutRules, Source, Splitter, decode_fragment, decode_put,
     fits_one_frame, is_fragment,
 };
+use super::lane_limits::MAX_RUNS_LIMIT;
 use super::limits::{Limits, Mode};
 use super::reassembly::{Progress, Reassembly};
 use super::tables::{InsertError, Keys, SlotTable};
 use super::{
     Bounds, Frame, MAX_BATCH_BYTES, MAX_COOKIE_BYTES, MAX_KEY_BYTES, Mapping, Message, Network,
-    Refusal, STREAM_LENGTH_BYTES, decode_batch_with,
+    Refusal, STREAM_LENGTH_BYTES, decode_batch_qos, decode_batch_with,
 };
 use slime_proto::zenoh_profile as p;
 
 #[cfg(test)]
 #[path = "session_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "lanes_handshake_tests.rs"]
+mod lanes_handshake_tests;
 
 /// Events one received batch can yield; this is the contract's outstanding-sample bound.
 pub const MAX_EVENTS: usize = 4;
@@ -429,6 +434,10 @@ pub struct SessionOf<
     now_ms: u64,
     /// The batch the peer announced in its INIT; what this side sends is bounded by it.
     peer_batch: usize,
+    /// The reassembly runs this side holds. 2 or more offers the QoS unit extension on its INIT.
+    runs: usize,
+    /// The peer's INIT carried the QoS unit extension.
+    peer_qos: bool,
     reassembly: Reassembly,
     /// The key aliases a stock peer declared with DeclareKeyExpr, and the keys they stand for.
     aliases: SlotTable<K, B>,
@@ -451,12 +460,27 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize> SessionOf<K
         Self::with_params(role, config, Params::DEMO)
     }
 
-    /// A session declared by `params`.
+    /// A session declared by `params`, holding one reassembly run. It writes the INIT it always wrote.
     pub fn with_params(
         role: Role,
         config: &Config<'_>,
         params: Params,
     ) -> Result<Self, SessionError> {
+        Self::with_lanes(role, config, params, 1)
+    }
+
+    /// A session declared by `params` that holds `runs` reassembly runs, at most [`MAX_RUNS_LIMIT`]. With 2
+    /// or more it offers the QoS unit extension on its INIT, and a peer that offers it too makes the
+    /// lanes hold ([`Self::lanes`]). With fewer it writes and reads the INIT of a session with one run.
+    pub fn with_lanes(
+        role: Role,
+        config: &Config<'_>,
+        params: Params,
+        runs: usize,
+    ) -> Result<Self, SessionError> {
+        if runs > MAX_RUNS_LIMIT {
+            return Err(SessionError::InvalidConfig);
+        }
         // The storage is exactly what the configuration declares: the peer's aliases, our own subscriptions
         // and the peer's, the key length and the events a batch yields. Smaller refuses what the limits
         // promise and larger leaves a bound that only the array enforces. A side that may declare none
@@ -471,7 +495,7 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize> SessionOf<K
             return Err(SessionError::InvalidConfig);
         }
         let mut scratch = [0u8; 2 * MAX_BATCH_BYTES];
-        encode::init_syn(&mut scratch, config.zid, params.announced)
+        encode::init_syn_qos(&mut scratch, config.zid, params.announced)
             .map_err(|_| SessionError::InvalidConfig)?;
         encode::open_ack(&mut scratch, config.lease_ms, config.initial_sn)
             .map_err(|_| SessionError::InvalidConfig)?;
@@ -482,7 +506,7 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize> SessionOf<K
             .ok_or(SessionError::InvalidConfig)?
             .copy_from_slice(config.zid);
         if role == Role::Listener {
-            encode::init_ack(&mut scratch, config.zid, params.announced, config.cookie)
+            encode::init_ack_qos(&mut scratch, config.zid, params.announced, config.cookie)
                 .map_err(|_| SessionError::InvalidConfig)?;
             cookie
                 .get_mut(..config.cookie.len())
@@ -506,12 +530,30 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize> SessionOf<K
             last_tx_ms: 0,
             now_ms: 0,
             peer_batch: usize::from(u16::MAX),
+            runs,
+            peer_qos: false,
             reassembly: Reassembly::new(params.timeout_ms, params.message_limit),
             aliases: SlotTable::new(),
             subs: SlotTable::new(),
             local_n: 0,
             remote_n: 0,
         })
+    }
+
+    /// Whether this side offers the QoS unit extension on its INIT: it holds 2 or more runs.
+    const fn offers_qos(&self) -> bool {
+        self.runs >= 2
+    }
+
+    /// The reassembly runs this side holds.
+    pub const fn runs(&self) -> usize {
+        self.runs
+    }
+
+    /// Whether both INITs carried the QoS unit extension. Only then may a peer select a priority, so a
+    /// side that offered nothing, or a peer that did not, has one lane.
+    pub const fn lanes(&self) -> bool {
+        self.offers_qos() && self.peer_qos
     }
 
     /// A graph session's check before it applies a FRAME: the session is open and `sn` is the next
@@ -734,7 +776,11 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize> SessionOf<K
         if self.role != Role::Connector || self.state != State::Idle {
             return Err(SessionError::UnexpectedMessage);
         }
-        let sent = encode::init_syn(out, self.own_zid()?, self.params.announced)?;
+        let sent = if self.offers_qos() {
+            encode::init_syn_qos(out, self.own_zid()?, self.params.announced)?
+        } else {
+            encode::init_syn(out, self.own_zid()?, self.params.announced)?
+        };
         self.state = State::AwaitInitAck;
         self.last_rx_ms = now_ms;
         self.last_tx_ms = now_ms;
@@ -773,7 +819,11 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize> SessionOf<K
             self.now_ms = now_ms;
             return Ok(outcome);
         }
-        let message = decode_batch_with(batch, &self.params.bounds)?;
+        let message = if self.offers_qos() {
+            decode_batch_qos(batch, &self.params.bounds)?
+        } else {
+            decode_batch_with(batch, &self.params.bounds)?
+        };
         self.on_message(message, now_ms, out)
     }
 
@@ -821,10 +871,15 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize> SessionOf<K
             return Err(SessionError::Closed);
         }
         let outcome = match message {
-            Message::InitSyn { batch_size, .. } => self.on_init_syn(batch_size, out)?,
+            Message::InitSyn {
+                batch_size, qos, ..
+            } => self.on_init_syn(batch_size, qos, out)?,
             Message::InitAck {
-                cookie, batch_size, ..
-            } => self.on_init_ack(cookie, batch_size, out)?,
+                cookie,
+                batch_size,
+                qos,
+                ..
+            } => self.on_init_ack(cookie, batch_size, qos, out)?,
             Message::OpenSyn {
                 lease_ms,
                 initial_sn,
@@ -849,23 +904,36 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize> SessionOf<K
     fn on_init_syn<'a>(
         &mut self,
         batch_size: u16,
+        qos: bool,
         out: &mut [u8],
     ) -> Result<Outcome<'a, E>, SessionError> {
         if self.role != Role::Listener || self.state != State::Idle {
             return Err(SessionError::UnexpectedMessage);
         }
-        let sent = encode::init_ack(
-            out,
-            self.own_zid()?,
-            self.params.announced,
-            self.own_cookie()?,
-        )?;
+        // The extension answers an offer. A listener that offers nothing, or a peer that offered nothing,
+        // gets the INIT_ACK a session with one run writes.
+        let sent = if self.offers_qos() && qos {
+            encode::init_ack_qos(
+                out,
+                self.own_zid()?,
+                self.params.announced,
+                self.own_cookie()?,
+            )?
+        } else {
+            encode::init_ack(
+                out,
+                self.own_zid()?,
+                self.params.announced,
+                self.own_cookie()?,
+            )?
+        };
         // The reply is a batch and cannot be fragmented: the peer must have said it accepts it, stream
         // length included.
         if sent + STREAM_LENGTH_BYTES > usize::from(batch_size) {
             return Err(SessionError::Decode(Refusal::LengthExceedsBatch));
         }
         self.peer_batch = usize::from(batch_size);
+        self.peer_qos = qos;
         self.state = State::AwaitOpenSyn;
         Ok(Outcome::sending(sent))
     }
@@ -874,6 +942,7 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize> SessionOf<K
         &mut self,
         cookie: &[u8],
         batch_size: u16,
+        qos: bool,
         out: &mut [u8],
     ) -> Result<Outcome<'a, E>, SessionError> {
         if self.role != Role::Connector || self.state != State::AwaitInitAck {
@@ -890,6 +959,7 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize> SessionOf<K
         slot.copy_from_slice(cookie);
         self.cookie_len = cookie.len();
         self.peer_batch = usize::from(batch_size);
+        self.peer_qos = qos;
         self.state = State::AwaitOpenAck;
         Ok(Outcome::sending(sent))
     }

@@ -222,7 +222,8 @@ fn listen_handshake() {
         decode_batch(&init_syn),
         Ok(Message::InitSyn {
             zid: &ZID_CONNECTOR,
-            batch_size: 512
+            batch_size: 512,
+            qos: false
         })
     );
     let (init_ack, _) = expect_recv(&mut b, &init_syn, 11);
@@ -231,6 +232,7 @@ fn listen_handshake() {
             zid,
             batch_size,
             cookie: sent,
+            ..
         }) => {
             assert_eq!(zid, ZID_LISTENER);
             assert_eq!(batch_size, 512);

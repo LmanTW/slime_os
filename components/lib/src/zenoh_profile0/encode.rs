@@ -7,11 +7,11 @@
 //! refused here with the matching class. Nothing allocates.
 
 use super::{
-    ATTACHMENT_GID_LEN_AT, Bounds, EXT_ATTACHMENT, EXT_WIRE_EXPR, FLAG_BIT5, FLAG_BIT6, FLAG_Z,
-    GID_BYTES, ID_CLOSE, ID_D_SUBSCRIBER, ID_DECLARE, ID_FRAME, ID_INIT, ID_KEEP_ALIVE, ID_OPEN,
-    ID_PUSH, ID_PUT, MAX_ATTACHMENT_BYTES, MAX_BATCH_BYTES, MAX_COOKIE_BYTES, Mapping, Refusal,
-    STREAM_LENGTH_BYTES, U_SUBSCRIBER_HEADER, WIRE_EXPR_FLAG_NAMED, WIRE_EXPR_FLAG_SENDER,
-    key_expression,
+    ATTACHMENT_GID_LEN_AT, Bounds, EXT_ATTACHMENT, EXT_QOS_UNIT, EXT_WIRE_EXPR, FLAG_BIT5,
+    FLAG_BIT6, FLAG_Z, GID_BYTES, ID_CLOSE, ID_D_SUBSCRIBER, ID_DECLARE, ID_FRAME, ID_INIT,
+    ID_KEEP_ALIVE, ID_OPEN, ID_PUSH, ID_PUT, MAX_ATTACHMENT_BYTES, MAX_BATCH_BYTES,
+    MAX_COOKIE_BYTES, Mapping, Refusal, STREAM_LENGTH_BYTES, U_SUBSCRIBER_HEADER,
+    WIRE_EXPR_FLAG_NAMED, WIRE_EXPR_FLAG_SENDER, key_expression,
 };
 use slime_proto::zenoh_profile as p;
 
@@ -163,6 +163,7 @@ fn init(
     zid: &[u8],
     batch_size: u16,
     cookie: Option<&[u8]>,
+    qos: bool,
 ) -> Result<usize, EncodeError> {
     let zid_code = check_zid(zid)?;
     if batch_size == 0 {
@@ -179,6 +180,9 @@ fn init(
     if sized {
         header |= FLAG_BIT6;
     }
+    if qos {
+        header |= FLAG_Z;
+    }
     let mut writer = Writer::new(out);
     writer.byte(header)?;
     writer.byte(VERSION)?;
@@ -191,13 +195,21 @@ fn init(
     if let Some(cookie) = cookie {
         writer.prefixed(cookie)?;
     }
+    if qos {
+        writer.byte(EXT_QOS_UNIT)?;
+    }
     Ok(writer.len)
 }
 
 /// INIT_SYN as a peer. A `batch_size` of `u16::MAX` is the default and is sent
 /// by omitting the size parameters.
 pub fn init_syn(out: &mut [u8], zid: &[u8], batch_size: u16) -> Result<usize, EncodeError> {
-    init(out, zid, batch_size, None)
+    init(out, zid, batch_size, None, false)
+}
+
+/// INIT_SYN that offers the QoS unit extension, one byte after the rest of the message.
+pub fn init_syn_qos(out: &mut [u8], zid: &[u8], batch_size: u16) -> Result<usize, EncodeError> {
+    init(out, zid, batch_size, None, true)
 }
 
 /// INIT_ACK as a peer, carrying the 1..=64 byte cookie.
@@ -207,7 +219,17 @@ pub fn init_ack(
     batch_size: u16,
     cookie: &[u8],
 ) -> Result<usize, EncodeError> {
-    init(out, zid, batch_size, Some(cookie))
+    init(out, zid, batch_size, Some(cookie), false)
+}
+
+/// INIT_ACK that accepts the peer's QoS offer, one byte after the rest of the message.
+pub fn init_ack_qos(
+    out: &mut [u8],
+    zid: &[u8],
+    batch_size: u16,
+    cookie: &[u8],
+) -> Result<usize, EncodeError> {
+    init(out, zid, batch_size, Some(cookie), true)
 }
 
 fn open(

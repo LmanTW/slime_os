@@ -128,3 +128,21 @@ fn the_margins_cover_the_state_a_run_and_the_lanes_hold() {
         LANE_COUNTER_BYTES
     );
 }
+
+#[test]
+fn a_link_with_several_runs_holds_its_batch_to_the_qos_init_ack() {
+    let batch = |runs: usize, bytes: usize| {
+        let mut base = HEAP;
+        base.batch_bytes = bytes;
+        base.key_bytes = 1;
+        exact(base, runs)
+    };
+    // 87 bytes for the largest INIT_ACK, one for the extension and two for the stream length.
+    assert_eq!(batch(2, 89).check(), Err(LimitsError::Batch));
+    assert_eq!(batch(2, 90).check(), Ok(()));
+    assert_eq!(batch(16, 89).check(), Err(LimitsError::Batch));
+    assert_eq!(batch(16, 90).check(), Ok(()));
+    // A link with one run writes no extension and keeps the version 1 floor.
+    assert_eq!(batch(1, 89).check(), Ok(()));
+    assert_eq!(batch(1, 88).check(), Err(LimitsError::Batch));
+}

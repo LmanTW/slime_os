@@ -261,11 +261,15 @@ pub enum Message<'a> {
     InitSyn {
         zid: &'a [u8],
         batch_size: u16,
+        /// The INIT carried the QoS unit extension: the peer offers priorities.
+        qos: bool,
     },
     InitAck {
         zid: &'a [u8],
         batch_size: u16,
         cookie: &'a [u8],
+        /// The INIT_ACK carried the QoS unit extension. Only a decoder asked for it takes one.
+        qos: bool,
     },
     OpenSyn {
         lease_ms: u64,
@@ -391,10 +395,20 @@ fn cookie<'a>(reader: &mut Reader<'a>) -> Result<&'a [u8], Refusal> {
     reader.take(length)
 }
 
-fn init<'a>(mut reader: Reader<'a>, header: u8, graph: bool) -> Result<Message<'a>, Refusal> {
+fn init<'a>(
+    mut reader: Reader<'a>,
+    header: u8,
+    graph: bool,
+    offers_qos: bool,
+) -> Result<Message<'a>, Refusal> {
     // An extension is refused before anything else is read, as it always was, except the QoS unit
-    // extension a stock peer puts on an INIT_SYN that states its resolution and batch size.
-    if header & FLAG_Z != 0 && (header & FLAG_BIT5 != 0 || header & FLAG_BIT6 == 0) {
+    // extension a stock peer puts on an INIT_SYN that states its resolution and batch size. A side that
+    // offers QoS also takes it on an INIT_ACK and on an INIT that keeps the default batch size, because
+    // upstream writes the size parameters only when they are not the default.
+    if header & FLAG_Z != 0
+        && !(offers_qos && !graph)
+        && (header & FLAG_BIT5 != 0 || header & FLAG_BIT6 == 0)
+    {
         return Err(Refusal::UnsupportedExtension);
     }
     if u32::from(reader.u8()?) != p::PROTOCOL_VERSION {
@@ -430,16 +444,21 @@ fn init<'a>(mut reader: Reader<'a>, header: u8, graph: bool) -> Result<Message<'
             return Err(Refusal::MalformedMessage);
         }
     }
+    let qos = header & FLAG_Z != 0;
     if header & FLAG_BIT5 != 0 {
         let cookie = cookie(&mut reader)?;
+        if qos {
+            init_qos_extension(&mut reader)?;
+        }
         reader.finish()?;
         Ok(Message::InitAck {
             zid,
             batch_size,
             cookie,
+            qos,
         })
     } else {
-        if header & FLAG_Z != 0 {
+        if qos {
             if graph {
                 graph::init_extensions(&mut reader)?;
             } else {
@@ -447,7 +466,11 @@ fn init<'a>(mut reader: Reader<'a>, header: u8, graph: bool) -> Result<Message<'
             }
         }
         reader.finish()?;
-        Ok(Message::InitSyn { zid, batch_size })
+        Ok(Message::InitSyn {
+            zid,
+            batch_size,
+            qos,
+        })
     }
 }
 
@@ -792,15 +815,24 @@ pub fn decode_batch(batch: &[u8]) -> Result<Message<'_>, Refusal> {
 
 /// Decodes one batch body under `bounds`.
 pub fn decode_batch_with<'a>(batch: &'a [u8], bounds: &Bounds) -> Result<Message<'a>, Refusal> {
-    decode_batch_in(batch, bounds, false)
+    decode_batch_in(batch, bounds, false, false)
+}
+
+/// Decodes one batch body for a side that offers the QoS unit extension on its own INIT. It differs from
+/// [`decode_batch_with`] in the INIT only: an INIT_SYN or an INIT_ACK may carry the extension, with or
+/// without the size parameters, and the message says so. Any other extension is refused as before.
+pub fn decode_batch_qos<'a>(batch: &'a [u8], bounds: &Bounds) -> Result<Message<'a>, Refusal> {
+    decode_batch_in(batch, bounds, false, true)
 }
 
 /// Decodes one batch body. `graph` is the one difference a graph session makes to a handshake message:
 /// the INIT extensions an rmw_zenoh peer sends. Its FRAMEs are read by [`graph::decode_graph_batch`].
+/// `qos` is the difference a side that offers QoS makes: the unit extension on either INIT.
 fn decode_batch_in<'a>(
     batch: &'a [u8],
     bounds: &Bounds,
     graph: bool,
+    qos: bool,
 ) -> Result<Message<'a>, Refusal> {
     if batch.is_empty() {
         return Err(Refusal::EmptyBatch);
@@ -811,7 +843,7 @@ fn decode_batch_in<'a>(
     let mut reader = Reader::new(batch);
     let header = reader.u8()?;
     match header & ID_MASK {
-        ID_INIT => init(reader, header, graph),
+        ID_INIT => init(reader, header, graph, qos),
         ID_OPEN => open(reader, header),
         ID_CLOSE => close(reader, header),
         ID_KEEP_ALIVE => keep_alive(reader, header),

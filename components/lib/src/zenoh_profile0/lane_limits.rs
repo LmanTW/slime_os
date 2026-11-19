@@ -5,7 +5,8 @@
 //! every version 1 configuration keeps its figures, and a [`LaneLimits`] with one run has the same stack and
 //! heap as its [`Limits`].
 
-use super::limits::{Limits, LimitsError, Mode};
+use super::STREAM_LENGTH_BYTES;
+use super::limits::{HANDSHAKE_BYTES, Limits, LimitsError, Mode};
 
 /// The most runs a link may hold: a lane is a priority (0 to 7) and a reliability, so a stock peer has at
 /// most 16 messages open.
@@ -14,6 +15,9 @@ pub const MAX_RUNS_LIMIT: usize = 16;
 pub const RUN_OVERHEAD_BYTES: u64 = 64;
 /// The sequence counters of the lanes, charged once for a link with several runs.
 pub const LANE_COUNTER_BYTES: u64 = 64;
+/// The QoS unit extension a link with several runs writes after its INIT: one byte, which makes its largest
+/// INIT_ACK 88 bytes and not 87.
+pub const QOS_OFFER_BYTES: usize = 1;
 
 /// A link configuration and the runs its heap holds open at once.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,6 +66,13 @@ impl LaneLimits {
         // Version 2 needs at least the stack and heap of version 1, so a declaration the version 1 rules
         // refuse for any other reason, or for too little of either, is refused here too.
         self.limits.check()?;
+        // An INIT cannot be fragmented, so the batch must carry the largest INIT_ACK the link writes, the
+        // extension and the stream length included.
+        if self.max_runs > 1
+            && self.limits.batch_bytes < HANDSHAKE_BYTES + STREAM_LENGTH_BYTES + QOS_OFFER_BYTES
+        {
+            return Err(LimitsError::Batch);
+        }
         if self.limits.stack_bytes < self.required_stack() {
             return Err(LimitsError::Stack);
         }
