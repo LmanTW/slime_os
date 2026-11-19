@@ -5,7 +5,7 @@ item :: s.Item = (h.task "01a1ef1a-ec52-74c8-8be6-505a372bdbc3" "zenoh-service-p
   "The peer of the Zenoh service composition subscribes, and each publication by alpha reaches it once"
   "The peer in `sel4-zenoh-service` declares no subscriber. A publication by `alpha` therefore reaches the holders and not the peer, and the service core reports the peer's copy as not subscribed. The booted gate prints `peer=none` for each publication. No gate shows a sample crossing the link to a peer that subscribes.")
   with {
-    intent = #planned;
+    intent = #active;
     owns = {
       "components/applications/zenoh-peer/**";
       "contracts/component-spec/v1/components/zenoh-peer.zti";

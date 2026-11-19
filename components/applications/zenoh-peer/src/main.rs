@@ -2,8 +2,8 @@
 #![no_main]
 
 //! The peer of the Zenoh service composition: a Zenoh Profile 0 listener that accepts the service's connection and
-//! completes the session. It declares no subscriber, so a publication the service sends is not delivered here, and it
-//! ends when the service closes the session.
+//! completes the session. It declares one subscriber on the exchange key once the session is open, prints one line for
+//! each sample the service sends, and ends when the service closes the session.
 
 use slime_components::network_io::{
     Connection as ServiceConnection, NetworkError, NetworkIo, NetworkNotifications, NetworkReply,
@@ -23,6 +23,9 @@ const RING_BASE: u64 = 0x0000_001c_0000_0000;
 const DATA_BASE: u64 = RING_BASE + 4096;
 const DEADLINE_MS: i64 = 30_000;
 const ZID: [u8; 8] = [0xd4; 8];
+/// The key the publisher holder may publish and the peer subscribes to.
+const KEY: &str = "0/slime_service/exchange";
+const SUBSCRIBER_ID: u32 = 1;
 
 /// One connection of the network service, driven without blocking.
 struct Wire<'a, 'b> {
@@ -108,6 +111,7 @@ fn main(_: u32) {
         let mut link = Link::new(Stream::new(wire), Role::Listener, &config, 1)
             .unwrap_or_else(|_| fail(b"session config"));
         let handle = link.handle();
+        let mut declared = false;
         loop {
             let now = clock.millis(monotonic_read().unwrap_or_else(|_| fail(b"clock read")));
             link.pump(handle, now as u64)
@@ -123,11 +127,31 @@ fn main(_: u32) {
                     Notice::Closed { .. } => ended = true,
                     // The service declares the subscription of its holder, and may undeclare it.
                     Notice::SubscriberDeclared { .. } | Notice::SubscriberUndeclared { .. } => {}
-                    // The peer declares nothing, so no sample is addressed to it.
-                    Notice::SampleDelivered(_) | Notice::SampleStored(_) => {
-                        fail(b"unexpected sample")
+                    Notice::SampleDelivered(sample) => {
+                        Line::<96>::new()
+                            .bytes(b"[zenoh-peer] received sequence=")
+                            .signed(sample.sequence)
+                            .bytes(b" len=")
+                            .decimal(sample.len as u64)
+                            .bytes(b" first=")
+                            .decimal(u64::from(sample.payload().first().copied().unwrap_or(0)))
+                            .bytes(b"\n")
+                            .emit();
                     }
+                    // The link never reassembles, so a joined sample is not addressed to this peer.
+                    Notice::SampleStored(_) => fail(b"unexpected stored sample"),
                 }
+            }
+            // The declaration waits for a free send slot, and the service's own declaration may hold it first.
+            if link.is_open() && !declared && !link.send_pending() {
+                link.declare_subscriber(handle, SUBSCRIBER_ID, KEY)
+                    .unwrap_or_else(|_| fail(b"declare subscriber"));
+                declared = true;
+                Line::<96>::new()
+                    .bytes(b"[zenoh-peer] declared subscriber key=")
+                    .bytes(KEY.as_bytes())
+                    .bytes(b"\n")
+                    .emit();
             }
             if ended {
                 break;
