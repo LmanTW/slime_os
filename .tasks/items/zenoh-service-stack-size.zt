@@ -5,7 +5,7 @@ item :: s.Item = (h.task "01a1ef67-2110-75db-a6f7-3d5b5addb0f8" "zenoh-service-s
   "The stack the Zenoh service needs at a stated size is measured, and the declared stack covers it"
   "The Zenoh service component is built for 2 holders and 2 rows, with a declared stack of 32768 bytes. The grants contract counts the core's arrays only. Nobody has measured the link, the tables in the main frame or the call path, at the built size or at a larger one.")
   with {
-    intent = #planned;
+    intent = #active;
     owns = {
       "components/lib/src/zenoh_service_stack*";
       "components/lib/src/lib.rs";
