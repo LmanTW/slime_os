@@ -75,7 +75,7 @@ item :: s.Item = (h.task "01a1ee8a-6ef8-73ab-8725-b6c0481587c3" "zenoh-fragment-
         h.agentDefault
         { "drops-what-best-effort-loses"; };
       h.decided "a-run-belongs-to-one-lane"
-        "A link holds one run for each of its `maxRuns`, and a lane opens a run on its first fragment. A lane with a run open refuses a FRAME."
+        "A link holds one run for each of its `maxRuns`, and a lane opens a run on its first fragment. A reliable lane with a run open refuses a FRAME. A best-effort FRAME there drops the run and is delivered."
         "upstream keeps one defragmentation buffer for each priority and reliability pair. The session cannot order a whole frame ahead of an open run on its lane"
         h.agentDefault
         { "joins-runs-by-lane"; "refuses-what-it-must"; };
