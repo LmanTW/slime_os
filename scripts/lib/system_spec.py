@@ -76,100 +76,19 @@ COMPUTED_SYSTEM_SOURCES = {
 _SOURCE_TOOL = ROOT / "scripts" / "tools" / "system-spec-source" / "Cargo.toml"
 _SOURCE_TARGET = ROOT / "build" / "system-spec-source-target"
 
-# Which committed `contracts/generation-manifest/v1` fixture each system spec derives.
-#
-# An explicit table rather than a glob makes "which fixtures are generated" a
-# stated fact and a system spec that derives nothing a gate failure rather
-# than a silent no-op. Every composition manifest is derived. Both the gate
-# and the generator read the map from here.
-DERIVED_GENERATION_FIXTURES = {
-    "reference": "valid.zti",
-    "sel4": "sel4.zti",
-    "sel4-boot": "sel4-boot.zti",
-    "sel4-call": "sel4-call.zti",
-    "sel4-channel": "sel4-channel.zti",
-    "sel4-large-image": "sel4-large-image.zti",
-    "sel4-clock-authority": "sel4-clock-authority.zti",
-    "sel4-crossing": "sel4-crossing.zti",
-    "sel4-demo": "sel4-demo.zti",
-    "sel4-entropy": "sel4-entropy.zti",
-    "sel4-directory": "sel4-directory.zti",
-    "sel4-filesystem": "sel4-filesystem.zti",
-    "sel4-generation": "sel4-generation.zti",
-    "sel4-input": "sel4-input.zti",
-    "sel4-http": "sel4-http.zti",
-    "sel4-http-public": "sel4-http-public.zti",
-    "sel4-io-block": "sel4-io-block.zti",
-    "sel4-io-driver-authority": "sel4-io-driver-authority.zti",
-    "sel4-io-link": "sel4-io-link.zti",
-    "sel4-io-network": "sel4-io-network.zti",
-    "sel4-io-tcp": "sel4-io-tcp.zti",
-    "sel4-io-tcp-buffers": "sel4-io-tcp-buffers.zti",
-    "sel4-io-tcp-impairment": "sel4-io-tcp-impairment.zti",
-    "sel4-io-tcp-listener": "sel4-io-tcp-listener.zti",
-    "sel4-io-tcp-options": "sel4-io-tcp-options.zti",
-    "sel4-io-local": "sel4-io-local.zti",
-    "sel4-io-lifetime": "sel4-io-lifetime.zti",
-    "sel4-io-service-fault": "sel4-io-service-fault.zti",
-    "sel4-io-driver-reset": "sel4-io-driver-reset.zti",
-    "sel4-io-queue": "sel4-io-queue.zti",
-    "sel4-lifecycle-restart": "sel4-lifecycle-restart.zti",
-    "sel4-lifetime": "sel4-lifetime.zti",
-    "sel4-lifetime-exit": "sel4-lifetime-exit.zti",
-    "sel4-net": "sel4-net.zti",
-    "sel4-zenoh": "sel4-zenoh.zti",
-    "sel4-zenoh-external": "sel4-zenoh-external.zti",
-    "sel4-zenoh-service": "sel4-zenoh-service.zti",
-    "sel4-loan": "sel4-loan.zti",
-    "sel4-mavlink": "sel4-mavlink.zti",
-    "sel4-operation": "sel4-operation.zti",
-    "sel4-powerbox": "sel4-powerbox.zti",
-    "sel4-private-memory": "sel4-private-memory.zti",
-    # MEM-ADAPTIVE's declared-policy compositions. The `-rv64` row is a separate
-    # spec for the same reason every other private-memory plane's is: a closure's
-    # platform follows its system spec's `targetRequirement`, and a spec declares
-    # exactly one. `-overcommit` is a negative control that must never boot a
-    # graph — it declares a simultaneous guarantee no reference machine can fund,
-    # so admission has to fail closed before publication.
-    "sel4-private-memory-adaptive": "sel4-private-memory-adaptive.zti",
-    "sel4-private-memory-adaptive-rv64": "sel4-private-memory-adaptive-rv64.zti",
-    "sel4-private-memory-adaptive-overcommit": "sel4-private-memory-adaptive-overcommit.zti",
-    # The inventory matrix: one pool-relative policy, booted unchanged against
-    # every pinned kernel-visible RAM row by `private_memory_matrix_check`.
-    "sel4-private-memory-matrix": "sel4-private-memory-matrix.zti",
-    "sel4-private-memory-matrix-rv64": "sel4-private-memory-matrix-rv64.zti",
-    "sel4-private-memory-cycles": "sel4-private-memory-cycles.zti",
-    "sel4-private-memory-1g": "sel4-private-memory-1g.zti",
-    "sel4-private-memory-isolation": "sel4-private-memory-isolation.zti",
-    "sel4-private-memory-stress": "sel4-private-memory-stress.zti",
-    "sel4-private-memory-stress-rv64": "sel4-private-memory-stress-rv64.zti",
-    "sel4-private-memory-heap-stress": "sel4-private-memory-heap-stress.zti",
-    "sel4-private-memory-heap-stress-rv64": "sel4-private-memory-heap-stress-rv64.zti",
-    "sel4-pwm": "sel4-pwm.zti",
-    "sel4-qos": "sel4-qos.zti",
-    "sel4-reclamation": "sel4-reclamation.zti",
-    "sel4-recovery": "sel4-recovery.zti",
-    "sel4-replay": "sel4-replay.zti",
-    "sel4-robot-runtime": "sel4-robot-runtime.zti",
-    "sel4-rollback": "sel4-rollback.zti",
-    "sel4-sample": "sel4-sample.zti",
-    "sel4-scheduling-class": "sel4-scheduling-class.zti",
-    "sel4-slisp": "sel4-slisp.zti",
-    "sel4-spawn": "sel4-spawn.zti",
-    "sel4-storage": "sel4-storage.zti",
-    "sel4-store": "sel4-store.zti",
-    "sel4-data-volume": "sel4-data-volume.zti",
-    "sel4-lidar-external": "sel4-lidar-external.zti",
-    "sel4-stream": "sel4-stream.zti",
-    "sel4-c-runtime": "sel4-c-runtime.zti",
-    "sel4-matrix": "sel4-matrix.zti",
-    "sel4-stress": "sel4-stress.zti",
-    "sel4-supervision": "sel4-supervision.zti",
-    "sel4-traffic": "sel4-traffic.zti",
-    "sel4-transfer": "sel4-transfer.zti",
-    "sel4-visibility": "sel4-visibility.zti",
-    "sel4-wait-set": "sel4-wait-set.zti",
-}
+# Which committed `contracts/generation-manifest/v1` fixture each system spec derives. Every system spec derives
+# `<name>.zti`, except the reference generation, which derives `valid.zti`. The directory is the table, so a
+# composition adds its spec and nothing here, and a spec with no manifest fails the generator's `--check`.
+# Both the gate and the generator read the map from here.
+def _derived_generation_fixtures() -> dict[str, str]:
+    """The system specs in `systems/`, each with the manifest it derives."""
+    found = {path.stem: f"{path.stem}.zti" for path in sorted(SYSTEM_ROOT.glob("*.zti"))}
+    found["reference"] = "valid.zti"
+    return found
+
+
+DERIVED_GENERATION_FIXTURES = _derived_generation_fixtures()
+
 
 def derived_manifest_path(fixture: str) -> Path:
     """Where a derived manifest is committed.

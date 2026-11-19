@@ -228,42 +228,15 @@ def _decode(path: Path, label: str) -> dict:
     return json.loads(process.stdout)
 
 
-# These compositions were authored as system specs, not migrated from a
-# hand-authored manifest. Their contracts and derived-byte drift remain checked.
-SPEC_NATIVE_SYSTEMS = frozenset({
-    "sel4-data-volume",
-    "sel4-lidar-external",
-    "sel4-entropy",
-    "sel4-http",
-    "sel4-http-public",
-    "sel4-io-local",
-    "sel4-io-lifetime",
-    "sel4-io-service-fault",
-    "sel4-io-driver-reset",
-    "sel4-io-tcp-impairment",
-    "sel4-io-tcp-buffers",
-    "sel4-io-tcp-listener",
-    "sel4-io-tcp-options",
-    "sel4-large-image",
-    "sel4-lifetime",
-    "sel4-lifetime-exit",
-    "sel4-net",
-    "sel4-zenoh",
-    "sel4-zenoh-external",
-    "sel4-zenoh-service",
-    "sel4-private-memory-stress",
-    "sel4-private-memory-stress-rv64",
-    "sel4-private-memory-heap-stress",
-    "sel4-private-memory-heap-stress-rv64",
-    # MEM-ADAPTIVE's three compositions. They declare `privateMemoryPolicy`,
-    # which no pre-CP1 hand-authored manifest could express at all, so there is
-    # nothing for a frozen baseline to have been migrated from.
-    "sel4-private-memory-adaptive",
-    "sel4-private-memory-adaptive-rv64",
-    "sel4-private-memory-adaptive-overcommit",
-    "sel4-private-memory-matrix",
-    "sel4-private-memory-matrix-rv64",
-})
+def _spec_native_systems() -> frozenset[str]:
+    """The compositions authored as system specs, not migrated from a hand-authored manifest. Their contracts and
+    derived-byte drift remain checked. The inventory states which they are with `state = "specNative"`, so a new
+    composition marks itself there and no list in this file changes. Any other composition has a frozen baseline."""
+    inventory = _decode(ROOT / "contracts" / "composition-inventory" / "v1" / "inventory.zti", "composition inventory")
+    return frozenset(entry["composition"] for entry in inventory["entries"] if entry["state"] == "specNative")
+
+
+SPEC_NATIVE_SYSTEMS = _spec_native_systems()
 
 
 def load_baseline(name: str) -> dict:
