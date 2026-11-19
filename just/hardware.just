@@ -515,3 +515,13 @@ duo_serial_monitor serial timeout="120":
 [group('hardware')]
 duo_gate_control_check:
     python3 scripts/check/check-duo-gate-control.py
+
+# Judges the composition that runs the rmw_zenoh node and its native peer, and boots it. The judge requires the system
+# spec, the manifest derived from it, the composition inventory row, the test-run record and the arm of the network plane
+# checker, and then runs that arm under QEMU. The arm requires each component to publish and receive the sequence numbers
+# 1 to 4 and the node to close the session once the exchange is done. The expectation is scripts/lib/zenoh_rmw_arm.py and
+# the marker chains in scripts/check/check-sel4-io-network-plane.py. The recipe is in no aggregate. It fails until the
+# composition lands.
+[group('hardware')]
+zenoh_rmw_booted_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice rmw-booted

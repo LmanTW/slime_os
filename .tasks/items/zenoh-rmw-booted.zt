@@ -1,0 +1,72 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a1ee87-954c-76f6-9700-b117aabc1863" "zenoh-rmw-booted" "zenoh-transport"
+  "A seL4 composition boots the rmw_zenoh node and its native peer, and each publishes and receives four samples before the session closes"
+  "The node and the peer are judged by file facts and by the data link's exam, and nothing runs them together. Two defects reached `main` because of that. A peer built as a listener passed every fact. A pair in which neither side closed the session exchanged all eight samples and then idled to the deadline. A host probe of the two loops found both. No file fact or type check could. Only a boot that judges how the exchange ends can pin the pair. The service composition shows the form. It has a system spec, a derived manifest, an inventory row and a test-run record. It also has an arm of the network plane checker with marker chains.")
+  with {
+    owns = {
+      "contracts/system-spec/v1/systems/sel4-zenoh-rmw.zti";
+      "contracts/generation-manifest/v1/compositions/sel4-zenoh-rmw.zti";
+      "contracts/system-image-closure/v3/closures/sel4-zenoh-rmw.zti";
+      "contracts/system-test-run/v2/runs/sel4-zenoh-rmw.zti";
+      "contracts/composition-inventory/v1/inventory.zti";
+      "scripts/generate/generate-system-test-runs.py";
+    };
+    depends = { "01a1edfd-96f2-7589-8f0b-7a85ca6778e6"; };
+    nonGoals = {
+      h.nonGoal "Changing the node, the peer or any library file. This item boots them as they are on `main`." h.agentDefault;
+      h.nonGoal "A live rmw_zenoh peer, a router, a liveliness token or a NIC. Both components run over the network service's loopback backend." h.agentDefault;
+      h.nonGoal "A Zenoh service, a grants table or a limits record. Neither component uses them, so the spec declares none." h.agentDefault;
+      h.nonGoal "The sizes of the node's or the peer's buffers. The spec grants the network service's defaults, as the service composition does." h.agentDefault;
+      h.nonGoal "A second boot, a malformed batch or a stalled link. One boot is the evidence." h.agentDefault;
+      h.nonGoal "A frozen boot layout for the composition. `check-sel4-boot-layout.py` freezes 36 of the 77 compositions, and its row needs a closure and a recorded fixture that exist only after the composition lands." h.agentDefault;
+    };
+    requirements = {
+      h.req "the-composition-exists"
+        "A system spec `sel4-zenoh-rmw` of generation 173 runs `init`, `network-service`, `zenoh-rmw-node` and `zenoh-rmw-peer`. The node listens on 127.0.0.1:7447, and the peer connects to it. The manifest derived from the spec, the closure source, the test-run record and an inventory row owned by `zenoh_rmw_booted_check` exist."
+        { "zenoh_rmw_booted_check"; };
+      h.req "each-component-completes-the-exchange"
+        "The node and the peer each print `published sequence=` and `received sequence=` for 1 to 4 once each in order, each after its own `subscription declared`. The peer prints `session open` before it declares."
+        { "zenoh_rmw_booted_check"; };
+      h.req "the-session-closes-after-the-exchange"
+        "The node prints `session closing` only after its fourth publication and its fourth reception. Each component ends with `session closed` and prints nothing after it. Neither prints a `fail:` line."
+        { "zenoh_rmw_booted_check"; };
+      h.req "no-order-across-components"
+        "The judge accepts the honest transcript in four interleavings of the two components' lines and orders each component's lines against its own only."
+        { "zenoh_rmw_booted_check"; };
+      h.req "controls-are-refused"
+        "The judge refuses 64 corrupted inputs before it boots: 16 synthetic file sets, one for each fact, and 48 mutated transcripts."
+        { "zenoh_rmw_booted_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_rmw_booted_check" {
+        h.count "casesObserved" 17;
+        h.count "negativeControlsRefused" 64;
+      };
+    };
+    decisions = {
+      h.decided "no-boot-layout-row"
+        "The composition gets no row in the plane table of `check-sel4-boot-layout.py`. A later item may add one with a recorded fixture."
+        "that table is a grader that `sel4_large_image_check` runs, and a row with no closure makes the gate fail before the composition lands"
+        h.agentDefault
+        { "the-composition-exists"; };
+      h.decided "chains-order-each-component-against-itself"
+        "The marker chains hold the node's lines in one chain and the peer's in another. No chain orders a line of one against a line of the other."
+        "the boot plane gate held lines of separate tasks to one order and failed 2 of 10 boots on it"
+        h.agentDefault
+        { "no-order-across-components"; };
+      h.decided "the-boot-must-see-the-end"
+        "A transcript is accepted only when each component printed its close and the node closed after the exchange was done. A transcript that shows the exchange begin is refused."
+        "the two defects found in the pair would each have passed a judge that saw only the start"
+        h.agentDefault
+        { "the-session-closes-after-the-exchange"; "each-component-completes-the-exchange"; };
+      h.decided "no-grants-table"
+        "The spec declares no Zenoh grants and no limits record."
+        "neither component reads the grants table, and a service composition's grants serve holders that this pair does not have"
+        h.agentDefault
+        { "the-composition-exists"; };
+    };
+  };
+
+item
