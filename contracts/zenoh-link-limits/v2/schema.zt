@@ -73,6 +73,10 @@ streamLengthBytes :: Int = 2;
 -- sequence number and a 64-byte cookie is 76.
 handshakeBytes :: Int = 87;
 
+-- A link with several runs offers the QoS unit extension on its INIT, one byte after the rest of it, so its
+-- largest INIT_ACK is 88 bytes. `zenoh-codec` 1.0.0 writes 87 without the extension and 88 with it.
+qosOfferBytes :: Int = 1;
+
 -- A link sends a key declaration whole, in one FRAME, and does not fragment it. The longest
 -- declaration the host encoder writes is an UNDECLARE_SUBSCRIBER whose extension body is the key
 -- behind two bytes. Around that body it adds a header, a four-byte id, the extension tag and the
@@ -213,6 +217,9 @@ noticeBytes :: Config -> Int
 
 -- The lane state of a link with several runs. It is evaluated only for a run count `commonOk` has bounded, so
 -- the product cannot overflow the contract's 63-bit integers.
+offerBytes :: Config -> Int
+  = c => if c.maxRuns > 1 then qosOfferBytes else 0;
+
 laneBytes :: Config -> Int
   = c => if c.maxRuns > 1 then (c.maxRuns - 1) * runOverheadBytes + laneCounterBytes else 0;
 
@@ -222,7 +229,7 @@ requiredStack :: Config -> Int
 
 commonOk :: Config -> Bool
   = c => t.length c.name >= 1 && t.length c.name <= 16
-    && c.batchBytes >= handshakeBytes + streamLengthBytes && c.batchBytes <= dataBytes
+    && c.batchBytes >= handshakeBytes + streamLengthBytes + offerBytes c && c.batchBytes <= dataBytes
     && c.payloadBytes >= 1 && c.payloadBytes <= maxPayloadLengthBytes && c.keyBytes >= 1 && c.keyBytes <= maxKeyLengthBytes
     && declarationBytes c <= c.batchBytes
     && c.attachmentBytes == requiredAttachmentBytes
@@ -305,6 +312,7 @@ decodeLimits :: Data -> Validation DecodeIssue Limits
   dataBytes =;
   streamLengthBytes =;
   handshakeBytes =;
+  qosOfferBytes =;
   declarationFixedBytes =;
   lebBytes =;
   declarationBytes =;
@@ -324,6 +332,7 @@ decodeLimits :: Data -> Validation DecodeIssue Limits
   maxRunsLimit =;
   runOverheadBytes =;
   laneBytes =;
+  offerBytes =;
   laneCounterBytes =;
   messageBytes =;
   heapNeeded =;
