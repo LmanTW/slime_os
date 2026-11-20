@@ -5,6 +5,7 @@ item :: s.Item = (h.bug "01a1f66e-b75c-71e3-9db1-612245371711" "zenoh-lost-holde
   "A holder that settled gets a denial on its control endpoint, and does not block"
   "The Zenoh service stores each holder's control endpoint in `ends` and reads only the holders that have an entry. A detach and `reclaim` both clear the entry, so the service stops reading that endpoint. A live holder that expired, or one that detached and then sends, calls on an endpoint that no one answers, and the call blocks. The last holder to settle still gets no answer, because `serve` returns once the roster is done. `Server` already answers such a request as denied, and the host tests grade that answer. The component never sends it.")
   with {
+    intent = #active;
     owns = {
       "components/services/zenoh-service/**";
     };

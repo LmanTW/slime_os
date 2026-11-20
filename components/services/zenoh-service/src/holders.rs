@@ -202,11 +202,11 @@ fn supervision(holder: &[u8]) -> Option<u32> {
     slime_rt::resolve_binding(&name[..end]).ok()
 }
 
-/// Ends a lost holder's session, refuses the holder every later request, and says why.
+/// Ends a lost holder's session, refuses the holder every later request, and says why. The holder's endpoints stay, so the
+/// loop keeps reading its control endpoint and answers each request with the denial `Server` gives.
 fn reclaim(
     server: &mut Server<{ crate::HOLDERS }>,
     session: &mut Option<Session>,
-    end: &mut Option<Endpoints>,
     index: usize,
     name: &[u8],
     cause: &[u8],
@@ -217,7 +217,6 @@ fn reclaim(
     {
         fail(b"session release");
     }
-    *end = None;
     Line::<128>::new()
         .bytes(b"[zenoh-service] holder reclaimed holder=")
         .bytes(name)
@@ -284,14 +283,7 @@ pub fn serve<'k>(
                     Ok(Some(_)) => {
                         supervised[index] = None;
                         if roster.death(index) != Death::Ignored {
-                            reclaim(
-                                server,
-                                &mut sessions[index],
-                                &mut ends[index],
-                                index,
-                                name,
-                                b"dead",
-                            );
+                            reclaim(server, &mut sessions[index], index, name, b"dead");
                         }
                     }
                     Ok(None) => {}
@@ -303,14 +295,7 @@ pub fn serve<'k>(
         for index in 0..names.count {
             if expired[index] {
                 let name = &names.bytes[index][..names.lens[index]];
-                reclaim(
-                    server,
-                    &mut sessions[index],
-                    &mut ends[index],
-                    index,
-                    name,
-                    b"expired",
-                );
+                reclaim(server, &mut sessions[index], index, name, b"expired");
             }
         }
         for index in 0..names.count {
@@ -350,7 +335,6 @@ pub fn serve<'k>(
                         if !session.close() {
                             fail(b"session release");
                         }
-                        ends[index] = None;
                         roster.detach(index);
                         say(name, b"detached");
                     }
