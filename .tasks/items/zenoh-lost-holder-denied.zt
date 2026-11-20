@@ -3,37 +3,37 @@ h ::= import "./helpers.zt";
 
 item :: s.Item = (h.bug "01a1f66e-b75c-71e3-9db1-612245371711" "zenoh-lost-holder-denied" "zenoh-service-core"
   "A holder that settled gets a denial on its control endpoint, and does not block"
-  "The Zenoh service stores each holder's control endpoint in `ends` and reads only the holders that have an entry. A detach and `reclaim` both clear the entry, so the service stops reading that endpoint. A live holder that expired, or one that detached and then sends, calls on an endpoint that no one answers, and the call blocks. `Server` already answers such a request as denied, and the host tests grade that answer. The component never sends it.")
+  "The Zenoh service stores each holder's control endpoint in `ends` and reads only the holders that have an entry. A detach and `reclaim` both clear the entry, so the service stops reading that endpoint. A live holder that expired, or one that detached and then sends, calls on an endpoint that no one answers, and the call blocks. The last holder to settle still gets no answer, because `serve` returns once the roster is done. `Server` already answers such a request as denied, and the host tests grade that answer. The component never sends it.")
   with {
     owns = {
       "components/services/zenoh-service/**";
     };
     nonGoals = {
-      h.nonGoal "A boot in which a holder sends after it settled. The composition has no supervision binding for a holder, so no run reaches `reclaim` through a death, and a run that expires a holder needs a holder that outlives 30000 ms. A later item owns that boot." h.agentDefault;
+      h.nonGoal "A boot in which a holder sends after it settled. The composition has no supervision binding for a holder, so no run reaches `reclaim` through a death. A run that expires a holder needs a holder that outlives 30000 ms. A later item owns that boot." h.agentDefault;
       h.nonGoal "The answer itself. `Server::control` and `Server::request` already refuse a settled holder, and the roster test grades them. This item keeps the component reading so that the answer is sent." h.agentDefault;
       h.nonGoal "Releasing a settled holder's loans, ring and data page. `Session::close` does that and stays as it is." h.agentDefault;
       h.nonGoal "The wait, the supervision polling and the roster. They stay as merged." h.agentDefault;
     };
     requirements = {
       h.req "the-detach-path-keeps-the-endpoint"
-        "After a holder detaches, the component keeps its entry in `ends`. The line `ends[index] = None;` is gone from `holders.rs`."
+        "After a holder detaches, the component keeps its entry in `ends`. The statement `ends[index] = None;` is gone from the code of `holders.rs`."
         { "zenoh_service_lost_holder_check"; };
       h.req "reclaim-keeps-the-endpoint"
-        "After `reclaim` closes a holder's session, the component keeps its entry in `ends`. The line `*end = None;` is gone from `holders.rs`."
+        "After `reclaim` closes a holder's session, the component keeps its entry in `ends`. The statement `*end = None;` is gone from the code of `holders.rs`."
         { "zenoh_service_lost_holder_check"; };
       h.req "the-judge-is-held-to-its-facts"
-        "The judge refuses 7 files. Two put one of the lines back in the loop. Two add one of them with another indent. Two put one of them above `reclaim`. One counts a comment that holds a line. It counts no comment."
+        "The judge refuses 10 files. Each of the two statements is put back in five places: alone in the loop, with a tab indent, after other code on a line, before other code on a line, and with its spaces changed. It counts no statement inside a comment."
         { "zenoh_service_lost_holder_check"; };
     };
     acceptance = {
       h.observedWhere "zenoh_service_lost_holder_check" {
         h.count "casesObserved" 2;
-        h.count "negativeControlsRefused" 7;
+        h.count "negativeControlsRefused" 10;
       };
     };
     decisions = {
       h.decided "grade-the-absence-of-the-clearing-lines"
-        "The judge reads `holders.rs` and requires two lines to be absent. It does not show what the component answers."
+        "The judge reads `holders.rs` and requires two statements to be absent from its code. It does not show what the component answers."
         "the component has no host test, because its crate is a binary that links the runtime. The answer is already graded on `Server`. What is missing is only that the loop reads the endpoint, and the two lines that stop it are the whole cause"
         h.agentDefault
         { "the-detach-path-keeps-the-endpoint"; "reclaim-keeps-the-endpoint"; };

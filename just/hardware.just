@@ -336,8 +336,8 @@ zenoh_service_holder_fault_check:
 
 # Judges that the Zenoh service keeps reading the control endpoint of a holder that settled, so the holder gets the
 # denial that the server half already answers and does not block. The judge reads the component's holders.rs and
-# requires two lines to be absent: the one that clears the endpoint after a detach, and the one in reclaim. It refuses
-# seven files. The expectation is scripts/lib/zenoh_lost_holder_exam.py. Nothing here boots QEMU. The recipe fails until
+# requires two statements to be absent from its code: the one that clears the endpoint after a detach, and the one in
+# reclaim. It refuses ten files. The expectation is scripts/lib/zenoh_lost_holder_exam.py. Nothing here boots QEMU. The recipe fails until
 # the implementation removes the two lines. A boot in which a settled holder sends is not graded.
 [group('hardware')]
 zenoh_service_lost_holder_check:
