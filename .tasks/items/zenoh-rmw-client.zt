@@ -28,16 +28,16 @@ item :: s.Item = (h.task "01a1f66e-957a-70f7-b2b6-4a9c500c5c27" "zenoh-rmw-clien
         "A connector with no client role writes the peer form and refuses an INIT_ACK of `whatami` 0 as `unsupported-whatami`. Its written bytes equal what it wrote before."
         { "zenoh_rmw_client_check"; "zenoh_session_check"; "zenoh_stock_check"; };
       h.req "client-refuses-what-it-must"
-        "A client refuses an INIT_ACK of `whatami` 1 or 2 as `unsupported-whatami`. A listener built as a client is `invalid-config`. A refused batch changes no state."
+        "A client refuses an INIT_ACK of `whatami` 1 or 2 as `unsupported-whatami`. A listener built as a client is `invalid-config`. A refused batch leaves the connector awaiting its INIT_ACK, and the transcript prints that state."
         { "zenoh_rmw_client_check"; };
       h.req "controls-are-refused"
-        "The judge refuses 44 corrupted records before it judges the real run: 36 mutated transcripts and 8 corrupted captures."
+        "The judge refuses 52 corrupted records before it judges the real run: 44 mutated transcripts and 8 corrupted captures."
         { "zenoh_rmw_client_check"; };
     };
     acceptance = {
       h.observedWhere "zenoh_rmw_client_check" {
-        h.count "casesObserved" 11;
-        h.count "negativeControlsRefused" 44;
+        h.count "casesObserved" 13;
+        h.count "negativeControlsRefused" 52;
       };
       h.observed "zenoh_session_check";
       h.observed "zenoh_stock_check";

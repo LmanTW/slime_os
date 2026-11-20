@@ -127,6 +127,7 @@ import zenoh_rmw_component_exam
 import zenoh_rmw_peer_component_exam
 import zenoh_rmw_data_exam
 import zenoh_rmw_client_exam
+import zenoh_rmw_router
 import zenoh_rmw_data_link_exam
 import zenoh_rmw_link_exam
 import zenoh_lanes_exam
@@ -2189,7 +2190,9 @@ def exam_lines_client(output: str) -> list[str]:
 
 
 def run_rmw_client() -> list[str]:
-    stdout, output = cargo_tests((RMW_CLIENT_FILTER,), {**_os.environ})
+    # The captures reach the Rust test only through this variable, one run to a line: name, INIT_SYN, INIT_ACK, OPEN_ACK.
+    environment = {**_os.environ, "ZENOH_RMW_ROUTER_RUNS": "\n".join(" ".join(run) for run in zenoh_rmw_router.RUNS)}
+    stdout, output = cargo_tests((RMW_CLIENT_FILTER,), environment)
     passed = tests_passed(output)
     missing = [name for name in RMW_CLIENT_TESTS if name not in passed]
     if missing:

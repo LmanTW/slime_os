@@ -13,7 +13,9 @@ Rust must print it, line for line:
 * the OPEN_SYN it wrote on the router's INIT_ACK, which echoes the cookie, and that the session is open after
   the router's OPEN_ACK;
 * the INIT_SYN a connector with no client role writes, which equals what it wrote before this item;
-* four refusals, each with the class it is refused as and the bytes the session had written.
+* the captured bytes the test was given, one line for each run, so the transcript binds what the Rust fed;
+* four refusals, each with the class it is refused as, the state the session was left in and the bytes it had
+  written. A refused batch changes no state, so a connector that refused an INIT_ACK is still awaiting one.
 
 The captured OPEN_SYN is not a fixture, because the router did not write it. Like the other judges, this one is
 trusted only after it refuses a mutation of an honest transcript.
@@ -105,6 +107,13 @@ def check_runs() -> None:
     _need(router.RUNS[0][2] != router.RUNS[1][2], "the two runs carry the same cookie")
 
 
+def refusal_state(name: str) -> str:
+    """The state a refusal leaves: a connector that had written its INIT_SYN is still waiting for an INIT_ACK, and a
+    client built as a listener has no session."""
+    _need(name in {n for n, _ in REFUSALS}, f"no refusal named {name}")
+    return "none" if name == "client-as-a-listener" else "await-init-ack"
+
+
 def refusal_written(name: str) -> bytes:
     """What the session had written when it refused: its INIT_SYN, in the form its configuration gives, or nothing."""
     if name == "default-session-takes-a-router-ack":
@@ -121,13 +130,14 @@ def refusal_written(name: str) -> bytes:
 def good_lines() -> list[str]:
     check_runs()
     lines: list[str] = []
-    for name, _syn, ack, _open in router.RUNS:
+    for name, _syn, ack, open_ack in router.RUNS:
+        lines.append(f"client fed {name} {ack} {open_ack}")
         lines.append(f"client syn {name} {hexed(client_syn())}")
         lines.append(f"client open-syn {name} {hexed(open_syn(bytes.fromhex(ack)))}")
         lines.append(f"client opened {name} state=open")
     lines.append(f"client default-syn {hexed(peer_syn())}")
     for name, cls in REFUSALS:
-        lines.append(f"client refused {name} {cls} {hexed(refusal_written(name))}")
+        lines.append(f"client refused {name} {cls} state={refusal_state(name)} {hexed(refusal_written(name))}")
     return lines
 
 
@@ -170,7 +180,7 @@ def reference_controls() -> int:
             try:
                 check_runs()
             except (ClientExamError, IndexError, ValueError) as error:
-                _need(reason in str(error) or not isinstance(error, ClientExamError), f"control: {label} was refused for another reason: {error}")
+                _need(isinstance(error, ClientExamError) and reason in str(error), f"control: {label} was refused for another reason: {error!r}")
                 refused += 1
                 continue
             raise ClientExamError(f"control: the reference check accepted {label}")
@@ -187,7 +197,7 @@ def transcript_mutations() -> list[tuple[str, list[str]]]:
         out[first], out[second] = out[second], out[first]
         return out
 
-    kinds = {kind: [i for i, line in enumerate(good) if line.startswith(f"client {kind} ")] for kind in ("syn", "open-syn", "opened", "default-syn", "refused")}
+    kinds = {kind: [i for i, line in enumerate(good) if line.startswith(f"client {kind} ")] for kind in ("fed", "syn", "open-syn", "opened", "default-syn", "refused")}
     out: list[tuple[str, list[str]]] = [
         ("an empty transcript", []),
         ("a line that is not a client exam line", [*good, "link ok something"]),
@@ -202,7 +212,7 @@ def transcript_mutations() -> list[tuple[str, list[str]]]:
     ]
     for index, line in enumerate(good):
         out.append((f"line {index} missing ({line[:44]})", [*good[:index], *good[index + 1 :]]))
-    for kind in ("syn", "open-syn", "default-syn", "refused"):
+    for kind in ("fed", "syn", "open-syn", "default-syn", "refused"):
         for index in kinds[kind]:
             fields = good[index].split(" ")
             last = fields[-1]
@@ -216,6 +226,10 @@ def transcript_mutations() -> list[tuple[str, list[str]]]:
     out.append(("a client INIT_SYN written in the peer form", [good[i].replace(client_syn().hex(), peer_syn().hex(), 1) if i == kinds["syn"][0] else good[i] for i in range(len(good))]))
     out.append(("a default INIT_SYN written in the client form", [good[i].replace(peer_syn().hex(), client_syn().hex(), 1) if i == kinds["default-syn"][0] else good[i] for i in range(len(good))]))
     out.append(("a session left in another state", [good[i].replace("state=open", "state=await-open-ack", 1) if i == kinds["opened"][0] else good[i] for i in range(len(good))]))
+    out.append(("a refusal that closed the session", [good[i].replace("state=await-init-ack", "state=closed", 1) if i == kinds["refused"][0] else good[i] for i in range(len(good))]))
+    out.append(("a refusal that left the session idle", [good[i].replace("state=await-init-ack", "state=idle", 1) if i == kinds["refused"][1] else good[i] for i in range(len(good))]))
+    out.append(("a client built as a listener that kept a session", [good[i].replace("state=none", "state=idle", 1) if i == kinds["refused"][3] else good[i] for i in range(len(good))]))
+    out.append(("a capture the test was not given", [good[i].replace(router.RUNS[0][2], router.RUNS[1][2], 1) if i == kinds["fed"][0] else good[i] for i in range(len(good))]))
     out.append(("an OPEN_SYN without the cookie", [good[i].replace(init_ack_cookie(bytes.fromhex(router.RUNS[0][2])).hex(), "", 1) if i == kinds["open-syn"][0] else good[i] for i in range(len(good))]))
     return out
 
@@ -243,9 +257,9 @@ def all_controls() -> int:
 
 # What the item fixes, held here as well so the gate stays correct after the item is closed and moved to
 # .tasks/terminal. While the item is open its stored predicates are compared with these. Both are exact.
-PINNED_CASES = 11
+PINNED_CASES = 13
 PINNED_REFUSALS = len(REFUSALS)
-PINNED_CONTROLS = 44
+PINNED_CONTROLS = 52
 
 
 def item_pins() -> tuple[int, int]:
