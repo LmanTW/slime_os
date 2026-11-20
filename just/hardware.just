@@ -105,6 +105,15 @@ zenoh_rmw_graph_check:
 zenoh_rmw_data_check:
     python3 scripts/check/check-zenoh-profile0.py --slice rmw-data
 
+# Judges the Profile 0 client role, which a connector takes to open a session with a router. A client writes the INIT_SYN
+# with whatami 2, takes an INIT_ACK of whatami 0 and finishes the handshake with an OPEN_SYN that echoes the router's cookie.
+# The Rust tests drive that connector with two handshakes that rmw_zenohd wrote, captured by scripts/lib/zenoh_rmw_router.py,
+# and a connector with no client role, which still writes the peer form and refuses both. The expectation is
+# scripts/lib/zenoh_rmw_client_exam.py. Nothing here needs a registry or a ROS install. It fails until the role exists.
+[group('hardware')]
+zenoh_rmw_client_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice rmw-client
+
 # A Profile 0 graph link that declares its owner's subscription, writes its owner's Puts and holds the samples
 # it receives in a bounded queue. The two captured data sessions of an rmw_zenoh_cpp peer are written to it
 # whole, one byte at a time and all at once. A talker's 11 samples reach the queue in order and 28 other pushes

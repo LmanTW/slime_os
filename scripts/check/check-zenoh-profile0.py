@@ -126,6 +126,7 @@ import zenoh_rmw_arm
 import zenoh_rmw_component_exam
 import zenoh_rmw_peer_component_exam
 import zenoh_rmw_data_exam
+import zenoh_rmw_client_exam
 import zenoh_rmw_data_link_exam
 import zenoh_rmw_link_exam
 import zenoh_lanes_exam
@@ -2175,6 +2176,59 @@ def run_rmw_data_link() -> list[str]:
     return exam_lines_data_link(stdout)
 
 
+RMW_CLIENT_FILTER = "zenoh_profile0::client_tests::"
+# The exam's own Rust tests, by name: a filter that matches nothing passes silently.
+RMW_CLIENT_TESTS = tuple(f"zenoh_profile0::client_tests::{name}" for name in (
+    "the_client_exam",
+))
+
+
+def exam_lines_client(output: str) -> list[str]:
+    """The `[zenoh-exam] client ...` lines of a run, with the marker removed."""
+    return [line for line in exam_lines(output) if line.startswith("client ")]
+
+
+def run_rmw_client() -> list[str]:
+    stdout, output = cargo_tests((RMW_CLIENT_FILTER,), {**_os.environ})
+    passed = tests_passed(output)
+    missing = [name for name in RMW_CLIENT_TESTS if name not in passed]
+    if missing:
+        fail(f"rmw-client: the exam's tests did not run and pass ({len(missing)} of {len(RMW_CLIENT_TESTS)}): {', '.join(missing[:4])}")
+    return exam_lines_client(stdout)
+
+
+def rmw_client_main(controls_only: bool) -> int:
+    sample = "\n".join(f"test {name} ... ok" for name in RMW_CLIENT_TESTS[1:])
+    if all(name in tests_passed(sample) for name in RMW_CLIENT_TESTS):
+        fail("control: a run with an rmw-client exam test missing was read as complete")
+    exam = zenoh_rmw_client_exam
+    try:
+        refused_controls = exam.all_controls()
+        item_cases, item_controls = exam.item_pins()
+        positive, refusals = exam.judge(exam.good_lines())
+    except exam.ClientExamError as error:
+        fail(str(error))
+    if positive + refusals != exam.PINNED_CASES:
+        fail(f"rmw-client: an honest transcript is {positive + refusals} cases, the checker pins {exam.PINNED_CASES}")
+    if refused_controls != exam.PINNED_CONTROLS:
+        fail(f"rmw-client: {refused_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if item_cases and item_cases != exam.PINNED_CASES:
+        fail(f"rmw-client: the item fixes {item_cases} cases, the checker pins {exam.PINNED_CASES}")
+    if item_controls and item_controls != exam.PINNED_CONTROLS:
+        fail(f"rmw-client: the item requires {item_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 rmw-client judge: refused {refused_controls} corrupted records")
+        return 0
+    try:
+        cases, refusals = exam.judge(run_rmw_client())
+    except exam.ClientExamError as error:
+        fail(str(error))
+    print(f"[zenoh-profile0] slice=rmw-client cases={cases} refusals={refusals} controls={refused_controls}")
+    devloop_observations.record(casesObserved=cases + refusals, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 rmw-client check: a client-role connector opened a session with the captured handshakes of rmw_zenohd, and a session with no client role still refused them")
+    return 0
+
+
 def rmw_data_link_main(controls_only: bool) -> int:
     try:
         zenoh_rmw_exam.all_controls()
@@ -3363,7 +3417,7 @@ def lost_holder_main(controls_only: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "lanes", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service-peer", "service", "service-link", "holder-fault", "service-stack", "lost-holder"), required=True)
+    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-client", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "lanes", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service-peer", "service", "service-link", "holder-fault", "service-stack", "lost-holder"), required=True)
     parser.add_argument("--controls-only", action="store_true")
     arguments = parser.parse_args()
     if arguments.slice == "composition":
@@ -3386,6 +3440,8 @@ def main() -> int:
         return rmw_component_main(arguments.controls_only)
     if arguments.slice == "rmw-data-link":
         return rmw_data_link_main(arguments.controls_only)
+    if arguments.slice == "rmw-client":
+        return rmw_client_main(arguments.controls_only)
     if arguments.slice == "rmw-data":
         return rmw_data_main(arguments.controls_only)
     if arguments.slice == "rmw-graph":
