@@ -406,7 +406,7 @@ fn init<'a>(
     // offers QoS also takes it on an INIT_ACK and on an INIT that keeps the default batch size, because
     // upstream writes the size parameters only when they are not the default.
     if header & FLAG_Z != 0
-        && !(offers_qos && !graph)
+        && (graph || !offers_qos)
         && (header & FLAG_BIT5 != 0 || header & FLAG_BIT6 == 0)
     {
         return Err(Refusal::UnsupportedExtension);
