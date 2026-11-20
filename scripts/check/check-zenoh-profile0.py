@@ -139,6 +139,7 @@ import zenoh_grants_reader_exam
 import zenoh_grading_exam
 import zenoh_server_exam
 import zenoh_holder_fault_exam
+import zenoh_lost_holder_exam
 import zenoh_service_arm
 import zenoh_service_component_exam
 import zenoh_service_peer_exam
@@ -3331,9 +3332,38 @@ def holder_fault_main(controls_only: bool) -> int:
     return 0
 
 
+def lost_holder_main(controls_only: bool) -> int:
+    """The service keeps reading the control endpoint of a holder that settled, so the holder gets its denial. The judge
+    reads `holders.rs` for the two lines that stop the read. The server half already answers a settled holder, and the
+    holder-fault slice grades that answer."""
+    exam = zenoh_lost_holder_exam
+    try:
+        refused_controls = exam.controls()
+        item_cases, item_controls = exam.item_pins()
+    except exam.LostHolderError as error:
+        fail(str(error))
+    if refused_controls != exam.PINNED_CONTROLS:
+        fail(f"lost-holder: {refused_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if item_cases and item_cases != exam.PINNED_CASES:
+        fail(f"lost-holder: the item fixes {item_cases} cases, the checker pins {exam.PINNED_CASES}")
+    if item_controls and item_controls != exam.PINNED_CONTROLS:
+        fail(f"lost-holder: the item requires {item_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 lost-holder judge: refused {refused_controls} corrupted files")
+        return 0
+    try:
+        held = exam.check_files()
+    except exam.LostHolderError as error:
+        fail(f"lost-holder: {error}")
+    print(f"[zenoh-profile0] slice=lost-holder cases={held} refusals={refused_controls} controls={refused_controls}")
+    devloop_observations.record(casesObserved=held, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 lost-holder check: the service keeps reading the control endpoint of a holder that settled")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "lanes", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service-peer", "service", "service-link", "holder-fault", "service-stack"), required=True)
+    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "lanes", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service-peer", "service", "service-link", "holder-fault", "service-stack", "lost-holder"), required=True)
     parser.add_argument("--controls-only", action="store_true")
     arguments = parser.parse_args()
     if arguments.slice == "composition":
@@ -3400,6 +3430,8 @@ def main() -> int:
         return service_stack_main(arguments.controls_only)
     if arguments.slice == "holder-fault":
         return holder_fault_main(arguments.controls_only)
+    if arguments.slice == "lost-holder":
+        return lost_holder_main(arguments.controls_only)
     refused_controls = controls(arguments.slice)
     if arguments.controls_only:
         print(f"zenoh profile 0 {arguments.slice} judge: refused {refused_controls} corrupted transcripts")
