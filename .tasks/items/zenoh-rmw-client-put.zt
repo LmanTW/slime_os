@@ -27,8 +27,11 @@ item :: s.Item = (h.task "01a20383-8a5a-7199-bc29-a7202dc774b5" "zenoh-rmw-clien
         "A Put the link writes has the sender mapping and the peer form of the PUT header, with the attachment and no timestamp. The judge refuses the receiver mapping and the timestamp flag."
         { "zenoh_rmw_client_put_check"; };
       h.req "no-role-link-still-refuses-an-undeclared-key"
-        "A link with no client role refuses a Put on a key its peer did not declare as `undeclared-key`. The session and stock-peer exams pass unchanged."
-        { "zenoh_rmw_client_put_check"; "zenoh_session_check"; "zenoh_stock_check"; };
+        "A link with no client role refuses a Put on a key its peer did not declare as `undeclared-key`."
+        { "zenoh_rmw_client_put_check"; };
+      h.req "neighbour-exams-pass-unchanged"
+        "The session exam and the stock-peer exam pass unchanged beside the client put slice."
+        { "zenoh_session_check"; "zenoh_stock_check"; };
       h.req "client-link-refuses-what-it-must"
         "A client-role link refuses a Put before the session is open as `not-open`. It refuses a payload over the bound and a short attachment as `encode`. It refuses a Put while the send slot is busy as `send-busy`."
         { "zenoh_rmw_client_put_check"; };
