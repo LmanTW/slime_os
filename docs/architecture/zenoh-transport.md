@@ -292,6 +292,10 @@ holder every later request and attach. A holder that has not detached 30000 ms a
 same way. The other holders, the link and the session stay up. The wait includes the time the service spends in `connect`, which
 it bounds at 20000 ms. A holder with no supervision binding is bounded by the wait alone.
 
+The service keeps each holder's endpoints for the rest of the run. The service still reads the control endpoint of a holder that
+settled. The server answers each of its requests as denied, so its call does not block. The loop ends once every holder has
+settled, so the last holder to settle gets no answer to a request that comes after.
+
 The service prints one line for a publication, a taken sample and a publication refused for a row the holder may not publish.
 `exchange_line` in the server half builds them from the request and the answer, and a host test drives it. The booted exchange is
 judged on these lines.
@@ -325,8 +329,8 @@ attachment, `holders::serve` or `holders::drive`.
 Known limits of the component:
 
 - It is built for at most two holders and two rows. It refuses a table above that, and it serves a table below it.
-- A live holder that expired gets no answer on its control endpoint, because the loop stops reading it. A request it sends there
-  blocks. The planning record said such a holder is denied.
+- The last holder to settle gets no answer to a request after that, because the service returns once the roster is done.
+  No boot shows a settled holder sending. The judge shows only that the statements which cleared the endpoints are gone.
 - A configuration judged by `contracts/zenoh-link-limits/v1` cannot declare more than one local subscription. A second
   declaration needs a new version of that contract. The component does not use that path: it opens its link with
   `Params { local: 3 }`.
