@@ -109,7 +109,7 @@ zenoh_rmw_data_check:
 # with whatami 2, takes an INIT_ACK of whatami 0 and finishes the handshake with an OPEN_SYN that echoes the router's cookie.
 # The Rust tests drive that connector with two handshakes that rmw_zenohd wrote, captured by scripts/lib/zenoh_rmw_router.py,
 # and a connector with no client role, which still writes the peer form and refuses both. The expectation is
-# scripts/lib/zenoh_rmw_client_exam.py. Nothing here needs a registry or a ROS install. It fails until the role exists.
+# scripts/lib/zenoh_rmw_client_exam.py. Nothing here needs a registry or a ROS install.
 [group('hardware')]
 zenoh_rmw_client_check:
     python3 scripts/check/check-zenoh-profile0.py --slice rmw-client

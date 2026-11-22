@@ -446,6 +446,31 @@ Known limits:
 - The node drops samples that arrive in the same pump as a peer `CLOSE`. The boot closes after four of each, so it does not reach that case.
 - No live `rmw_zenoh` peer runs in this composition. The exchange is between two Slime components over loopback.
 
+## Client role
+
+A Profile 0 session announces itself as a peer. `rmw_zenohd` answers a peer's `INIT_SYN` as a router, and a session
+with no client role refuses that answer as `unsupported-whatami`. A connector takes the client role with
+`SessionOf::with_client_role`, which `Params` and `Config` do not carry.
+
+| Side | With no client role | With the client role |
+| --- | --- | --- |
+| `INIT_SYN` it writes | `whatami` 1 | `whatami` 2, and no other byte differs |
+| `INIT_ACK` it takes | `whatami` 1 | `whatami` 0 only |
+| `INIT_ACK` it refuses | `whatami` 0 and 2 | `whatami` 1 and 2 |
+
+A refused `INIT_ACK` leaves the connector awaiting its `INIT_ACK`. A listener, and a connector that has written its
+`INIT_SYN`, get `invalid-config` when they ask for the role.
+
+`scripts/lib/zenoh_rmw_router.py` holds two handshakes that `rmw_zenohd` 0.6.10-r1 wrote to a client on one host.
+Each is a 72-byte `INIT_ACK` of `whatami` 0 with a 49-byte cookie, then an `OPEN_ACK` of a 60 s lease. The role is
+judged against those two captures by `scripts/lib/zenoh_rmw_client_exam.py`.
+
+Known limits:
+
+- Only the session takes the role. The links and the graph session do not, so no component connects to a router yet.
+- The captures end at the handshake. They show nothing a router forwards, no liveliness token and no router with a
+  non-default configuration.
+
 ## Limitations
 
 - `sel4-zenoh` crosses the loopback backend, so there is no packet capture there. The
@@ -474,7 +499,7 @@ Known limits:
   `std_msgs/String` over a direct link. Live probes on one host showed more, with no CI evidence. A
   best-effort subscriber received the Puts. A peer that reconnected sent no second `INTEREST`. A Slime
   peer that dialed `rmw_zenohd` as a peer got no sample through, and one that announced itself as a client
-  got all 12. The encoder writes no client `INIT`.
+  got all 12. A session writes a client `INIT` only with the client role, which the link a component uses does not take yet.
 - A peer waits about 10 s for the answer to its `INTEREST`. A `FRAME` whose answer the session cannot write
   is refused whole. `ZENOH_ROUTER_CHECK_ATTEMPTS=0` stopped the one peer from exchanging data in the probes, and a
   value of 1 did not.
@@ -529,6 +554,8 @@ Known limits:
   closures. It fetches them from a registry, so the recipe is explicit and not in CI;
   `cargo deny` run on that crate reports `paste` as unmaintained (RUSTSEC-2024-0436) and
   Zlib-licensed transitive crates, which the root `deny.toml` does not allow;
+- `just zenoh_rmw_client_check` — a connector with the client role against two handshakes of `rmw_zenohd`: 13 cases
+  and 52 controls. A connector with no role still refuses them; explicit, not part of `all`;
 - `just zenoh_rmw_booted_check` — the `sel4-zenoh-rmw` boot: 17 cases and 65 controls, and the arm under QEMU;
   explicit, not part of `all`;
 - `just rpi5_ros2_zenoh_check` — the QEMU exchange; explicit, not part of `all`;
