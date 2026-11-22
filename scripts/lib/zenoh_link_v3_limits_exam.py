@@ -32,6 +32,9 @@ GENERATED = ROOT / "components" / "proto" / "src" / "zenoh_link_v3_limits.rs"
 ITEM = ROOT / ".tasks" / "items" / "zenoh-link-limits-v3.zt"
 FORMAT_VERSION = 3
 MAX_LOCAL = 65535
+# The byte a link with several runs adds to its INIT_ACK, as version 2 and the lanes exam hold it: the extension of the
+# handshake is the only edge the batch bound has.
+QOS_OFFER = 1
 MAX_RUNS = 16
 LOCAL_FIELDS = ("localSubscriptions", "maxRuns")
 
@@ -128,6 +131,11 @@ def cases() -> list[tuple[str, str, bool]]:
         ("a stack one byte over what 3 local subscriptions need", with_heap(dict(heap3, stackBytes=heap3["stackBytes"] + 1)), True),
         ("a heap link with 3 local subscriptions, 2 runs and 1 outstanding sample, exact", with_heap(config_v3(heap, 3, 2, outstandingSamples=1)), True),
         ("a heap link with 2 runs and 1 local subscription, exact", with_heap(config_v3(heap, 1, 2)), True),
+        ("a heap link with 2 runs and a batch of 90, the largest INIT_ACK with the extension and its stream length", with_heap(config_v3(heap, 1, 2, batchBytes=90, keyBytes=1)), True),
+        ("a heap link with 16 runs and a batch of 90", with_heap(config_v3(heap, 1, 16, batchBytes=90, keyBytes=1)), True),
+        ("a heap link with 1 run and a batch of 89, which writes no extension", with_heap(config_v3(heap, 1, 1, batchBytes=89, keyBytes=1)), True),
+        ("a heap link with 2 runs and a batch of 89, one byte short of it", with_heap(config_v3(heap, 1, 2, batchBytes=89, keyBytes=1)), False),
+        ("a heap link with 16 runs and a batch of 89", with_heap(config_v3(heap, 1, 16, batchBytes=89, keyBytes=1)), False),
         ("a heap link with 3 local subscriptions and one byte too little stack", with_heap(dict(heap3, stackBytes=heap3["stackBytes"] - 1)), False),
         ("a fixed link with 3 local subscriptions and one byte too little stack", rec(dict(fixed3, stackBytes=fixed3["stackBytes"] - 1), fixed_large, heap1), False),
         ("a heap link with 3 local subscriptions and the stack of 1", with_heap(dict(heap3, **one_stack)), False),
@@ -172,13 +180,15 @@ SCHEMA_MUTATIONS = (
     ("a contract with no upper bound on local subscriptions", " && c.localSubscriptions <= maxLocalSubscriptions", "", "65536 local subscriptions"),
     ("a contract that leaves local subscriptions out of the stack", " + localBytes c + runBytes c", " + runBytes c", "a heap link with 3 local subscriptions and the stack of 1"),
     ("a contract that leaves runs out of the stack", " + localBytes c + runBytes c", " + localBytes c", "a heap link with 2 runs and the stack of 1 run"),
-    ("a contract that adds the lane counters only from 3 runs", "if c.maxRuns > 1 then", "if c.maxRuns > 2 then", "a heap link with 2 runs and the stack of 1 run"),
+    ("a contract that adds the lane counters only from 3 runs", "runBytes :: Config -> Int\n  = c => if c.maxRuns > 1 then", "runBytes :: Config -> Int\n  = c => if c.maxRuns > 2 then", "a heap link with 2 runs and the stack of 1 run"),
     ("a contract with no upper bound on runs", "c.maxRuns >= 1 && c.maxRuns <= maxRunsPerLink", "c.maxRuns >= 1", "a heap link with 17 runs, exact"),
     ("a contract with no lower bound on a heap link's runs", "c.maxRuns >= 1 && c.maxRuns <= maxRunsPerLink", "c.maxRuns <= maxRunsPerLink", "a heap link with 0 runs"),
     ("a contract that lets a fixed link hold a run", "c.maxRuns == 0 && c.reassemblyTimeoutMs == 0", "c.reassemblyTimeoutMs == 0", "a fixed link with 1 run"),
     ("a contract whose heap holds one run", "c.outstandingSamples + c.maxRuns) * messageBytes c", "c.outstandingSamples + 1) * messageBytes c", "a heap link with 2 runs and the heap of 1"),
     ("a contract that reads a field it does not name", "if closedLimits data then", "if true then", "a field the configuration does not name"),
     ("a contract that ignores the format version", "rec.formatVersion == formatVersion", "true", "format version 4"),
+    ("a contract that holds no batch to the INIT_ACK with the extension", " + offerBytes c && c.batchBytes <= dataBytes", " && c.batchBytes <= dataBytes", "a heap link with 2 runs and a batch of 89, one byte short of it"),
+    ("a contract that offers the extension from 3 runs", "offerBytes :: Config -> Int\n  = c => if c.maxRuns > 1 then", "offerBytes :: Config -> Int\n  = c => if c.maxRuns > 2 then", "a heap link with 2 runs and a batch of 89, one byte short of it"),
     ("a contract that takes the v2 version number", "formatVersion :: Int = 3;", "formatVersion :: Int = 2;", "a v2 record that carries both fields"),
 )
 
@@ -247,6 +257,7 @@ CONSTANTS = {
     "MAX_RUNS_PER_LINK": "maxRunsPerLink",
     "RUN_OVERHEAD_BYTES": "runOverheadBytes",
     "LANE_COUNTER_BYTES": "laneCounterBytes",
+    "QOS_OFFER_BYTES": "qosOfferBytes",
     "SLOT_OVERHEAD_BYTES": "slotOverheadBytes",
 }
 RESTATED = {
@@ -255,6 +266,7 @@ RESTATED = {
     "MAX_RUNS_PER_LINK": lanes.MAX_RUNS,
     "RUN_OVERHEAD_BYTES": lanes.RUN_OVERHEAD_BYTES,
     "LANE_COUNTER_BYTES": lanes.LANE_COUNTER_BYTES,
+    "QOS_OFFER_BYTES": QOS_OFFER,
     "SLOT_OVERHEAD_BYTES": links.SLOT,
 }
 
@@ -269,18 +281,38 @@ def schema_constants() -> dict[str, int]:
     return found
 
 
-def arithmetic_controls() -> int:
-    """The schema's constants equal the values restated here, which are the lanes exam's and the links exam's, and a drift is seen."""
-    constants = schema_constants()
+def check_constants(constants: dict[str, int]) -> None:
+    """The schema's constants equal the values restated here, which are the lanes exam's and the links exam's."""
     for name, expected in RESTATED.items():
         need(constants[name] == expected, f"the schema states {name} = {constants[name]}, the exam and the lanes exam restate {expected}")
     need(MAX_RUNS == lanes.MAX_RUNS, "the exam and the lanes exam disagree on the runs bound")
+
+
+def arithmetic_controls() -> int:
+    """The schema's constants pass `check_constants`, and each constant drifted by one is refused by it."""
+    constants = schema_constants()
+    check_constants(constants)
     refused = 0
-    for label, name, delta in (("a run header that drifts", "RUN_OVERHEAD_BYTES", 1), ("a lane counter that drifts", "LANE_COUNTER_BYTES", -1), ("a runs bound that drifts", "MAX_RUNS_PER_LINK", 1), ("a slot overhead that drifts", "SLOT_OVERHEAD_BYTES", 1)):
+    for label, name, delta in (("a run header that drifts", "RUN_OVERHEAD_BYTES", 1), ("a lane counter that drifts", "LANE_COUNTER_BYTES", -1), ("a QoS offer that drifts", "QOS_OFFER_BYTES", 1), ("a runs bound that drifts", "MAX_RUNS_PER_LINK", 1), ("a slot overhead that drifts", "SLOT_OVERHEAD_BYTES", 1)):
         changed = {**constants, name: constants[name] + delta}
-        need(any(changed[n] != v for n, v in RESTATED.items()), f"control: {label} was not seen")
-        refused += 1
+        try:
+            check_constants(changed)
+        except LinkV3Error as error:
+            need(name in str(error), f"control: {label} was refused for another constant: {error}")
+            refused += 1
+            continue
+        raise LinkV3Error(f"control: the constants check took {label}")
     return refused
+
+
+def check_lifting(runs: int, stack_of, heap_of) -> None:
+    """At one local subscription the stack and the heap that `stack_of` and `heap_of` give a heap link of `runs` runs
+    equal the lanes exam's version 2 values."""
+    heap = links.pinned_configs()[2]
+    v2 = lanes.v2_config(heap, runs)
+    v3 = config_v3(heap, 1, runs)
+    need(v2["stackBytes"] == stack_of(v3), f"v3 and v2 declare different stacks for {runs} runs: {stack_of(v3)} and {v2['stackBytes']}")
+    need(v2["heapBytes"] == heap_of(v3), f"v3 and v2 declare different heaps for {runs} runs: {heap_of(v3)} and {v2['heapBytes']}")
 
 
 def lifting_controls() -> int:
@@ -292,15 +324,19 @@ def lifting_controls() -> int:
     """
     heap = links.pinned_configs()[2]
     for runs in (1, 2, 3, 16):
-        v2 = lanes.v2_config(heap, runs)
-        v3 = config_v3(heap, 1, runs)
-        need(v2["stackBytes"] == v3["stackBytes"], f"v3 and v2 declare different stacks for {runs} runs: {v3['stackBytes']} and {v2['stackBytes']}")
-        need(v2["heapBytes"] == v3["heapBytes"], f"v3 and v2 declare different heaps for {runs} runs: {v3['heapBytes']} and {v2['heapBytes']}")
+        check_lifting(runs, stack_v3, heap_v3)
     refused = 0
-    for label, bad in (("a stack that drops one run header", lambda c: stack_v3(c) - lanes.RUN_OVERHEAD_BYTES), ("a stack that adds one slot", lambda c: stack_v3(c) + links.SLOT)):
-        c = config_v3(heap, 1, 2)
-        need(lanes.v2_config(heap, 2)["stackBytes"] != bad(c), f"control: {label} was not seen")
-        refused += 1
+    for label, stack, heap_of in (
+        ("a stack that drops one run header", lambda c: stack_v3(c) - lanes.RUN_OVERHEAD_BYTES, heap_v3),
+        ("a stack that adds one slot", lambda c: stack_v3(c) + links.SLOT, heap_v3),
+        ("a heap that holds one run too few", stack_v3, lambda c: heap_v3(c) - links.message_bytes(c)),
+    ):
+        try:
+            check_lifting(2, stack, heap_of)
+        except LinkV3Error:
+            refused += 1
+            continue
+        raise LinkV3Error(f"control: the lifting check took {label}")
     return refused
 
 
@@ -405,8 +441,8 @@ def all_controls() -> int:
 
 
 # What the item fixes, held here as well so the gate stays correct after the item moves to .tasks/terminal.
-PINNED_CASES = 49
-PINNED_CONTROLS = 73
+PINNED_CASES = 55
+PINNED_CONTROLS = 79
 
 
 def item_pins() -> tuple[int, int]:

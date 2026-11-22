@@ -27,7 +27,7 @@ item :: s.Item = (h.task "01a1ef06-fb8b-7046-b24b-47fccf60c29f" "zenoh-link-limi
         "Each local subscription beyond the first adds a key slot to the stack. Each run beyond the first adds a run header to the stack and to the heap. The record is refused one byte below each total."
         { "zenoh_link_limits_v3_check"; };
       h.req "v3-keeps-the-v1-rules"
-        "The contract refuses every input version 1 refuses, and it refuses a v1 record, a v2 record and a record with either new field missing. A fixed link holds no run and a heap link holds 1 to 16."
+        "The contract refuses every input version 1 refuses, and it refuses a v1 record, a v2 record and a record with either new field missing. A fixed link holds no run and a heap link holds 1 to 16. A link with 2 or more runs needs a batch of 90 bytes, one more than a link with one run."
         { "zenoh_link_limits_v3_check"; };
       h.req "v3-matches-the-lanes-arithmetic"
         "At one local subscription, the stack and the heap equal the lanes exam's version 2 values for 1, 2, 3 and 16 runs. The two versions declare the same memory for one link."
@@ -36,13 +36,13 @@ item :: s.Item = (h.task "01a1ef06-fb8b-7046-b24b-47fccf60c29f" "zenoh-link-limi
         "`components/proto/src/zenoh_link_v3_limits.rs` equals the output of `generate-zenoh-link-v3-limits-bindings.py` byte for byte. The recipe `zenoh_link_v3_limits_gen` writes it."
         { "zenoh_link_limits_v3_check"; };
       h.req "controls-are-refused"
-        "The judge takes 11 records and refuses 32 through the contract's decoder. It also refuses 41 corruptions: 13 removed checks, 5 off-by-one bounds, 4 drifted constants, 2 drifted restatements and 17 corrupted binding files."
+        "The judge takes 14 records and refuses 34 through the contract's decoder. It also refuses 45 corruptions: 15 removed checks, 5 off-by-one bounds, 5 drifted constants, 3 drifted restatements and 17 corrupted binding files."
         { "zenoh_link_limits_v3_check"; };
     };
     acceptance = {
       h.observedWhere "zenoh_link_limits_v3_check" {
-        h.count "casesObserved" 49;
-        h.count "negativeControlsRefused" 73;
+        h.count "casesObserved" 55;
+        h.count "negativeControlsRefused" 79;
       };
     };
     decisions = {

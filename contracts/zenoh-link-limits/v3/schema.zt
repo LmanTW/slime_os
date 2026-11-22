@@ -14,7 +14,7 @@
 --          and does not change; `large` is the same mode with bigger arrays.
 --   heap   The owning component supplies the storage a fragmented message is reassembled into, from
 --          its own allocator. A message may be larger than a batch and is sent and received as
---          fragments. One message is reassembled at a time.
+--          fragments. `maxRuns` messages are reassembled at a time, one for each lane.
 --
 -- A configuration is judged here, before a link is built from it, so a declaration that cannot hold
 -- its own largest message, cannot cross the network service in one operation, or leaves the owning
@@ -73,6 +73,11 @@ streamLengthBytes :: Int = 2;
 -- ZID, resolution and batch size, cookie length and cookie. An OPEN_SYN with the longest lease and
 -- sequence number and a 64-byte cookie is 76.
 handshakeBytes :: Int = 87;
+
+-- A link with several runs offers the QoS unit extension on its INIT, one byte after the rest of it, so its
+-- largest INIT_ACK is 88 bytes. `zenoh-codec` 1.0.0 writes 87 without the extension and 88 with it. This restates
+-- the rule of version 2, which holds the batch of such a link to that INIT_ACK.
+qosOfferBytes :: Int = 1;
 
 -- A link sends a key declaration whole, in one FRAME, and does not fragment it. The longest
 -- declaration the host encoder writes is an UNDECLARE_SUBSCRIBER whose extension body is the key
@@ -223,6 +228,10 @@ noticeBytes :: Config -> Int
 localBytes :: Config -> Int
   = c => (c.localSubscriptions - 1) * (c.keyBytes + slotOverheadBytes);
 
+-- The extension a link with several runs offers on its INIT. A link with one run or none writes none.
+offerBytes :: Config -> Int
+  = c => if c.maxRuns > 1 then qosOfferBytes else 0;
+
 -- What the runs beyond the first add: a run header each, and the lane counters once.
 runBytes :: Config -> Int
   = c => if c.maxRuns > 1 then (c.maxRuns - 1) * runOverheadBytes + laneCounterBytes else 0;
@@ -233,7 +242,7 @@ requiredStack :: Config -> Int
 
 commonOk :: Config -> Bool
   = c => t.length c.name >= 1 && t.length c.name <= 16
-    && c.batchBytes >= handshakeBytes + streamLengthBytes && c.batchBytes <= dataBytes
+    && c.batchBytes >= handshakeBytes + streamLengthBytes + offerBytes c && c.batchBytes <= dataBytes
     && c.payloadBytes >= 1 && c.payloadBytes <= maxPayloadLengthBytes && c.keyBytes >= 1 && c.keyBytes <= maxKeyLengthBytes
     && declarationBytes c <= c.batchBytes
     && c.attachmentBytes == requiredAttachmentBytes
@@ -316,6 +325,7 @@ decodeLimits :: Data -> Validation DecodeIssue Limits
   dataBytes =;
   streamLengthBytes =;
   handshakeBytes =;
+  qosOfferBytes =;
   declarationFixedBytes =;
   lebBytes =;
   declarationBytes =;
@@ -339,6 +349,7 @@ decodeLimits :: Data -> Validation DecodeIssue Limits
   messageBytes =;
   heapNeeded =;
   localBytes =;
+  offerBytes =;
   runBytes =;
   requiredStack =;
 }
