@@ -114,6 +114,16 @@ zenoh_rmw_data_check:
 zenoh_rmw_client_check:
     python3 scripts/check/check-zenoh-profile0.py --slice rmw-client
 
+# Judges a Profile 0 link with the client role that subscribes through a router. rmw_zenohd stamps every Put it forwards,
+# and the link takes that timestamp while every other decoder still refuses it. The Rust tests drive the link with two runs
+# of rmw_zenohd, captured by scripts/lib/zenoh_rmw_router_data.py, three ways: each batch whole, one byte at a time and all
+# at once. The link writes the client INIT_SYN, the OPEN_SYN and the subscription, and delivers the four samples the router
+# forwarded. The expectation is scripts/lib/zenoh_rmw_router_link_exam.py. Nothing here needs a registry or a ROS install.
+# It fails until the link takes the role.
+[group('hardware')]
+zenoh_rmw_router_link_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice rmw-router-link
+
 # A Profile 0 graph link that declares its owner's subscription, writes its owner's Puts and holds the samples
 # it receives in a bounded queue. The two captured data sessions of an rmw_zenoh_cpp peer are written to it
 # whole, one byte at a time and all at once. A talker's 11 samples reach the queue in order and 28 other pushes
