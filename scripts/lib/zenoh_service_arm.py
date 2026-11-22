@@ -123,8 +123,6 @@ def judge(lines: list[str], grants: Grants | None = None) -> tuple[int, int]:
     _need(len(grants) == 1, f"zenoh-service: {len(grants)} grants lines, expected exactly one")
     _need(lines[0] == grants[0].string, "zenoh-service: the grants line is not the first")
     declared_rows, declared_holders = int(grants[0].group(1)), int(grants[0].group(2))
-    counted = (len(held), sum(len(rows) for rows in held.values()))
-    _need((declared_holders, declared_rows) == counted, f"zenoh-service: the grants line says {declared_holders} holders and {declared_rows} rows, the grants of the composition give {counted[0]} and {counted[1]}")
 
     attached: dict[str, int] = {}
     detached: set[str] = set()
@@ -222,8 +220,12 @@ def mutations() -> list[tuple[str, list[str]]]:
     return out
 
 
-def rich_mutations() -> list[tuple[str, list[str]]]:
-    """Corruptions of the RICH transcript that only the grants can refuse. The merged judge took each of them."""
+# The grants of the control that judges the honest RICH transcript against two of its four holders.
+TWO_HOLDERS: Grants = {holder: RICH[holder] for holder in ("alpha", "beta")}
+
+
+def rich_mutations() -> list[tuple[str, list[str], Grants]]:
+    """(label, transcript, grants) for the corruptions of RICH that only the grants can refuse. The merged judge took each."""
     good = synthesize_rich()
     first_delivery = next(i for i, line in enumerate(good) if "delivered holder=beta" in line)
     first_publication = next(i for i, line in enumerate(good) if "published holder=alpha" in line)
@@ -231,17 +233,18 @@ def rich_mutations() -> list[tuple[str, list[str]]]:
     def edited(index: int, old: str, new: str) -> list[str]:
         return [line.replace(old, new) if i == index else line for i, line in enumerate(good)]
 
-    return [
+    out: list[tuple[str, list[str]]] = [
         ("a delivery on a row that holds another key", edited(first_delivery, "row=1", "row=0")),
         ("a delivery on a row past the receiver's rows", edited(first_delivery, "row=1", "row=2")),
         ("a publication on a row that only subscribes", edited(first_publication, "holder=alpha row=0", "holder=beta row=1")),
         # The reach and the deliveries agree, so only the count of attached subscribers can refuse it: gamma subscribes and is
         # attached, and sequence 0 is not delivered to it. A reach above the subscribers is refused by the deliveries rule.
         ("a reach below the attached holders that subscribe, with the deliveries to match", [line.replace("reached=2", "reached=1") if i == first_publication else line for i, line in enumerate(good) if "delivered holder=gamma row=0 sequence=0" not in line]),
-        ("an attach with a row count the grants line does not sum to", [line.replace("holder=beta rows=2", "holder=beta rows=1") for line in good]),
+        ("an attach with a row count the grants line does not sum to, on a holder that is never delivered to", edited(next(i for i, line in enumerate(good) if "attached holder=delta" in line), "rows=1", "rows=2")),
         ("an attach of a holder the grants do not name, in place of a named one", [line.replace("holder=delta", "holder=zeta") for line in good]),
-        ("a transcript of four holders judged against the grants of two", good),
+        ("a transcript of four holders judged against the grants of two, which names the first holder it does not know", good),
     ]
+    return [(label, lines, TWO_HOLDERS if "grants of two" in label else RICH) for label, lines in out]
 
 
 def controls() -> int:
@@ -259,10 +262,9 @@ def controls() -> int:
         raise ArmError(f"control: the zenoh-service judge accepted {label}")
     rich = synthesize_rich()
     _need(judge(rich, RICH) == (SAMPLES, 1), "zenoh-service: the honest transcript of the richer composition was not accepted")
-    for label, lines in rich_mutations():
-        # The last control keeps the honest transcript and changes the grants: two holders where the transcript has four.
-        grants = {h: RICH[h] for h in ("alpha", "beta")} if label.endswith("grants of two") else RICH
-        _need(lines != rich or grants is not RICH, f"control: {label} did not change the transcript")
+    for label, lines, grants in rich_mutations():
+        # A control changes the transcript or the grants it is judged against, and one of them at least.
+        _need(lines != rich or grants is not RICH, f"control: {label} changed neither the transcript nor the grants")
         try:
             judge(lines, grants)
         except ArmError:

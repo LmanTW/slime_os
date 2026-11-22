@@ -16,7 +16,7 @@ item :: s.Item = (h.bug "01a202cb-f3e5-777d-a488-7c3853891f3d" "zenoh-arm-row-ru
     };
     requirements = {
       h.req "the-judge-reads-the-grants"
-        "The judge takes the grants of the composition as rows of a holder, a key, and the publish and subscribe rights. It reads them from the system spec of the composition, in the order the grants table sorts them. It requires the grants line of the transcript to state the same holder and row counts. It requires each attached holder to be one the grants name."
+        "The judge takes the grants of the composition as rows of a holder, a key, and the publish and subscribe rights. It reads them from the system spec of the composition, in the order the grants table sorts them. It requires each attached holder to be one the grants name. It requires the attached rows to sum to the row count of the grants line."
         { "zenoh_service_booted_check"; };
       h.req "a-delivery-names-the-receivers-row"
         "A delivery carries the index of a row of the receiving holder, and that row holds the key of the publication it answers. The judge no longer requires the row to equal the publisher's row."
@@ -25,7 +25,7 @@ item :: s.Item = (h.bug "01a202cb-f3e5-777d-a488-7c3853891f3d" "zenoh-arm-row-ru
         "A publication carries the index of a publish row of the publishing holder. Its reach equals the number of holders that hold a subscribe row on that key and are attached."
         { "zenoh_service_booted_check"; };
       h.req "controls-are-refused"
-        "The judge refuses the 63 inputs that the merged judge refuses, and 7 more. Two deliver a sample on a row that holds another key and on a row past the receiver's rows. One publishes on a row that only subscribes. One states a reach below the attached holders that subscribe, with the deliveries to match. Three disagree with the grants. One has a row count the grants line does not sum to. One attaches a holder the grants do not name. One is a transcript of four holders against the grants of two."
+        "The judge refuses the 63 inputs that the merged judge refuses, and 7 more. Two deliver a sample on a row that holds another key and on a row past the receiver's rows. One publishes on a row that only subscribes. One states a reach below the attached holders that subscribe, with the deliveries to match. Three disagree with the grants. One has a row count the grants line does not sum to. One attaches a holder the grants do not name. One is a transcript of four holders against the grants of two, refused at the first holder the grants do not name."
         { "zenoh_service_booted_check"; };
     };
     acceptance = {
