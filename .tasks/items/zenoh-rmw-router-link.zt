@@ -18,7 +18,7 @@ item :: s.Item = (h.task "01a20200-959c-702b-b450-13ce7e0dbece" "zenoh-rmw-route
       h.nonGoal "Writing a Put to a router. The captures show only what a router forwards to a subscriber." h.agentDefault;
       h.nonGoal "Delivering the Put's own timestamp. The link checks it and delivers the attachment's source timestamp, as it did for a peer's Put." h.agentDefault;
       h.nonGoal "A Put with the encoding flag, a forwarded sample larger than one frame, and a router that is not on its default configuration." h.agentDefault;
-      h.nonGoal "Any change to what a link with no client role writes or accepts. The existing exams and the stock-peer exam pin it." h.agentDefault;
+      h.nonGoal "Any change to what a link with no client role writes or accepts, and any change to the graph decoder or the fragment decoder. The existing exams and the stock-peer exam pin it." h.agentDefault;
     };
     requirements = {
       h.req "client-link-subscribes-through-a-router"
@@ -31,7 +31,7 @@ item :: s.Item = (h.task "01a20200-959c-702b-b450-13ce7e0dbece" "zenoh-rmw-route
         "A local close writes a CLOSE of reason 0. The transcript prints the queue as empty and the subscription as none, and the judge refuses any other value."
         { "zenoh_rmw_router_link_check"; };
       h.req "timestamp-is-taken-only-with-the-role"
-        "A PUT header with the timestamp flag is refused as `unsupported-message` by every decoder with no client role. The client decoder takes it only with a 16-byte ID, refuses a short ID as `malformed-message` and refuses the encoding flag as `unsupported-message`."
+        "The plain decoder and the fragment decoder refuse a PUT header with the timestamp flag as `unsupported-message`. The graph decoder takes it, as it did. The client decoder takes it only with a 16-byte ID. It refuses a short ID as `malformed-message` and refuses the encoding flag as `unsupported-message`."
         { "zenoh_rmw_router_link_check"; "zenoh_session_check"; "zenoh_stock_check"; };
       h.req "listener-link-refuses-the-role"
         "A link built as a listener and asked for the client role is `invalid-config`."
@@ -49,12 +49,12 @@ item :: s.Item = (h.task "01a20200-959c-702b-b450-13ce7e0dbece" "zenoh-rmw-route
       h.observed "zenoh_stock_check";
     };
     decisions = {
-      h.decided "the-timestamp-is-an-opt-in-of-the-decoder"
-        "The decoder takes the timestamp on a PUT only when the session has the client role. Every other decoder refuses it as it did."
-        "the stock-peer exam pins what a peer session refuses, and a peer's direct Put carries no timestamp"
+      h.decided "the-timestamp-is-an-opt-in-of-the-plain-decoder"
+        "The plain decoder takes the timestamp on a PUT only when the session has the client role. The fragment decoder keeps refusing it, and the graph decoder keeps taking it."
+        "the stock-peer exam pins what a plain peer session refuses, and the graph decoder already takes the timestamp of a direct `rmw_zenoh_cpp` Put"
         h.agentDefault
         { "timestamp-is-taken-only-with-the-role"; };
-      h.decided "the-router-timestamp-is-checked-not-delivered"
+      h.decided "the-put-timestamp-is-checked-not-delivered"
         "The decoder reads the Put's time and 16-byte ID and delivers neither. The sample keeps the attachment's source timestamp."
         "a consumer reads the source timestamp of a peer's Put, and the captures give the Put's time and ID no consumer"
         h.agentDefault
