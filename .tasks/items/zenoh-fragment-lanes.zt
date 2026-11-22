@@ -13,6 +13,8 @@ item :: s.Item = (h.task "01a1ee8a-6ef8-73ab-8725-b6c0481587c3" "zenoh-fragment-
       "components/lib/src/zenoh_profile0/**";
       "components/lib/src/zenoh_link.rs";
       "components/lib/src/zenoh_links.rs";
+      "components/lib/src/zenoh_stock.rs";
+      "components/lib/src/zenoh_subscribers.rs";
       "components/lib/src/lib.rs";
       "components/proto/src/zenoh_link_limits*";
       "contracts/zenoh-link-limits/v2/**";
