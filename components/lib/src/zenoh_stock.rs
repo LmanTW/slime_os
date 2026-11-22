@@ -132,6 +132,7 @@ fn owned(events: &crate::zenoh_profile0::session::Events<'_>) -> Vec<Ev> {
             Event::SampleStored { .. } => {
                 unreachable!("a session that cannot fragment stores no sample")
             }
+            Event::Dropped { .. } => unreachable!("a session with one run drops nothing"),
         })
         .collect()
 }

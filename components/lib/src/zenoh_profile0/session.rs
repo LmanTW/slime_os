@@ -19,6 +19,7 @@ use super::fragment::{
     FragmentError, PutMessage, PutRules, Source, Splitter, decode_fragment, decode_put,
     fits_one_frame, is_fragment,
 };
+use super::lane::{Lane, decode_lane_frame, is_frame};
 use super::lane_limits::MAX_RUNS_LIMIT;
 use super::limits::{Limits, Mode};
 use super::reassembly::{Progress, Reassembly};
@@ -26,12 +27,17 @@ use super::tables::{InsertError, Keys, SlotTable};
 use super::{
     Bounds, Frame, MAX_BATCH_BYTES, MAX_COOKIE_BYTES, MAX_KEY_BYTES, Mapping, Message, Network,
     Refusal, STREAM_LENGTH_BYTES, decode_batch_client, decode_batch_qos, decode_batch_with,
+    frame_of,
 };
 use slime_proto::zenoh_profile as p;
 
 #[cfg(test)]
 #[path = "session_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "lane_frames_tests.rs"]
+mod lane_frames_tests;
 
 #[cfg(test)]
 #[path = "lanes_handshake_tests.rs"]
@@ -167,6 +173,29 @@ pub enum SessionError {
     NeedsFragments,
 }
 
+impl SessionError {
+    /// The class name the exams pin: the decoder's own, or the session's.
+    pub fn class(self) -> &'static str {
+        match self {
+            Self::Decode(refusal) => refusal.name(),
+            Self::Encode(_) => "encode",
+            Self::InvalidConfig => "invalid-config",
+            Self::Closed => "closed",
+            Self::NotOpen => "not-open",
+            Self::UnexpectedMessage => "unexpected-message",
+            Self::CookieMismatch => "cookie-mismatch",
+            Self::SequenceMismatch => "sequence-mismatch",
+            Self::SubscriberLimit => "subscriber-limit",
+            Self::UnknownSubscriber => "unknown-subscriber",
+            Self::UndeclaredKey => "undeclared-key",
+            Self::TooManyMessages => "too-many-messages",
+            Self::Fragment(error) => error.class(),
+            Self::OutOfMemory => "out-of-memory",
+            Self::NeedsFragments => "needs-fragments",
+        }
+    }
+}
+
 impl From<Refusal> for SessionError {
     fn from(refusal: Refusal) -> Self {
         Self::Decode(refusal)
@@ -220,6 +249,46 @@ pub enum Event<'a> {
     Closed {
         reason: u8,
     },
+    /// A best-effort frame or run the session did not take. The lane stays open, and the loss is the
+    /// owner's to count. A reliable lane refuses instead.
+    Dropped {
+        priority: u8,
+        cause: DropCause,
+    },
+}
+
+/// Why a best-effort lane dropped what it was given.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DropCause {
+    /// The sequence number is not ahead of the last one taken, by less than 2^31.
+    StaleSequence,
+    /// A FRAME arrived on a lane with a run open, which ends the run.
+    FrameDuringRun,
+    /// A fragment arrived out of order, or the first one of a run was lost.
+    FragmentSequence,
+    /// A fragment of a run that already broke, discarded through its final fragment.
+    Discarded,
+    /// A first fragment with no free run.
+    LaneLimit,
+    /// A run that outlived its timeout.
+    ReassemblyTimeout,
+    /// A message that was taken and then refused. The class is the one a reliable lane returns.
+    Completed(&'static str),
+}
+
+impl DropCause {
+    /// The cause as the exam spells it, `completed` without its class.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::StaleSequence => "stale-sequence",
+            Self::FrameDuringRun => "frame-during-run",
+            Self::FragmentSequence => "fragment-sequence",
+            Self::Discarded => "discarded",
+            Self::LaneLimit => "lane-limit",
+            Self::ReassemblyTimeout => "reassembly-timeout",
+            Self::Completed(_) => "completed",
+        }
+    }
 }
 
 /// Up to `E` events, in the order they happened.
@@ -438,6 +507,9 @@ pub struct SessionOf<
     runs: usize,
     /// The peer's INIT carried the QoS unit extension.
     peer_qos: bool,
+    /// The next sequence number each lane takes, indexed by [`Lane::index`], and whether the peer's OPEN has
+    /// set it. A lane the peer has not used counts from the number its OPEN announced.
+    lane_sn: [u32; LANES],
     reassembly: Reassembly,
     /// The key aliases a stock peer declared with DeclareKeyExpr, and the keys they stand for.
     aliases: SlotTable<K, B>,
@@ -451,6 +523,11 @@ pub struct SessionOf<
     /// This connector announces itself as a client and takes the INIT_ACK of a router.
     client: bool,
 }
+
+/// The lanes a session counts: a priority (0 to 7) and a reliability.
+const LANES: usize = 16;
+/// A best-effort sequence number is ahead of the last one taken by less than half the 32-bit range.
+const HALF: u32 = 1 << 31;
 
 /// The first release's session.
 pub type Session = SessionOf<1, 2, MAX_KEY_BYTES, MAX_EVENTS>;
@@ -534,6 +611,7 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize> SessionOf<K
             peer_batch: usize::from(u16::MAX),
             runs,
             peer_qos: false,
+            lane_sn: [0; LANES],
             reassembly: Reassembly::new(params.timeout_ms, params.message_limit),
             aliases: SlotTable::new(),
             subs: SlotTable::new(),
@@ -557,6 +635,12 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize> SessionOf<K
     /// Whether this session has the client role.
     pub const fn is_client(&self) -> bool {
         self.client
+    }
+
+    /// The next sequence number `lane` takes. A lane the peer has not used counts from the number its OPEN
+    /// announced.
+    pub const fn lane_next(&self, lane: Lane) -> u32 {
+        self.lane_sn[lane.index()]
     }
 
     /// Whether this side offers the QoS unit extension on its INIT: it holds 2 or more runs.
@@ -840,6 +924,9 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize> SessionOf<K
             self.now_ms = now_ms;
             return Ok(outcome);
         }
+        if self.lanes() && !self.client && batch.first().copied().is_some_and(is_frame) {
+            return self.on_lane_frame(batch, now_ms);
+        }
         let message = self.decode(batch)?;
         self.on_message(message, now_ms, out)
     }
@@ -1012,6 +1099,7 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize> SessionOf<K
         }
         self.peer_lease_ms = lease_ms;
         self.rx_sn = initial_sn;
+        self.lane_sn = [initial_sn; LANES];
         self.state = State::Open;
         Ok(Outcome::sending(sent).with(Event::HandshakeComplete))
     }
@@ -1026,6 +1114,7 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize> SessionOf<K
         }
         self.peer_lease_ms = lease_ms;
         self.rx_sn = initial_sn;
+        self.lane_sn = [initial_sn; LANES];
         self.state = State::Open;
         Ok(Outcome::nothing().with(Event::HandshakeComplete))
     }
@@ -1102,6 +1191,88 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize> SessionOf<K
                     }
                 }
                 Err(error)
+            }
+        }
+    }
+
+    /// One FRAME on a negotiated link, taken by the lane its header names. A reliable lane takes exactly its
+    /// next number and refuses anything else, as a link with one lane does. A best-effort lane takes a number
+    /// ahead of the last one, counts the gap and delivers; it drops a number that is not ahead and reports
+    /// it. The network messages are validated and applied as a plain FRAME's are.
+    fn on_lane_frame<'a>(
+        &mut self,
+        batch: &'a [u8],
+        now_ms: u64,
+    ) -> Result<Outcome<'a, E>, SessionError> {
+        if self.state != State::Open {
+            return Err(SessionError::UnexpectedMessage);
+        }
+        let header = decode_lane_frame(batch)?;
+        let lane = header.lane;
+        let next = self.lane_sn[lane.index()];
+        if lane.reliable {
+            if header.sn != next {
+                return Err(SessionError::SequenceMismatch);
+            }
+        } else if header.sn.wrapping_sub(next) >= HALF - 1 {
+            // Upstream measures from the last number taken, one below the count held here, so a number
+            // is ahead by 1 to 2^31 - 1 of it, which is 0 to 2^31 - 2 of the count.
+            return Ok(Outcome::nothing().with(Event::Dropped {
+                priority: lane.priority,
+                cause: DropCause::StaleSequence,
+            }));
+        }
+        let mut journal = [None; JOURNAL];
+        let mut used = 0;
+        let mut events = Events::empty();
+        let applied = match frame_of(header.sn, header.body, &self.params.bounds) {
+            Ok(frame) => self.apply_frame(&frame, &mut journal, &mut used, &mut events),
+            Err(refusal) => Err(refusal.into()),
+        };
+        match applied {
+            Ok(()) => {
+                for change in journal.iter().take(used).flatten() {
+                    if let Change::Unsubscribed(at) = *change {
+                        self.subs.settle(at);
+                    }
+                }
+                self.lane_sn[lane.index()] = header.sn.wrapping_add(1);
+                if lane == Lane::DEFAULT {
+                    self.rx_sn = self.lane_sn[lane.index()];
+                }
+                self.last_rx_ms = now_ms;
+                self.now_ms = now_ms;
+                Ok(Outcome { sent: 0, events })
+            }
+            Err(error) if lane.reliable => {
+                self.undo(&journal, used);
+                Err(error)
+            }
+            Err(error) => {
+                self.undo(&journal, used);
+                // The number was ahead, so the lane moves past it: the sender will not send it again.
+                self.lane_sn[lane.index()] = header.sn.wrapping_add(1);
+                Ok(Outcome::nothing().with(Event::Dropped {
+                    priority: lane.priority,
+                    cause: DropCause::Completed(error.class()),
+                }))
+            }
+        }
+    }
+
+    /// Undoes the table changes of a FRAME that failed midway, newest first.
+    fn undo(&mut self, journal: &[Option<Change>; JOURNAL], used: usize) {
+        for change in journal.iter().take(used).rev().flatten() {
+            match *change {
+                Change::Alias(at) => self.aliases.remove(at),
+                Change::Subscribed(at) => {
+                    self.subs.remove(at);
+                    self.remote_n -= 1;
+                }
+                Change::Unsubscribed(at) => {
+                    self.subs.restore(at);
+                    self.remote_n += 1;
+                }
             }
         }
     }

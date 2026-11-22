@@ -503,6 +503,8 @@ impl<
                 Event::SubscriberDeclared { id } => Notice::SubscriberDeclared { id },
                 Event::SubscriberUndeclared { id } => Notice::SubscriberUndeclared { id },
                 Event::Closed { reason } => Notice::Closed { reason },
+                // A drop is the session's report. The owner has no notice for it yet.
+                Event::Dropped { .. } => continue,
                 Event::SampleStored {
                     sequence,
                     timestamp,

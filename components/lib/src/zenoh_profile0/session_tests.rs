@@ -94,6 +94,7 @@ fn owned(outcome: &Outcome<'_>, out: &[u8]) -> (Vec<u8>, Vec<Ev>) {
             Event::SampleStored { .. } => {
                 unreachable!("a session that cannot fragment stores no sample")
             }
+            Event::Dropped { .. } => unreachable!("these sessions hold one run and drop nothing"),
         })
         .collect();
     (outcome.batch(out).to_vec(), events)

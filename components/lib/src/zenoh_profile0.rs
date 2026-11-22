@@ -804,16 +804,21 @@ fn frame<'a>(mut reader: Reader<'a>, header: u8, bounds: &Bounds) -> Result<Mess
     if reader.left() == 0 {
         return Err(Refusal::MalformedMessage);
     }
-    let body = Reader::new(&reader.data[reader.at..]);
-    let mut check = body;
+    frame_of(sn, &reader.data[reader.at..], bounds).map(Message::Frame)
+}
+
+/// A FRAME whose header was read elsewhere: `body` is its network messages, each validated as `frame` validates
+/// them. A lane FRAME reaches the session through here.
+pub(crate) fn frame_of<'a>(sn: u32, body: &'a [u8], bounds: &Bounds) -> Result<Frame<'a>, Refusal> {
+    let mut check = Reader::new(body);
     while check.left() != 0 {
         parse_network(&mut check, bounds)?;
     }
-    Ok(Message::Frame(Frame {
+    Ok(Frame {
         sn,
-        body: body.data,
+        body,
         bounds: *bounds,
-    }))
+    })
 }
 
 /// Decodes one batch body, the bytes after a stream length prefix, under the first release's bounds.
