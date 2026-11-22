@@ -114,7 +114,7 @@ fn an_extension_other_than_the_mandatory_qos_is_refused() {
         ("priority 255", "a50531ff01"),
         ("not mandatory", "a5052102"),
         ("another id", "a5053202"),
-        ("a chain", "a5b1020141"),
+        ("a chain", "a505b1024100"),
         ("an unknown extension", "a5054100"),
     ] {
         let bytes = with_body(header);
@@ -129,6 +129,21 @@ fn an_extension_other_than_the_mandatory_qos_is_refused() {
         decode_lane_fragment(&bytes, None).err(),
         Some(FragmentError::Refused(Refusal::UnsupportedExtension))
     );
+}
+
+#[test]
+fn a_value_the_extension_cannot_carry_is_refused_with_its_own_class() {
+    // The extension is `31` and a value. A value over 32 bits, a padded value and a cut one are not a
+    // priority above 7: the reader refuses them as a number, as it refuses a sequence number.
+    for (name, header, class) in [
+        ("over 32 bits", "a50531ffffffff1f", Refusal::Leb128Overflow),
+        ("padded", "a505318000", Refusal::Leb128Noncanonical),
+        ("cut after the id", "a50531", Refusal::Truncated),
+        ("256", "a505318002", Refusal::UnsupportedExtension),
+    ] {
+        let bytes = with_body(header);
+        assert_eq!(decode_lane_frame(&bytes), Err(class), "{name}");
+    }
 }
 
 #[test]

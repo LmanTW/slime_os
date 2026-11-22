@@ -64,8 +64,9 @@ pub struct LaneFragment<'a> {
 }
 
 /// Reads the extension chain of a FRAME or a FRAGMENT: nothing, or exactly the mandatory QoS extension. A
-/// priority above 7, any other extension, a chain that goes on and a value that does not fit are all
-/// refused as `unsupported-extension`.
+/// priority above 7, any other extension and a chain that goes on are refused as `unsupported-extension`.
+/// A value that is cut, padded or wider than 32 bits is refused as the number it is: `truncated`,
+/// `leb128-noncanonical` or `leb128-overflow`.
 fn priority(reader: &mut Reader<'_>, header: u8) -> Result<u8, Refusal> {
     if header & FLAG_Z == 0 {
         return Ok(DEFAULT_PRIORITY);
