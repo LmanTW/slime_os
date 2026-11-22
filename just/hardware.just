@@ -114,7 +114,7 @@ zenoh_rmw_data_check:
 zenoh_rmw_client_check:
     python3 scripts/check/check-zenoh-profile0.py --slice rmw-client
 
-# Judges a Profile 0 link with the client role that subscribes through a router. rmw_zenohd stamps every Put it forwards,
+# Judges a Profile 0 link with the client role that subscribes through a router. rmw_zenoh_cpp stamps every Put it publishes,
 # and the link takes that timestamp while every other decoder still refuses it. The Rust tests drive the link with two runs
 # of rmw_zenohd, captured by scripts/lib/zenoh_rmw_router_data.py, three ways: each batch whole, one byte at a time and all
 # at once. The link writes the client INIT_SYN, the OPEN_SYN and the subscription, and delivers the four samples the router

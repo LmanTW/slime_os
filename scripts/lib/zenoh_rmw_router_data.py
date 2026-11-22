@@ -13,9 +13,10 @@ Provenance, one x86_64 Linux host, two runs:
   the 2-byte stream length. The OPEN_SYN and the subscriber FRAME are this side's, so they are not fixtures of the router.
 
 Each forwarded FRAME holds one PUSH of the chatter key whose PUT header is `0xa1`: a PUT with the timestamp flag and
-the attachment extension. The router adds the timestamp, a 64-bit time and a 16-byte ID, to a Put it forwards. A peer's
-direct Put carries none. The attachment is the 33 bytes `rmw_zenoh_cpp` writes, and its source timestamp is not the
-router's. The frame sequence numbers are consecutive and the first equals the OPEN_ACK's initial sequence number.
+the attachment extension. The timestamp, a 64-bit time and a 16-byte ID, is the publisher's. The ID is not the router's
+ZID, and the time is within a microsecond of the attachment's source timestamp. The direct-peer captures of
+`zenoh_rmw_data_peer`, which have no router, carry the same header and layout. The frame sequence numbers are
+consecutive and the first equals the OPEN_ACK's initial sequence number.
 The samples carry sequence numbers 3 to 6 and the payloads `Hello World: 3` to `Hello World: 6`. The ZIDs, the
 cookies and the times differ between runs.
 

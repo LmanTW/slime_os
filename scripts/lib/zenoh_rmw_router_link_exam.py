@@ -1,9 +1,10 @@
 """Judge a client-role link that subscribes through a router from what the Rust tests print.
 
-`rmw_zenohd` stamps every Put it forwards. The PUT header carries the timestamp flag, and a 64-bit time and a
-16-byte ID follow it, before the attachment extension. A Profile 0 decoder refuses that header, so a link that opened
-a session with a router would end on the first forwarded sample. This exam judges the opt-in that changes that: a
-link with the client role takes the timestamp, and every other decoder still refuses it.
+`rmw_zenoh_cpp` stamps every Put it publishes, and a router forwards the stamp unchanged. The PUT header carries the
+timestamp flag, and a 64-bit time and a 16-byte ID follow it, before the attachment extension. The plain Profile 0
+decoder refuses that header, so a link that opened a session with a router would end on the first forwarded sample.
+This exam judges the opt-in that changes that: a link with the client role takes the timestamp, and every other
+decoder still refuses it.
 
 The Rust tests under `zenoh_link::router_tests` drive a client-role link against the two captures of
 `zenoh_rmw_router_data` through a scripted byte stream, three ways: each batch written whole, every byte read alone,
@@ -13,8 +14,9 @@ module builds the whole transcript from the captured bytes and `zenoh_wire`, and
 * the bytes the link wrote: the client INIT_SYN, the OPEN_SYN that echoes the router's cookie, and the FRAME that
   declares the owner's subscription on the chatter key;
 * the four samples the link delivered, with the sequence number and source timestamp of each attachment and its text.
-  The router's timestamp is checked and not delivered;
-* the CLOSE the link wrote when the owner closed it;
+  The Put's own timestamp is checked and not delivered;
+* the CLOSE the link wrote when the owner closed it, and that the queue is then empty and the link holds no
+  subscription;
 * four refusals, each with the class it is refused as.
 
 Like the other judges, this one is trusted only after it refuses a mutation of an honest transcript.
@@ -81,7 +83,7 @@ def init_ack_cookie(ack: bytes) -> bytes:
 
 
 def read_wide_leb128(data: bytes, at: int) -> tuple[int, int]:
-    """A LEB128 of up to 64 bits, which the router's timestamp needs and `zenoh_wire.read_leb128` refuses."""
+    """A LEB128 of up to 64 bits, which the Put's timestamp needs and `zenoh_wire.read_leb128` refuses."""
     value = 0
     for count in range(10):
         _need(at < len(data), "a LEB128 that runs off the batch")
@@ -95,7 +97,7 @@ def read_wide_leb128(data: bytes, at: int) -> tuple[int, int]:
 
 
 def parse_forwarded(batch: bytes) -> dict:
-    """One forwarded FRAME: a PUSH of the chatter key, a PUT with the timestamp flag, the router's timestamp and the
+    """One forwarded FRAME: a PUSH of the chatter key, a PUT with the timestamp flag, the Put's timestamp and the
     attachment. Anything else is refused, so the transcript is about what the router wrote."""
     _need(bool(batch) and batch[0] == zenoh_wire.ID_FRAME | zenoh_wire.FLAG_R, "a forwarded batch that is not a reliable FRAME")
     sn, at = zenoh_wire.read_leb128(batch, 1)
@@ -181,7 +183,7 @@ def good_lines() -> list[str]:
             lines.append(f"routerlink sent {name} {mode} {hexed(written(ack))}")
             lines += [sample_line(name, mode, sample) for sample in samples(forwarded)]
             lines.append(f"routerlink pushes {name} {mode} dropped=0")
-            lines.append(f"routerlink closed {name} {mode} reason=0 wrote={hexed(framed(zenoh_wire.close(0, True)))}")
+            lines.append(f"routerlink closed {name} {mode} reason=0 wrote={hexed(framed(zenoh_wire.close(0, True)))} queue=0 subscription=none")
             lines.append(f"routerlink ok {name}-{mode}")
     for refused, cls in REFUSALS:
         lines.append(f"routerlink refused {refused} {cls}")
@@ -287,10 +289,12 @@ def transcript_mutations() -> list[tuple[str, list[str]]]:
         other = next(c for c in classes if c != cls)
         out.append((f"the {good[index].split(' ')[2]} refusal reported as {other}", [*good[:index], good[index].replace(f" {cls}", f" {other}", 1), *good[index + 1 :]]))
     out.append(("a sample delivered after the close", [*good, "routerlink sample router-data-1 whole 1 7 1 Hello_World:_7"]))
-    out.append(("a link that dropped a push", [good[i].replace("dropped=0", "dropped=1", 1) if i == kinds["pushes"][0] else good[i] for i in range(len(good))]))
+    out.append(("a sample queue left full after the close", [good[i].replace("queue=0", "queue=4", 1) if i == kinds["closed"][0] else good[i] for i in range(len(good))]))
+    out.append(("a subscription kept after the close", [good[i].replace("subscription=none", "subscription=1", 1) if i == kinds["closed"][0] else good[i] for i in range(len(good))]))
+    out.append(("a local close that wrote nothing", [good[i].replace("wrote=02002300", "wrote=-", 1) if i == kinds["closed"][0] else good[i] for i in range(len(good))]))
     out.append(("a subscription declared on another key", [good[i].replace(router.KEY.encode().hex()[:40], "00" * 20, 1) if i == kinds["sent"][0] else good[i] for i in range(len(good))]))
     out.append(("a close with another reason", [good[i].replace("reason=0", "reason=1", 1) if i == kinds["closed"][0] else good[i] for i in range(len(good))]))
-    out.append(("the router's timestamp delivered as the sample's", [good[i].replace(str(samples(router.RUNS[0][4])[0]["timestamp"]), "7710881841417541488", 1) if i == kinds["sample"][0] else good[i] for i in range(len(good))]))
+    out.append(("the Put's own timestamp delivered as the sample's", [good[i].replace(str(samples(router.RUNS[0][4])[0]["timestamp"]), "7710881841417541488", 1) if i == kinds["sample"][0] else good[i] for i in range(len(good))]))
     return out
 
 
@@ -319,7 +323,7 @@ def all_controls() -> int:
 # .tasks/terminal. While the item is open its stored predicates are compared with these. Both are exact.
 PINNED_CASES = 54
 PINNED_REFUSALS = len(REFUSALS)
-PINNED_CONTROLS = 111
+PINNED_CONTROLS = 113
 
 
 def item_pins() -> tuple[int, int]:
