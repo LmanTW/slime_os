@@ -311,16 +311,26 @@ fn run_session(run: &Run, mode_name: &str, mode: Mode) {
     rig.link.close(handle, 0).expect("a local close");
     rig.settle();
     let wrote = rig.written()[before..].to_vec();
-    while rig.link.next_notice().is_some() {}
+    // The samples were taken above. What a close leaves behind is read from the link: the reason it reported, and any
+    // sample it still holds. The `Closed` notice is the close itself and is not a sample.
+    let mut reason = None;
+    let mut samples_left = 0usize;
+    while let Some(notice) = rig.link.next_notice() {
+        match notice {
+            Notice::Closed { reason: reported } => reason = Some(reported),
+            Notice::SampleDelivered(_) | Notice::SampleStored(_) => samples_left += 1,
+            _ => {}
+        }
+    }
+    let reason = reason.expect("a local close reports its reason");
     let subscription = match rig.link.session().subscriber_id() {
         Some(id) => std::format!("{id}"),
         None => String::from("none"),
     };
     line(&std::format!(
-        "closed {} {mode_name} reason=0 wrote={} queue={} subscription={subscription}",
+        "closed {} {mode_name} reason={reason} wrote={} queue={samples_left} subscription={subscription}",
         run.name,
-        hex(&wrote),
-        rig.link.notices_queued()
+        hex(&wrote)
     ));
     line(&std::format!("ok {}-{mode_name}", run.name));
 }
