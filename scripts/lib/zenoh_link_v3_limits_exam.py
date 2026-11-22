@@ -322,7 +322,6 @@ def lifting_controls() -> int:
     the two versions cannot declare different memory for the same link. Each equality is one fact, and a changed
     restatement is refused.
     """
-    heap = links.pinned_configs()[2]
     for runs in (1, 2, 3, 16):
         check_lifting(runs, stack_v3, heap_v3)
     refused = 0
