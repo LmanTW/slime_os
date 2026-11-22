@@ -331,8 +331,9 @@ Known limits of the component:
 - It is built for at most two holders and two rows. It refuses a table above that, and it serves a table below it.
 - The last holder to settle gets no answer to a request after that, because the service returns once the roster is done.
   No boot shows a settled holder sending. The judge shows only that the statements which cleared the endpoints are gone.
-- A configuration judged by `contracts/zenoh-link-limits/v1` cannot declare more than one local subscription. A second
-  declaration needs a new version of that contract. The component does not use that path: it opens its link with
+- A configuration judged by `contracts/zenoh-link-limits/v1` cannot declare more than one local subscription. Version 3 of
+  that contract adds `localSubscriptions` beside `maxRuns`. The contract and its judge exist, and the generated Rust constants
+  and the reader of a version 3 record do not. The component does not use that path: it opens its link with
   `Params { local: 3 }`.
 - A publisher receives its own publications, and a holder cannot exclude them. Lazy declaration and reliable delivery with
   credits are not implemented. [The decision record](../decisions/zenoh-service.md) gives the reasons.
