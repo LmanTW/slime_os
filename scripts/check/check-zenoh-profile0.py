@@ -127,6 +127,7 @@ import zenoh_rmw_component_exam
 import zenoh_rmw_peer_component_exam
 import zenoh_rmw_data_exam
 import zenoh_rmw_client_exam
+import zenoh_rmw_client_put_exam
 import zenoh_rmw_router
 import zenoh_rmw_router_data
 import zenoh_rmw_router_link_exam
@@ -2301,6 +2302,73 @@ def rmw_router_link_main(controls_only: bool) -> int:
     return 0
 
 
+RMW_CLIENT_PUT_FILTER = "zenoh_link::put_tests::"
+# The exam's own Rust tests, by name: a filter that matches nothing passes silently.
+RMW_CLIENT_PUT_TESTS = tuple(f"zenoh_link::put_tests::{name}" for name in (
+    "the_client_put_exam",
+))
+
+
+def exam_lines_client_put(output: str) -> list[str]:
+    """The `[zenoh-exam] clientput ...` lines of a run, with the marker removed."""
+    return [line for line in exam_lines(output) if line.startswith("clientput ")]
+
+
+def run_rmw_client_put() -> list[str]:
+    # The router link exam runs first and is judged on this path: a Put path built on a link that no longer takes a
+    # router's handshake proves nothing.
+    try:
+        zenoh_rmw_router_link_exam.judge(run_rmw_router_link())
+    except zenoh_rmw_router_link_exam.RouterLinkExamError as error:
+        fail(str(error))
+    # The handshakes reach the Rust test only through this variable, one run to a line: name, INIT_SYN, INIT_ACK,
+    # OPEN_ACK and the four forwarded FRAMEs.
+    rows = ("\n".join(" ".join((name, syn, ack, open_ack, *forwarded)) for name, syn, ack, open_ack, forwarded in zenoh_rmw_router_data.RUNS))
+    stdout, output = cargo_tests((RMW_CLIENT_PUT_FILTER,), {**_os.environ, "ZENOH_RMW_ROUTER_DATA_RUNS": rows})
+    passed = tests_passed(output)
+    missing = [name for name in RMW_CLIENT_PUT_TESTS if name not in passed]
+    if missing:
+        fail(f"rmw-client-put: the exam's tests did not run and pass ({len(missing)} of {len(RMW_CLIENT_PUT_TESTS)}): {', '.join(missing[:4])}")
+    return exam_lines_client_put(stdout)
+
+
+def rmw_client_put_main(controls_only: bool) -> int:
+    try:
+        zenoh_rmw_client_exam.all_controls()
+        zenoh_rmw_router_link_exam.all_controls()
+    except (zenoh_rmw_client_exam.ClientExamError, zenoh_rmw_router_link_exam.RouterLinkExamError) as error:
+        fail(str(error))
+    sample = "\n".join(f"test {name} ... ok" for name in RMW_CLIENT_PUT_TESTS[1:])
+    if all(name in tests_passed(sample) for name in RMW_CLIENT_PUT_TESTS):
+        fail("control: a run with an rmw-client-put exam test missing was read as complete")
+    exam = zenoh_rmw_client_put_exam
+    try:
+        refused_controls = exam.all_controls()
+        item_cases, item_controls = exam.item_pins()
+        positive, refusals = exam.judge(exam.good_lines())
+    except exam.ClientPutExamError as error:
+        fail(str(error))
+    if positive + refusals != exam.PINNED_CASES:
+        fail(f"rmw-client-put: an honest transcript is {positive + refusals} cases, the checker pins {exam.PINNED_CASES}")
+    if refused_controls != exam.PINNED_CONTROLS:
+        fail(f"rmw-client-put: {refused_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if item_cases and item_cases != exam.PINNED_CASES:
+        fail(f"rmw-client-put: the item fixes {item_cases} cases, the checker pins {exam.PINNED_CASES}")
+    if item_controls and item_controls != exam.PINNED_CONTROLS:
+        fail(f"rmw-client-put: the item requires {item_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 rmw-client-put judge: refused {refused_controls} corrupted records")
+        return 0
+    try:
+        cases, refusals = exam.judge(run_rmw_client_put())
+    except exam.ClientPutExamError as error:
+        fail(str(error))
+    print(f"[zenoh-profile0] slice=rmw-client-put cases={cases} refusals={refusals} controls={refused_controls}")
+    devloop_observations.record(casesObserved=cases + refusals, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 rmw-client-put check: a client-role link wrote Puts on the chatter key with no declaration from its peer, and a link with no role still refused an undeclared key")
+    return 0
+
+
 def rmw_data_link_main(controls_only: bool) -> int:
     try:
         zenoh_rmw_exam.all_controls()
@@ -3519,7 +3587,7 @@ def lost_holder_main(controls_only: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-client", "rmw-router-link", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "lanes", "link-limits-v3", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service-peer", "service", "service-link", "holder-fault", "service-stack", "lost-holder"), required=True)
+    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-client", "rmw-router-link", "rmw-client-put", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "lanes", "link-limits-v3", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service-peer", "service", "service-link", "holder-fault", "service-stack", "lost-holder"), required=True)
     parser.add_argument("--controls-only", action="store_true")
     arguments = parser.parse_args()
     if arguments.slice == "composition":
@@ -3546,6 +3614,8 @@ def main() -> int:
         return rmw_client_main(arguments.controls_only)
     if arguments.slice == "rmw-router-link":
         return rmw_router_link_main(arguments.controls_only)
+    if arguments.slice == "rmw-client-put":
+        return rmw_client_put_main(arguments.controls_only)
     if arguments.slice == "rmw-data":
         return rmw_data_main(arguments.controls_only)
     if arguments.slice == "rmw-graph":
