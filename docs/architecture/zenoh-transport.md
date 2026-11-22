@@ -486,8 +486,8 @@ Each is a 72-byte `INIT_ACK` of `whatami` 0 with a 49-byte cookie, then an `OPEN
 is judged against those two captures by `scripts/lib/zenoh_rmw_client_exam.py`.
 
 `scripts/lib/zenoh_rmw_router_data.py` holds two further runs of the same router with a `demo_nodes_cpp` talker. Each
-has the handshake and the first four forwarded frames, with sequence numbers 3 to 6. The frames are consecutive and the
-first equals the `OPEN_ACK`'s sequence number. In both runs the timestamp's ID is not the router's ZID. Its time is
+has the handshake and the first four forwarded frames. The frames' own sequence numbers are consecutive, and the first
+equals the `OPEN_ACK`'s. The attachments carry the samples' sequence numbers 3 to 6. In both runs the timestamp's ID is not the router's ZID. Its time is
 within 1 µs of the attachment's source timestamp, so the publisher stamped it.
 
 `scripts/lib/zenoh_rmw_router_link_exam.py` judges a client-role link against those runs. The link writes the client
