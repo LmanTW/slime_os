@@ -5,6 +5,7 @@ item :: s.Item = (h.task "01a20204-f08d-7403-b3c0-553dafd965f6" "zenoh-grading-c
   "The grading exam of the Zenoh service server half has a control for each claim it makes"
   "The review of the grading planning PR found three gaps. No control changed the refused-offer count or the link of a stall, or the status and echoed row of a malformed answer. One control dropped the constants line and so repeated another. The item text counted nine answers and listed seven. The exam already refused each named input by its exact comparison. The controls that show it were missing.")
   with {
+    intent = #active;
     supersedes = { "01a1ef34-0852-7698-9239-8c901559b322"; };
     owns = {
       "components/lib/src/zenoh_service_server/grading.rs";
