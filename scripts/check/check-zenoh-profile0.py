@@ -2297,7 +2297,7 @@ def rmw_router_link_main(controls_only: bool) -> int:
         fail(str(error))
     print(f"[zenoh-profile0] slice=rmw-router-link cases={cases} refusals={refusals} controls={refused_controls}")
     devloop_observations.record(casesObserved=cases + refusals, negativeControlsRefused=refused_controls)
-    print("zenoh profile 0 rmw-router-link check: a client-role link subscribed through the captured handshakes of rmw_zenohd and delivered the samples the router forwarded, and every other decoder still refused its timestamp")
+    print("zenoh profile 0 rmw-router-link check: a client-role link subscribed through the captured handshakes of rmw_zenohd and delivered the samples the router forwarded, and the plain decoder still refused its timestamp without the role")
     return 0
 
 

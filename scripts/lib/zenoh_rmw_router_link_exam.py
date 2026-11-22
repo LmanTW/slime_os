@@ -3,8 +3,8 @@
 `rmw_zenoh_cpp` stamps every Put it publishes, and a router forwards the stamp unchanged. The PUT header carries the
 timestamp flag, and a 64-bit time and a 16-byte ID follow it, before the attachment extension. The plain Profile 0
 decoder refuses that header, so a link that opened a session with a router would end on the first forwarded sample.
-This exam judges the opt-in that changes that: a link with the client role takes the timestamp, and every other
-decoder still refuses it.
+This exam judges the opt-in that changes that: a link with the client role takes the timestamp, and the plain decoder
+still refuses it without the role. The graph decoder already takes it, and the fragment decoder refuses it.
 
 The Rust tests under `zenoh_link::router_tests` drive a client-role link against the two captures of
 `zenoh_rmw_router_data` through a scripted byte stream, three ways: each batch written whole, every byte read alone,
