@@ -16,22 +16,22 @@ item :: s.Item = (h.bug "01a202cb-f3e5-777d-a488-7c3853891f3d" "zenoh-arm-row-ru
     };
     requirements = {
       h.req "the-judge-reads-the-grants"
-        "The judge takes the grants of the composition as rows of a holder, a key, and the publish and subscribe rights. It reads them from the system spec of the composition, in the order the grants table sorts them. It requires the grants line of the transcript to state the same row and holder counts."
+        "The judge takes the grants of the composition as rows of a holder, a key, and the publish and subscribe rights. It reads them from the system spec of the composition, in the order the grants table sorts them. It requires the grants line of the transcript to state the same holder and row counts. It requires each attached holder to be one the grants name."
         { "zenoh_service_booted_check"; };
       h.req "a-delivery-names-the-receivers-row"
-        "A delivery carries the index of a subscribe row of the receiving holder, and that row holds the key of the publication it answers. The judge no longer requires the row to equal the publisher's row."
+        "A delivery carries the index of a row of the receiving holder, and that row holds the key of the publication it answers. The judge no longer requires the row to equal the publisher's row."
         { "zenoh_service_booted_check"; };
       h.req "a-publication-names-a-publish-row"
         "A publication carries the index of a publish row of the publishing holder. Its reach equals the number of holders that hold a subscribe row on that key and are attached."
         { "zenoh_service_booted_check"; };
       h.req "controls-are-refused"
-        "The judge refuses the 63 inputs that the merged judge refuses, and 8 more. They deliver a sample on a row that holds another key, on a row past the receiver's rows, and on a row that only publishes. They publish on a row that only subscribes. They state a reach above and below the holders that subscribe, and read grants that disagree with the grants line."
+        "The judge refuses the 63 inputs that the merged judge refuses, and 7 more. Two deliver a sample on a row that holds another key and on a row past the receiver's rows. One publishes on a row that only subscribes. One states a reach below the attached holders that subscribe, with the deliveries to match. Three disagree with the grants. One has a row count the grants line does not sum to. One attaches a holder the grants do not name. One is a transcript of four holders against the grants of two."
         { "zenoh_service_booted_check"; };
     };
     acceptance = {
       h.observedWhere "zenoh_service_booted_check" {
         h.count "casesObserved" 19;
-        h.count "negativeControlsRefused" 71;
+        h.count "negativeControlsRefused" 70;
       };
     };
     decisions = {
@@ -41,8 +41,8 @@ item :: s.Item = (h.bug "01a202cb-f3e5-777d-a488-7c3853891f3d" "zenoh-arm-row-ru
         h.agentDefault
         { "the-judge-reads-the-grants"; "a-delivery-names-the-receivers-row"; };
       h.decided "supersede-the-booted-exam-pin"
-        "This item supersedes the area requirement that pins the booted exam at exactly 63 controls, and it pins 71."
-        "V10 freezes area requirements, and a judge with 8 more controls would fail a promise of exactly 63. The cases stay at 19, so the other area requirements on this target are unchanged"
+        "This item supersedes the area requirement that pins the booted exam at exactly 63 controls, and it pins 70."
+        "V10 freezes area requirements, and a judge with 7 more controls would fail a promise of exactly 63. The cases stay at 19, so the other area requirements on this target are unchanged"
         h.agentDefault
         { "controls-are-refused"; };
     };

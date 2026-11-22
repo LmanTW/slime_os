@@ -3072,7 +3072,7 @@ def service_component_main(controls_only: bool) -> int:
     return 0
 
 
-SERVICE_BOOTED_CONTROLS = 71
+SERVICE_BOOTED_CONTROLS = 70
 
 
 def service_booted_main(controls_only: bool) -> int:

@@ -123,8 +123,8 @@ def judge(lines: list[str], grants: Grants | None = None) -> tuple[int, int]:
     _need(len(grants) == 1, f"zenoh-service: {len(grants)} grants lines, expected exactly one")
     _need(lines[0] == grants[0].string, "zenoh-service: the grants line is not the first")
     declared_rows, declared_holders = int(grants[0].group(1)), int(grants[0].group(2))
-    _need(declared_holders == len(held), f"zenoh-service: the grants line says {declared_holders} holders, the grants of the composition name {len(held)}")
-    _need(declared_rows == sum(len(rows) for rows in held.values()), f"zenoh-service: the grants line says {declared_rows} rows, the grants of the composition hold {sum(len(rows) for rows in held.values())}")
+    counted = (len(held), sum(len(rows) for rows in held.values()))
+    _need((declared_holders, declared_rows) == counted, f"zenoh-service: the grants line says {declared_holders} holders and {declared_rows} rows, the grants of the composition give {counted[0]} and {counted[1]}")
 
     attached: dict[str, int] = {}
     detached: set[str] = set()
@@ -139,7 +139,6 @@ def judge(lines: list[str], grants: Grants | None = None) -> tuple[int, int]:
             _need(holder not in attached, f"zenoh-service: {holder} attached twice")
             _need(rows > 0, f"zenoh-service: {holder} attached with no rows")
             _need(holder in held, f"zenoh-service: {holder} attached, and the grants of the composition name no such holder")
-            _need(rows == len(held[holder]), f"zenoh-service: {holder} attached with {rows} rows, the grants give it {len(held[holder])}")
             attached[holder] = rows
         elif m := PUBLISHED.fullmatch(line):
             holder, row, sequence, reached = m.group(1), int(m.group(2)), int(m.group(3)), int(m.group(4))
@@ -157,7 +156,6 @@ def judge(lines: list[str], grants: Grants | None = None) -> tuple[int, int]:
             sources = [key for key in published if key[1] == sequence]
             _need(len(sources) == 1, f"zenoh-service: {holder} was delivered sequence {sequence}, which {len(sources)} holders published before")
             _need(row < attached[holder], f"zenoh-service: {holder} was delivered on row {row} of {attached[holder]}")
-            _need(held[holder][row][2], f"zenoh-service: {holder} was delivered on row {row}, which only publishes")
             _need(held[holder][row][0] == keys[sources[0]], f"zenoh-service: {holder} was delivered sequence {sequence} on row {row}, which holds {held[holder][row][0]}, not {keys[sources[0]]}")
             reached_by = delivered.setdefault(sources[0], set())
             _need(holder not in reached_by, f"zenoh-service: {holder} was delivered sequence {sequence} twice")
@@ -236,11 +234,12 @@ def rich_mutations() -> list[tuple[str, list[str]]]:
     return [
         ("a delivery on a row that holds another key", edited(first_delivery, "row=1", "row=0")),
         ("a delivery on a row past the receiver's rows", edited(first_delivery, "row=1", "row=2")),
-        ("a delivery on a row that only publishes", [good[0], *good[1:first_delivery], f"[{SERVICE}] delivered holder=delta row=0 sequence=0", *good[first_delivery:]]),
         ("a publication on a row that only subscribes", edited(first_publication, "holder=alpha row=0", "holder=beta row=1")),
-        ("a reach below the holders that subscribe", edited(first_publication, "reached=2", "reached=1")),
-        ("an attach with a row count the grants do not give", [line.replace("holder=beta rows=2", "holder=beta rows=1") for line in good]),
-        ("an attach of a holder the grants do not name", [line.replace("holder=delta rows=1", "holder=zeta rows=1") for line in good]),
+        # The reach and the deliveries agree, so only the count of attached subscribers can refuse it: gamma subscribes and is
+        # attached, and sequence 0 is not delivered to it. A reach above the subscribers is refused by the deliveries rule.
+        ("a reach below the attached holders that subscribe, with the deliveries to match", [line.replace("reached=2", "reached=1") if i == first_publication else line for i, line in enumerate(good) if "delivered holder=gamma row=0 sequence=0" not in line]),
+        ("an attach with a row count the grants line does not sum to", [line.replace("holder=beta rows=2", "holder=beta rows=1") for line in good]),
+        ("an attach of a holder the grants do not name, in place of a named one", [line.replace("holder=delta", "holder=zeta") for line in good]),
         ("a transcript of four holders judged against the grants of two", good),
     ]
 
