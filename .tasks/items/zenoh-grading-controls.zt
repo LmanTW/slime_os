@@ -1,0 +1,58 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a20204-f08d-7403-b3c0-553dafd965f6" "zenoh-grading-controls" "zenoh-service-core"
+  "The grading exam of the Zenoh service server half has a control for each claim it makes"
+  "The review of the grading planning PR found three gaps. No control changed the refused-offer count or the link of a stall, or the status and echoed row of a malformed answer. One control dropped the constants line and so repeated another. The item text counted nine answers and listed seven. The exam already refused each named input by its exact comparison. The controls that show it were missing.")
+  with {
+    supersedes = { "01a1ef34-0852-7698-9239-8c901559b322"; };
+    owns = {
+      "components/lib/src/zenoh_service_server/grading.rs";
+    };
+    nonGoals = {
+      h.nonGoal "Any change to the server half, the core, the link or the test that drives them. The transcript of an honest run is unchanged, so the 60 cases stay." h.agentDefault;
+      h.nonGoal "A second boot of the QEMU image, a malformed request from a holder component, or a stalled link under QEMU. The terminal item `zenoh-service-grading` listed them, and this item restates the host claims only." h.agentDefault;
+      h.nonGoal "Telling the retry limit from the pump bound. The exam pins both constants and one run for each stall." h.agentDefault;
+      h.nonGoal "The overlap of the grading item and the holder-fault item on `zenoh_service_server.rs`. Both are terminal, and the roster call that the overlap feared has landed with every grading line unchanged." h.agentDefault;
+    };
+    requirements = {
+      h.req "second-run-repeats-the-first"
+        "A server, core and link built a second time give the first run's nine answers and states, in the same order. Each run attaches two holders, publishes once and takes twice. It then detaches twice, and an attach and a take after the detach are denied. The link then closes and the run prints its state."
+        { "zenoh_service_grading_check"; };
+      h.req "malformed-request-changes-nothing"
+        "A request outside the protocol is refused with the status and the echoed operation, row and length that the schema gives. After each of 28 such requests, both rings hold what they held and no byte reaches the stream or the peer. The link stays open and both sessions stay attached."
+        { "zenoh_service_grading_check"; };
+      h.req "served-after-refusals"
+        "After the 28 refusals, each holder takes the sample that sat in its ring, and a new publication reaches both rings and the peer."
+        { "zenoh_service_grading_check"; };
+      h.req "stalled-link-is-closed"
+        "A publication that the stream does not take is answered `link-closed`. A stream that takes nothing ends the link after four refused offers. A stream that takes one byte in two offers leaves the link open after 16 refused offers. In both, no ring holds the sample when the holder is answered."
+        { "zenoh_service_grading_check"; };
+      h.req "each-claim-has-a-control"
+        "The judge changes the refused-offer count and the link of each stall, and the status and echoed row of four malformed answers. It refuses each change. It also refuses a second run labelled as the first with its constants line kept."
+        { "zenoh_service_grading_check"; };
+      h.req "judge-is-independent"
+        "The judge writes every request and completion again with `struct` from the schema's layout and reads no Rust. It refuses 169 corrupted inputs, and no two build one transcript. It does this before it judges the run. The run is the one named test, run alone."
+        { "zenoh_service_grading_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_service_grading_check" {
+        h.count "casesObserved" 60;
+        h.count "negativeControlsRefused" 169;
+      };
+    };
+    decisions = {
+      h.decided "supersede-the-terminal-item"
+        "This item supersedes the whole item `zenoh-service-grading` and restates its requirements. It does not supersede `judge-is-independent` alone."
+        "the terminal item's acceptance says the target refuses 162 controls. If that item stayed bound, a run that refuses 169 would fail its promise"
+        h.agentDefault
+        { "judge-is-independent"; };
+      h.decided "refuse-a-repeated-control"
+        "The judge counts a control once and refuses two controls that build one transcript. The control `the last line missing` repeated the per-line control for the last line, so it is gone."
+        "the pin counts distinct corruptions, as the holder-fault exam holds it"
+        h.agentDefault
+        { "each-claim-has-a-control"; "judge-is-independent"; };
+    };
+  };
+
+item

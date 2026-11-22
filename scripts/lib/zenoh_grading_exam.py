@@ -251,9 +251,8 @@ def transcript_mutations() -> list[tuple[str, list[str]]]:
         ("a line that is not a grading line", [*good, "server ok every-request-is-answered-and-no-grant-is-widened"]),
         ("an unrecognised grading line", [*good, "grading dropped request"]),
         ("a line repeated", [*good, good[-2]]),
-        ("the last line missing", good[:-1]),
         ("the first two lines swapped", [good[1], good[0], *good[2:]]),
-        ("the second run's attach on the first run's phase", [good[1].replace("boot-1", "boot-2")] + good[2:]),
+        ("the second run's attach on the first run's phase", [good[0], good[1].replace("boot-1", "boot-2"), *good[2:]]),
     ]
     for index, line in enumerate(good):
         label = f"line {index + 1} ({line[8:60]})"
@@ -283,6 +282,46 @@ def state_mutations() -> list[tuple[str, list[str]]]:
     ]
 
 
+def field_mutations() -> list[tuple[str, list[str]]]:
+    """Each claim the requirements make about a stall and about a refusal, changed on its own line.
+
+    `state_mutations` changes the state suffix of a malformed line and `_change_last` changes the last field of a line. Neither
+    reaches the refused-offer count and the link of a stall, or the status and echoed row of a malformed completion."""
+    good = good_lines()
+    out: list[tuple[str, list[str]]] = []
+
+    def line_of(phase: str, label: str) -> int:
+        return next(i for i, line in enumerate(good) if f"grading {phase} {label} " in line)
+
+    def edited(index: int, old: str, new: str) -> list[str]:
+        _need(old in good[index], f"the exam has no {old!r} on line {index + 1}")
+        return [*good[:index], good[index].replace(old, new, 1), *good[index + 1 :]]
+
+    dead, slow = line_of("stall-dead", "publish"), line_of("stall-slow", "publish")
+    out.append(("a stream that takes nothing, left open", edited(dead, "link closed", "link open")))
+    out.append(("a stream that takes nothing, closed after another count of refused offers", edited(dead, f"refused {MAX_RETRIES + 1}", f"refused {MAX_RETRIES + 2}")))
+    out.append(("a slow stream, closed", edited(slow, "link open", "link closed")))
+    out.append(("a slow stream that stopped at another count of refused offers", edited(slow, f"refused {2 * PUMP_BOUND}", f"refused {2 * PUMP_BOUND - 1}")))
+
+    def completion_of(index: int) -> str:
+        return FIELDS.fullmatch(good[index])["completion"]
+
+    # A completion's status is at bytes 8 to 12 and its row at bytes 12 to 14, as the schema's layout gives them.
+    take_row = line_of("malformed", "take-row")
+    comp = completion_of(take_row)
+    out.append(("a take with a row answered with row 0", edited(take_row, comp, comp[:24] + "0000" + comp[28:])))
+    operation_six = line_of("malformed", "operation-six")
+    comp = completion_of(operation_six)
+    out.append(("an unsupported operation answered as malformed", edited(operation_six, comp, comp[:16] + "feffffff" + comp[24:])))
+    publish_row = line_of("malformed", "publish-row-past-rows")
+    comp = completion_of(publish_row)
+    out.append(("a publish past the rows that does not echo its row", edited(publish_row, comp, comp[:24] + "0000" + comp[28:])))
+    magic = line_of("malformed", "publish-magic")
+    comp = completion_of(magic)
+    out.append(("a malformed publish answered as the operation it did not name", edited(magic, comp, comp[:12] + "03" + comp[14:])))
+    return out
+
+
 def run_mutations() -> list[tuple[str, list[str]]]:
     """Transcripts that break the run or the stall rules without a field change of one line."""
     good = good_lines()
@@ -304,8 +343,12 @@ def transcript_controls() -> int:
     good = good_lines()
     judge(good)
     refused = 0
-    for label, lines in [*transcript_mutations(), *state_mutations(), *run_mutations()]:
+    seen: dict[tuple[str, ...], str] = {}
+    for label, lines in [*transcript_mutations(), *state_mutations(), *field_mutations(), *run_mutations()]:
         _need(lines != good, f"control: {label} did not change the transcript")
+        # Two controls that build one transcript are one control, and the pin counts distinct ones.
+        _need(tuple(lines) not in seen, f"control: {label} repeats {seen.get(tuple(lines))}")
+        seen[tuple(lines)] = label
         try:
             judge(lines)
         except (GradingExamError, KeyError):

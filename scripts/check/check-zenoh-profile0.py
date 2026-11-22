@@ -2899,7 +2899,7 @@ def server_main(controls_only: bool) -> int:
 
 
 GRADING_PINNED_CASES = 60
-GRADING_PINNED_CONTROLS = 162
+GRADING_PINNED_CONTROLS = 169
 
 
 def run_grading() -> list[str]:
