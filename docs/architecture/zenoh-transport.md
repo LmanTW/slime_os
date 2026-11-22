@@ -294,7 +294,7 @@ it bounds at 20000 ms. A holder with no supervision binding is bounded by the wa
 
 The service keeps each holder's endpoints for the rest of the run. The service still reads the control endpoint of a holder that
 settled. The server answers each of its requests as denied, so its call does not block. The loop ends once every holder has
-settled, so the last holder to settle gets no answer to a request that comes after.
+settled. After that no settled holder gets an answer, so the denial holds only while the service still runs.
 
 The service prints one line for a publication, a taken sample and a publication refused for a row the holder may not publish.
 `exchange_line` in the server half builds them from the request and the answer, and a host test drives it. The booted exchange is
@@ -329,7 +329,7 @@ attachment, `holders::serve` or `holders::drive`.
 Known limits of the component:
 
 - It is built for at most two holders and two rows. It refuses a table above that, and it serves a table below it.
-- The last holder to settle gets no answer to a request after that, because the service returns once the roster is done.
+- A settled holder gets no answer once every holder has settled, because the service returns when the roster is done.
   No boot shows a settled holder sending. The judge shows only that the statements which cleared the endpoints are gone.
 - A configuration judged by `contracts/zenoh-link-limits/v1` cannot declare more than one local subscription. Version 3 of
   that contract adds `localSubscriptions` beside `maxRuns`. The contract and its judge exist, and the generated Rust constants
