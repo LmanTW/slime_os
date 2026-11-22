@@ -119,7 +119,6 @@ zenoh_rmw_client_check:
 # of rmw_zenohd, captured by scripts/lib/zenoh_rmw_router_data.py, three ways: each batch whole, one byte at a time and all
 # at once. The link writes the client INIT_SYN, the OPEN_SYN and the subscription, and delivers the four samples the router
 # forwarded. The expectation is scripts/lib/zenoh_rmw_router_link_exam.py. Nothing here needs a registry or a ROS install.
-# It fails until the link takes the role.
 [group('hardware')]
 zenoh_rmw_router_link_check:
     python3 scripts/check/check-zenoh-profile0.py --slice rmw-router-link

@@ -456,7 +456,8 @@ Known limits:
 
 A Profile 0 session announces itself as a peer. `rmw_zenohd` answers a peer's `INIT_SYN` as a router, and a session
 with no client role refuses that answer as `unsupported-whatami`. A connector takes the client role with
-`SessionOf::with_client_role`, which `Params` and `Config` do not carry.
+`SessionOf::with_client_role`, and a plain link takes it with `LinkOf::with_client_role`. `Params` and `Config` do not
+carry it.
 
 | Side | With no client role | With the client role |
 | --- | --- | --- |
@@ -467,15 +468,42 @@ with no client role refuses that answer as `unsupported-whatami`. A connector ta
 A refused `INIT_ACK` leaves the connector awaiting its `INIT_ACK`. A listener, and a connector that has written its
 `INIT_SYN`, get `invalid-config` when they ask for the role.
 
+A Put that `rmw_zenoh_cpp` publishes carries a timestamp, and a router forwards it unchanged. The `PUT` header carries
+the timestamp flag, and a 64-bit time and a 16-byte ID follow it, before the attachment extension.
+
+| Decoder | A `PUT` with the timestamp flag |
+| --- | --- |
+| Plain, with no client role | refused as `unsupported-message` |
+| Plain, with the client role | taken with a 16-byte ID; a short ID is `malformed-message` |
+| Fragment | refused as `unsupported-message` |
+| Graph | taken, as it always was |
+
+Every session refuses the encoding flag. The client decoder reads the time and the ID and delivers neither. A sample keeps
+the source timestamp of its attachment.
+
 `scripts/lib/zenoh_rmw_router.py` holds two handshakes that `rmw_zenohd` 0.6.10-r1 wrote to a client on one host.
-Each is a 72-byte `INIT_ACK` of `whatami` 0 with a 49-byte cookie, then an `OPEN_ACK` of a 60 s lease. The role is
-judged against those two captures by `scripts/lib/zenoh_rmw_client_exam.py`.
+Each is a 72-byte `INIT_ACK` of `whatami` 0 with a 49-byte cookie, then an `OPEN_ACK` of a 60 s lease. The session role
+is judged against those two captures by `scripts/lib/zenoh_rmw_client_exam.py`.
+
+`scripts/lib/zenoh_rmw_router_data.py` holds two further runs of the same router with a `demo_nodes_cpp` talker. Each
+has the handshake and the first four forwarded frames, with sequence numbers 3 to 6. The frames are consecutive and the
+first equals the `OPEN_ACK`'s sequence number. In both runs the timestamp's ID is not the router's ZID. Its time is
+within 1 µs of the attachment's source timestamp, so the publisher stamped it.
+
+`scripts/lib/zenoh_rmw_router_link_exam.py` judges a client-role link against those runs. The link writes the client
+`INIT_SYN`, the `OPEN_SYN` that echoes the router's cookie, and the subscription on the chatter key. It delivers the four
+samples whole, one byte at a time and all at once.
 
 Known limits:
 
-- Only the session takes the role. The links and the graph session do not, so no component connects to a router yet.
-- The captures end at the handshake. They show nothing a router forwards, no liveliness token and no router with a
-  non-default configuration.
+- The plain session and the plain link take the role. The graph link and the graph session do not, and no component
+  connects to a router yet.
+- Nothing writes a Put to a router. The captures show only what a router forwards to a subscriber, so a Slime publisher
+  reaching a ROS listener through a router is untested.
+- A client-role session reads a FRAME through the plain decoder, including one that negotiated lanes. The session sends a
+  FRAME down the lane path only when it is not a client.
+- The captures show no liveliness token, no `Put` with the encoding flag, no sample larger than one frame and no router
+  with a non-default configuration.
 
 ## Limitations
 
@@ -562,6 +590,8 @@ Known limits:
   Zlib-licensed transitive crates, which the root `deny.toml` does not allow;
 - `just zenoh_rmw_client_check` — a connector with the client role against two handshakes of `rmw_zenohd`: 13 cases
   and 52 controls. A connector with no role still refuses them; explicit, not part of `all`;
+- `just zenoh_rmw_router_link_check` — a client-role link against two runs of `rmw_zenohd` with a talker: 50 cases, 4
+  refusals and 113 controls. The plain decoder still refuses the timestamp without the role; explicit, not part of `all`;
 - `just zenoh_rmw_booted_check` — the `sel4-zenoh-rmw` boot: 17 cases and 65 controls, and the arm under QEMU;
   explicit, not part of `all`;
 - `just rpi5_ros2_zenoh_check` — the QEMU exchange; explicit, not part of `all`;
