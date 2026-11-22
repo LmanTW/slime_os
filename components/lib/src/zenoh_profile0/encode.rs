@@ -18,6 +18,7 @@ use slime_proto::zenoh_profile as p;
 const RESOLUTION: u8 = p::DEFAULT_RESOLUTION as u8;
 const VERSION: u8 = p::PROTOCOL_VERSION as u8;
 const WHATAMI_PEER: u8 = p::WHATAMI_PEER as u8;
+const WHATAMI_CLIENT: u8 = p::WHATAMI_CLIENT as u8;
 const GID_LEN_BYTE: u8 = GID_BYTES as u8;
 /// Batch size an INIT states by omitting its size parameters.
 const DEFAULT_BATCH_SIZE: u16 = u16::MAX;
@@ -164,6 +165,7 @@ fn init(
     batch_size: u16,
     cookie: Option<&[u8]>,
     qos: bool,
+    whatami: u8,
 ) -> Result<usize, EncodeError> {
     let zid_code = check_zid(zid)?;
     if batch_size == 0 {
@@ -186,7 +188,7 @@ fn init(
     let mut writer = Writer::new(out);
     writer.byte(header)?;
     writer.byte(VERSION)?;
-    writer.byte((zid_code << 4) | WHATAMI_PEER)?;
+    writer.byte((zid_code << 4) | whatami)?;
     writer.put(zid)?;
     if sized {
         writer.byte(RESOLUTION)?;
@@ -204,12 +206,26 @@ fn init(
 /// INIT_SYN as a peer. A `batch_size` of `u16::MAX` is the default and is sent
 /// by omitting the size parameters.
 pub fn init_syn(out: &mut [u8], zid: &[u8], batch_size: u16) -> Result<usize, EncodeError> {
-    init(out, zid, batch_size, None, false)
+    init(out, zid, batch_size, None, false, WHATAMI_PEER)
+}
+
+/// INIT_SYN as a client: the peer form with `whatami` 2 and no other byte different.
+pub fn init_syn_client(out: &mut [u8], zid: &[u8], batch_size: u16) -> Result<usize, EncodeError> {
+    init(out, zid, batch_size, None, false, WHATAMI_CLIENT)
+}
+
+/// INIT_SYN as a client that offers the QoS unit extension.
+pub fn init_syn_client_qos(
+    out: &mut [u8],
+    zid: &[u8],
+    batch_size: u16,
+) -> Result<usize, EncodeError> {
+    init(out, zid, batch_size, None, true, WHATAMI_CLIENT)
 }
 
 /// INIT_SYN that offers the QoS unit extension, one byte after the rest of the message.
 pub fn init_syn_qos(out: &mut [u8], zid: &[u8], batch_size: u16) -> Result<usize, EncodeError> {
-    init(out, zid, batch_size, None, true)
+    init(out, zid, batch_size, None, true, WHATAMI_PEER)
 }
 
 /// INIT_ACK as a peer, carrying the 1..=64 byte cookie.
@@ -219,7 +235,7 @@ pub fn init_ack(
     batch_size: u16,
     cookie: &[u8],
 ) -> Result<usize, EncodeError> {
-    init(out, zid, batch_size, Some(cookie), false)
+    init(out, zid, batch_size, Some(cookie), false, WHATAMI_PEER)
 }
 
 /// INIT_ACK that accepts the peer's QoS offer, one byte after the rest of the message.
@@ -229,7 +245,7 @@ pub fn init_ack_qos(
     batch_size: u16,
     cookie: &[u8],
 ) -> Result<usize, EncodeError> {
-    init(out, zid, batch_size, Some(cookie), true)
+    init(out, zid, batch_size, Some(cookie), true, WHATAMI_PEER)
 }
 
 fn open(

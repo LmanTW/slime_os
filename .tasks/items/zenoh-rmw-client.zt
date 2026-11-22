@@ -5,6 +5,7 @@ item :: s.Item = (h.task "01a1f66e-957a-70f7-b2b6-4a9c500c5c27" "zenoh-rmw-clien
   "A Profile 0 connector takes the client role and opens a session with a router"
   "A Profile 0 session announces itself as a peer and refuses an INIT whose `whatami` is a client or a router. `rmw_zenohd` answers a client INIT with an INIT_ACK of `whatami` 0. A session built today refuses that answer, so no Slime component can connect to a router. A host probe of a Slime client against the pinned router exchanged samples 12 of 12 times, and the same peer got none. The encoder cannot write the client form either.")
   with {
+    intent = #active;
     owns = {
       "components/lib/src/zenoh_profile0.rs";
       "components/lib/src/zenoh_profile0/**";

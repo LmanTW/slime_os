@@ -19,6 +19,10 @@
 #[path = "zenoh_profile0/tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "zenoh_profile0/client_tests.rs"]
+mod client_tests;
+
 pub mod encode;
 pub mod fragment;
 pub mod graph;
@@ -400,6 +404,7 @@ fn init<'a>(
     header: u8,
     graph: bool,
     offers_qos: bool,
+    client: bool,
 ) -> Result<Message<'a>, Refusal> {
     // An extension is refused before anything else is read, as it always was, except the QoS unit
     // extension a stock peer puts on an INIT_SYN that states its resolution and batch size. A side that
@@ -418,9 +423,11 @@ fn init<'a>(
     if packed & PACKED_RESERVED != 0 {
         return Err(Refusal::MalformedMessage);
     }
-    match u32::from(packed & 0x03) {
-        p::WHATAMI_PEER => {}
-        3 => return Err(Refusal::MalformedMessage),
+    // A side with the client role takes an INIT_ACK of a router and no other `whatami`. Every other INIT, and
+    // every INIT a side without the role reads, is a peer's.
+    match (u32::from(packed & 0x03), client && header & FLAG_BIT5 != 0) {
+        (3, _) => return Err(Refusal::MalformedMessage),
+        (p::WHATAMI_PEER, false) | (p::WHATAMI_ROUTER, true) => {}
         _ => return Err(Refusal::UnsupportedWhatami),
     }
     let zid = reader.take(1 + usize::from(packed >> 4))?;
@@ -815,14 +822,25 @@ pub fn decode_batch(batch: &[u8]) -> Result<Message<'_>, Refusal> {
 
 /// Decodes one batch body under `bounds`.
 pub fn decode_batch_with<'a>(batch: &'a [u8], bounds: &Bounds) -> Result<Message<'a>, Refusal> {
-    decode_batch_in(batch, bounds, false, false)
+    decode_batch_in(batch, bounds, false, false, false)
 }
 
 /// Decodes one batch body for a side that offers the QoS unit extension on its own INIT. It differs from
 /// [`decode_batch_with`] in the INIT only: an INIT_SYN or an INIT_ACK may carry the extension, with or
 /// without the size parameters, and the message says so. Any other extension is refused as before.
 pub fn decode_batch_qos<'a>(batch: &'a [u8], bounds: &Bounds) -> Result<Message<'a>, Refusal> {
-    decode_batch_in(batch, bounds, false, true)
+    decode_batch_in(batch, bounds, false, true, false)
+}
+
+/// Decodes one batch body for a connector with the client role. It differs from [`decode_batch_qos`], or from
+/// [`decode_batch_with`] when `qos` is false, in one place: an INIT_ACK of `whatami` 0, a router's, is taken, and an
+/// INIT_ACK of any other `whatami` is refused as `UnsupportedWhatami`.
+pub fn decode_batch_client<'a>(
+    batch: &'a [u8],
+    bounds: &Bounds,
+    qos: bool,
+) -> Result<Message<'a>, Refusal> {
+    decode_batch_in(batch, bounds, false, qos, true)
 }
 
 /// Decodes one batch body. `graph` is the one difference a graph session makes to a handshake message:
@@ -833,6 +851,7 @@ fn decode_batch_in<'a>(
     bounds: &Bounds,
     graph: bool,
     qos: bool,
+    client: bool,
 ) -> Result<Message<'a>, Refusal> {
     if batch.is_empty() {
         return Err(Refusal::EmptyBatch);
@@ -843,7 +862,7 @@ fn decode_batch_in<'a>(
     let mut reader = Reader::new(batch);
     let header = reader.u8()?;
     match header & ID_MASK {
-        ID_INIT => init(reader, header, graph, qos),
+        ID_INIT => init(reader, header, graph, qos, client),
         ID_OPEN => open(reader, header),
         ID_CLOSE => close(reader, header),
         ID_KEEP_ALIVE => keep_alive(reader, header),

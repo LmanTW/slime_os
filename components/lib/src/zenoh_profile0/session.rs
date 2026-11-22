@@ -25,7 +25,7 @@ use super::reassembly::{Progress, Reassembly};
 use super::tables::{InsertError, Keys, SlotTable};
 use super::{
     Bounds, Frame, MAX_BATCH_BYTES, MAX_COOKIE_BYTES, MAX_KEY_BYTES, Mapping, Message, Network,
-    Refusal, STREAM_LENGTH_BYTES, decode_batch_qos, decode_batch_with,
+    Refusal, STREAM_LENGTH_BYTES, decode_batch_client, decode_batch_qos, decode_batch_with,
 };
 use slime_proto::zenoh_profile as p;
 
@@ -448,6 +448,8 @@ pub struct SessionOf<
     /// How many of `subs` each side holds, so a side's limit is checked without a scan.
     local_n: usize,
     remote_n: usize,
+    /// This connector announces itself as a client and takes the INIT_ACK of a router.
+    client: bool,
 }
 
 /// The first release's session.
@@ -537,7 +539,24 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize> SessionOf<K
             subs: SlotTable::new(),
             local_n: 0,
             remote_n: 0,
+            client: false,
         })
+    }
+
+    /// The same session with the client role: its INIT_SYN carries `whatami` 2, and it takes an INIT_ACK of
+    /// `whatami` 0 and refuses any other. Only a connector that has written nothing takes the role, because a
+    /// listener never writes an INIT_SYN and a connector that has begun a handshake already announced itself.
+    pub fn with_client_role(mut self) -> Result<Self, SessionError> {
+        if self.role != Role::Connector || self.state != State::Idle {
+            return Err(SessionError::InvalidConfig);
+        }
+        self.client = true;
+        Ok(self)
+    }
+
+    /// Whether this session has the client role.
+    pub const fn is_client(&self) -> bool {
+        self.client
     }
 
     /// Whether this side offers the QoS unit extension on its INIT: it holds 2 or more runs.
@@ -776,10 +795,12 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize> SessionOf<K
         if self.role != Role::Connector || self.state != State::Idle {
             return Err(SessionError::UnexpectedMessage);
         }
-        let sent = if self.offers_qos() {
-            encode::init_syn_qos(out, self.own_zid()?, self.params.announced)?
-        } else {
-            encode::init_syn(out, self.own_zid()?, self.params.announced)?
+        let (zid, announced) = (self.own_zid()?, self.params.announced);
+        let sent = match (self.client, self.offers_qos()) {
+            (true, true) => encode::init_syn_client_qos(out, zid, announced)?,
+            (true, false) => encode::init_syn_client(out, zid, announced)?,
+            (false, true) => encode::init_syn_qos(out, zid, announced)?,
+            (false, false) => encode::init_syn(out, zid, announced)?,
         };
         self.state = State::AwaitInitAck;
         self.last_rx_ms = now_ms;
@@ -819,12 +840,19 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize> SessionOf<K
             self.now_ms = now_ms;
             return Ok(outcome);
         }
-        let message = if self.offers_qos() {
-            decode_batch_qos(batch, &self.params.bounds)?
-        } else {
-            decode_batch_with(batch, &self.params.bounds)?
-        };
+        let message = self.decode(batch)?;
         self.on_message(message, now_ms, out)
+    }
+
+    /// Decodes `batch` as this session reads it: with the client role, an INIT_ACK of a router is taken.
+    fn decode<'a>(&self, batch: &'a [u8]) -> Result<Message<'a>, Refusal> {
+        if self.client {
+            decode_batch_client(batch, &self.params.bounds, self.offers_qos())
+        } else if self.offers_qos() {
+            decode_batch_qos(batch, &self.params.bounds)
+        } else {
+            decode_batch_with(batch, &self.params.bounds)
+        }
     }
 
     /// What a received batch can raise, judged without applying it so a link can wait until its queue

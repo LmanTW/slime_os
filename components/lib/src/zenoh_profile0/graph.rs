@@ -547,7 +547,7 @@ pub fn decode_graph_batch<'a>(
     if header & ID_MASK == ID_FRAME {
         return graph_frame(reader, header, bounds);
     }
-    decode_batch_in(batch, bounds, true, false).map(GraphMessage::Plain)
+    decode_batch_in(batch, bounds, true, false, false).map(GraphMessage::Plain)
 }
 
 /// Why a graph session refuses a call. Every error leaves the session unchanged.
