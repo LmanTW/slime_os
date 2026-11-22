@@ -5,6 +5,7 @@ item :: s.Item = (h.task "01a20200-959c-702b-b450-13ce7e0dbece" "zenoh-rmw-route
   "A Profile 0 link takes the client role and delivers the samples a router forwards"
   "The client role lives on the session, and no link takes it. A Put that `rmw_zenoh_cpp` publishes carries a timestamp, and a router forwards it unchanged: the PUT header carries the timestamp flag, and a time and a 16-byte ID follow it. The plain Profile 0 decoder refuses that header as `unsupported-message`. A link that opened a session with a router would end on its first forwarded sample. A host probe of a Slime client behind `rmw_zenohd` received a ROS talker's samples, and the decoder cannot read them.")
   with {
+    intent = #active;
     owns = {
       "components/lib/src/zenoh_profile0.rs";
       "components/lib/src/zenoh_profile0/**";

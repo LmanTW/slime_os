@@ -21,6 +21,10 @@ use crate::zenoh_profile0::{
 #[path = "zenoh_link/tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "zenoh_link/router_tests.rs"]
+mod router_tests;
+
 /// Consecutive stalled sends tolerated before the link gives up; the demo contract's `maxRetries`.
 pub const MAX_RETRIES: u32 = 3;
 /// The framed size of the first release's batch.
@@ -241,6 +245,14 @@ impl<
     const E: usize,
 > LinkOf<L, FRAMED, K, S, B, P, Q, E>
 {
+    /// The same link with the client role on its session: it announces itself as a client, takes the INIT_ACK of a
+    /// router and takes the timestamp of a Put a router forwards. A listener, and a link that has begun its
+    /// handshake, are `InvalidConfig`.
+    pub fn with_client_role(mut self) -> Result<Self, SessionError> {
+        self.session = self.session.with_client_role()?;
+        Ok(self)
+    }
+
     /// A link in its generation, declared by `params`.
     pub fn with_params(
         io: L,

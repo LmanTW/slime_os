@@ -224,6 +224,8 @@ pub struct Frame<'a> {
     pub sn: u32,
     body: &'a [u8],
     bounds: Bounds,
+    /// The frame was read by a session with the client role, which takes a Put's timestamp.
+    client: bool,
 }
 
 impl<'a> Frame<'a> {
@@ -231,6 +233,7 @@ impl<'a> Frame<'a> {
         Networks {
             reader: Reader::new(self.body),
             bounds: self.bounds,
+            client: self.client,
         }
     }
 }
@@ -239,6 +242,7 @@ impl<'a> Frame<'a> {
 pub struct Networks<'a> {
     reader: Reader<'a>,
     bounds: Bounds,
+    client: bool,
 }
 
 impl<'a> Iterator for Networks<'a> {
@@ -250,7 +254,7 @@ impl<'a> Iterator for Networks<'a> {
         }
         // `decode_batch` validated every message, so an error here is unreachable;
         // ending the iteration is the safe answer if it ever were not.
-        match parse_network(&mut self.reader, &self.bounds) {
+        match parse_network(&mut self.reader, &self.bounds, self.client) {
             Ok(message) => Some(message),
             Err(_) => {
                 self.reader.at = self.reader.data.len();
@@ -320,6 +324,26 @@ impl<'a> Reader<'a> {
         let byte = *self.data.get(self.at).ok_or(Refusal::Truncated)?;
         self.at += 1;
         Ok(byte)
+    }
+
+    /// A canonical LEB128 unsigned integer of up to 64 bits, which a Put's timestamp carries.
+    fn leb64(&mut self) -> Result<u64, Refusal> {
+        let mut value: u64 = 0;
+        for count in 0..10u32 {
+            let byte = self.u8()?;
+            let low = u64::from(byte & 0x7F);
+            if count == 9 && low > 1 {
+                return Err(Refusal::Leb128Overflow);
+            }
+            value |= low << (7 * count);
+            if byte & 0x80 == 0 {
+                if count > 0 && byte == 0 {
+                    return Err(Refusal::Leb128Noncanonical);
+                }
+                return Ok(value);
+            }
+        }
+        Err(Refusal::Leb128Overflow)
     }
 
     /// A canonical LEB128 unsigned integer that fits `bits`.
@@ -724,12 +748,27 @@ fn oam<'a>(reader: &mut Reader<'a>, header: u8) -> Result<Network<'a>, Refusal> 
     Ok(Network::Oam)
 }
 
-fn push<'a>(reader: &mut Reader<'a>, header: u8, bounds: &Bounds) -> Result<Network<'a>, Refusal> {
+fn push<'a>(
+    reader: &mut Reader<'a>,
+    header: u8,
+    bounds: &Bounds,
+    client: bool,
+) -> Result<Network<'a>, Refusal> {
     no_extension(header)?;
     let key = key_reference(reader, header & FLAG_BIT5 != 0, bounds)?;
     let body = reader.u8()?;
-    if body & ID_MASK != ID_PUT || body & (FLAG_BIT5 | FLAG_BIT6) != 0 {
+    // The timestamp flag is a Put's own stamp, which `rmw_zenoh_cpp` writes and a router forwards unchanged. Only a
+    // session with the client role takes it; the encoding flag is refused for every session.
+    let stamped = body & FLAG_BIT5 != 0;
+    if body & ID_MASK != ID_PUT || body & FLAG_BIT6 != 0 || (stamped && !client) {
         return Err(Refusal::UnsupportedMessage);
+    }
+    if stamped {
+        reader.leb64()?;
+        if usize::from(reader.u8()?) != GID_BYTES {
+            return Err(Refusal::MalformedMessage);
+        }
+        reader.take(GID_BYTES)?;
     }
     if body & FLAG_Z == 0 {
         return Err(Refusal::MalformedMessage);
@@ -782,17 +821,26 @@ fn word(bytes: &[u8], at: usize) -> [u8; 8] {
     out
 }
 
-fn parse_network<'a>(reader: &mut Reader<'a>, bounds: &Bounds) -> Result<Network<'a>, Refusal> {
+fn parse_network<'a>(
+    reader: &mut Reader<'a>,
+    bounds: &Bounds,
+    client: bool,
+) -> Result<Network<'a>, Refusal> {
     let header = reader.u8()?;
     match header & ID_MASK {
         ID_DECLARE => declare(reader, header, bounds),
-        ID_PUSH => push(reader, header, bounds),
+        ID_PUSH => push(reader, header, bounds, client),
         ID_OAM => oam(reader, header),
         _ => Err(Refusal::UnsupportedMessage),
     }
 }
 
-fn frame<'a>(mut reader: Reader<'a>, header: u8, bounds: &Bounds) -> Result<Message<'a>, Refusal> {
+fn frame<'a>(
+    mut reader: Reader<'a>,
+    header: u8,
+    bounds: &Bounds,
+    client: bool,
+) -> Result<Message<'a>, Refusal> {
     if header & FLAG_BIT5 == 0 {
         return Err(Refusal::UnsupportedMessage);
     }
@@ -804,20 +852,26 @@ fn frame<'a>(mut reader: Reader<'a>, header: u8, bounds: &Bounds) -> Result<Mess
     if reader.left() == 0 {
         return Err(Refusal::MalformedMessage);
     }
-    frame_of(sn, &reader.data[reader.at..], bounds).map(Message::Frame)
+    frame_of(sn, &reader.data[reader.at..], bounds, client).map(Message::Frame)
 }
 
 /// A FRAME whose header was read elsewhere: `body` is its network messages, each validated as `frame` validates
 /// them. A lane FRAME reaches the session through here.
-pub(crate) fn frame_of<'a>(sn: u32, body: &'a [u8], bounds: &Bounds) -> Result<Frame<'a>, Refusal> {
+pub(crate) fn frame_of<'a>(
+    sn: u32,
+    body: &'a [u8],
+    bounds: &Bounds,
+    client: bool,
+) -> Result<Frame<'a>, Refusal> {
     let mut check = Reader::new(body);
     while check.left() != 0 {
-        parse_network(&mut check, bounds)?;
+        parse_network(&mut check, bounds, client)?;
     }
     Ok(Frame {
         sn,
         body,
         bounds: *bounds,
+        client,
     })
 }
 
@@ -872,7 +926,7 @@ fn decode_batch_in<'a>(
         ID_OPEN => open(reader, header),
         ID_CLOSE => close(reader, header),
         ID_KEEP_ALIVE => keep_alive(reader, header),
-        ID_FRAME => frame(reader, header, bounds),
+        ID_FRAME => frame(reader, header, bounds, client),
         _ => Err(Refusal::UnsupportedMessage),
     }
 }

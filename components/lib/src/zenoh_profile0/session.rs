@@ -978,7 +978,7 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize> SessionOf<K
             return match decode_lane_frame(batch) {
                 Ok(header) => {
                     let dropped = usize::from(!header.lane.reliable);
-                    match frame_of(header.sn, header.body, &self.params.bounds) {
+                    match frame_of(header.sn, header.body, &self.params.bounds, false) {
                         Ok(frame) => {
                             let (events, samples) = count_events::<E>(&frame);
                             (events.max(dropped), samples)
@@ -989,7 +989,7 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize> SessionOf<K
                 Err(_) => (0, 0),
             };
         }
-        match decode_batch_with(batch, &self.params.bounds) {
+        match self.decode(batch) {
             Ok(Message::Frame(frame)) => count_events::<E>(&frame),
             Ok(Message::OpenSyn { .. } | Message::OpenAck { .. } | Message::Close { .. }) => (1, 0),
             _ => (0, 0),
@@ -1250,7 +1250,7 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize> SessionOf<K
         let mut journal = [None; JOURNAL];
         let mut used = 0;
         let mut events = Events::empty();
-        let applied = match frame_of(header.sn, header.body, &self.params.bounds) {
+        let applied = match frame_of(header.sn, header.body, &self.params.bounds, false) {
             Ok(frame) => self.apply_frame(&frame, &mut journal, &mut used, &mut events),
             Err(refusal) => Err(refusal.into()),
         };
