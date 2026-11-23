@@ -196,3 +196,35 @@ fn the_lanes_are_sixteen_and_each_has_its_own_index() {
     }
     assert!(seen.iter().all(|taken| *taken));
 }
+
+#[test]
+fn the_lane_of_a_fragment_is_read_without_judging_the_rest_of_it() {
+    // Every header upstream wrote names its lane, whatever follows it.
+    for (reliable, priority, _more, _sn, header) in FRAGMENTS {
+        let bytes = unhex(header);
+        assert_eq!(
+            peek_fragment_lane(&bytes),
+            Some(Lane { priority, reliable }),
+            "{header}"
+        );
+    }
+    // A body that is refused for what follows the header still names its lane: the data is empty here.
+    assert_eq!(
+        peek_fragment_lane(&unhex("e6053102")),
+        Some(Lane {
+            priority: 2,
+            reliable: true
+        })
+    );
+    // A body whose header, number or extension cannot be read names none.
+    for (name, header) in [
+        ("empty", ""),
+        ("a FRAME", "2505"),
+        ("a cut number", "e68080"),
+        ("priority 8", "e6053108"),
+        ("another extension id", "e6053202"),
+        ("a cut extension", "e60531"),
+    ] {
+        assert_eq!(peek_fragment_lane(&unhex(header)), None, "{name}");
+    }
+}

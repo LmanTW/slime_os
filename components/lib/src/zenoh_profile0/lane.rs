@@ -142,6 +142,23 @@ pub fn decode_lane_fragment(
     })
 }
 
+/// The lane a FRAGMENT body names, read without judging the rest of it. A body whose header, number or
+/// extension cannot be read names none, and neither does a priority above 7. A caller that refuses a fragment
+/// uses it to find the run the refusal ends.
+pub fn peek_fragment_lane(body: &[u8]) -> Option<Lane> {
+    let mut reader = Reader::new(body);
+    let header = reader.u8().ok()?;
+    if !is_fragment(header) {
+        return None;
+    }
+    reader.leb(p::LEB128_MAX_BITS).ok()?;
+    let priority = priority(&mut reader, header).ok()?;
+    Some(Lane {
+        priority,
+        reliable: header & FLAG_BIT5 != 0,
+    })
+}
+
 const _: () = assert!(ID_FRAGMENT == 0x06);
 
 #[cfg(test)]

@@ -19,7 +19,7 @@ use super::fragment::{
     Fragment, FragmentError, PutMessage, PutRules, Source, Splitter, decode_fragment, decode_put,
     fits_one_frame, is_fragment,
 };
-use super::lane::{Lane, decode_lane_fragment, decode_lane_frame, is_frame};
+use super::lane::{Lane, decode_lane_fragment, decode_lane_frame, is_frame, peek_fragment_lane};
 use super::lane_limits::MAX_RUNS_LIMIT;
 use super::limits::{Limits, Mode};
 use super::reassembly::{Progress, Run};
@@ -1487,7 +1487,17 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
         if self.state != State::Open || !self.params.fragments || !self.lanes() {
             return Err(SessionError::UnexpectedMessage);
         }
-        let header = decode_lane_fragment(batch, Some(usize::from(self.params.announced)))?;
+        let header = match decode_lane_fragment(batch, Some(usize::from(self.params.announced))) {
+            Ok(header) => header,
+            Err(error) => {
+                // A refused fragment ends the run of its lane, as it does on the one-cell path. A header that
+                // names no lane ends none.
+                if let Some(slot) = peek_fragment_lane(batch).and_then(|lane| self.slot_of(lane)) {
+                    self.run_table[slot].release();
+                }
+                return Err(error.into());
+            }
+        };
         if !header.lane.reliable {
             return Err(SessionError::Decode(Refusal::UnsupportedMessage));
         }

@@ -866,3 +866,57 @@ fn closing_the_session_releases_every_run() {
     receiver.close(0, &mut out).expect("close");
     assert!(!receiver.reassembling());
 }
+
+#[test]
+fn a_refused_fragment_header_ends_the_run_of_its_lane_and_no_other() {
+    let lane = |priority| Lane {
+        priority,
+        reliable: true,
+    };
+    let (_, mut receiver) = heap_pair();
+    let mut cells = Cells::new();
+    for priority in [2u8, 5] {
+        let parts = fragments_on(priority, 100, 300);
+        fragment_in(&mut receiver, &mut cells, &parts[0], 10).expect("first fragment");
+    }
+    // Both runs are open, so a third lane has no slot. The slot of an open run and the first free slot can be
+    // the same number, so a lane with no run of its own is the witness of what is open.
+    assert_eq!(receiver.run_slot(lane(7)), None, "every run is open");
+    // A fragment of priority 2 with no data is refused, and the run of priority 2 ends with it.
+    let parts = fragments_on(2, 100, 300);
+    let empty = parts[1][..4].to_vec();
+    assert_eq!(
+        receiver
+            .on_lane_fragment(&empty, 11, &mut cells.cells[0])
+            .err(),
+        Some(SessionError::Decode(Refusal::MalformedMessage))
+    );
+    assert_eq!(
+        receiver.run_slot(lane(7)),
+        Some(0),
+        "the run of priority 2 is gone"
+    );
+    assert_eq!(
+        receiver.run_slot(lane(5)),
+        Some(1),
+        "the run of priority 5 is open"
+    );
+    assert!(receiver.reassembling());
+    // A header that names no lane, a priority of 8, ends no run. Priority 7 has none open, so a free slot
+    // before and after shows that no run was released: slot 0 is free and slot 1 is still open.
+    let mut unreadable = fragments_on(2, 100, 300)[1].clone();
+    unreadable[3] = 8;
+    assert_eq!(
+        receiver
+            .on_lane_fragment(&unreadable, 12, &mut cells.cells[1])
+            .err(),
+        Some(SessionError::Decode(Refusal::UnsupportedExtension))
+    );
+    assert_eq!(
+        receiver.run_slot(lane(5)),
+        Some(1),
+        "the run of priority 5 is still open"
+    );
+    assert_eq!(receiver.run_slot(lane(7)), Some(0));
+    assert_eq!(receiver.lane_next(lane(2)), 100);
+}
