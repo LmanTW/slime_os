@@ -148,6 +148,34 @@ def push_put(key: str, att: bytes, payload: bytes, sender: bool) -> bytes:
     return bytes([header]) + leb128(0) + prefixed(raw) + put
 
 
+QOS_PRIORITY_MASK = 0x07
+QOS_BLOCK = 0x08
+QOS_EXPRESS = 0x10
+# eclipse-zenoh 1.0.0 QoSType::PUSH: Priority::Data (5), CongestionControl::Drop, not express. A PUSH
+# whose QoS equals it carries no extension.
+QOS_PUSH_DEFAULT = 5
+
+
+def qos_value(priority: int, block: bool, express: bool) -> int:
+    """The Z64 the network QoS extension carries: priority in bits 0 to 2, Block (upstream's D, don't drop) in bit 3, express in bit 4."""
+    if not 0 <= priority <= QOS_PRIORITY_MASK:
+        raise WireError("priority is 0 to 7")
+    return priority | (QOS_BLOCK if block else 0) | (QOS_EXPRESS if express else 0)
+
+
+def push_put_qos(key: str, att: bytes, payload: bytes, sender: bool, priority: int, block: bool, express: bool) -> bytes:
+    """A PUSH as upstream's encoder writes it: the network QoS extension sits between the key expression
+    and the Put, and is left out when the value is the PUSH default."""
+    if len(att) != ATTACHMENT_BYTES:
+        raise WireError("the profile admits only the 33-byte attachment")
+    value = qos_value(priority, block, express)
+    raw = key.encode()
+    header = ID_PUSH | FLAG_N | (FLAG_M if sender else 0) | (FLAG_Z if value != QOS_PUSH_DEFAULT else 0)
+    put = bytes([ID_PUT | FLAG_Z, EXT_ATTACHMENT]) + prefixed(att) + prefixed(payload)
+    ext = bytes([EXT_QOS_NETWORK]) + leb128(value) if value != QOS_PUSH_DEFAULT else b""
+    return bytes([header]) + leb128(0) + prefixed(raw) + ext + put
+
+
 def frame(sn: int, *messages: bytes) -> bytes:
     return bytes([ID_FRAME | FLAG_R]) + leb128(sn) + b"".join(messages)
 

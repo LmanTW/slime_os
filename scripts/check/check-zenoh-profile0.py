@@ -160,6 +160,7 @@ import zenoh_limits_exam
 import zenoh_service_exam
 import zenoh_service_link_exam
 import zenoh_stack_exam
+import zenoh_qos_exam
 import zenoh_stock_peer
 import zenoh_subscribers_exam
 import zenoh_undeclare_exam
@@ -2859,6 +2860,40 @@ def link_limits_v3_main(controls_only: bool) -> int:
     print(f"[zenoh-profile0] slice=link-limits-v3 cases={cases} controls={refused_controls}")
     devloop_observations.record(casesObserved=cases, negativeControlsRefused=refused_controls)
     print("zenoh profile 0 link-limits-v3 check: the contract takes the records that declare local subscriptions and runs, refuses the ones it must, and its constants are the generated ones")
+QOS_FILTER = "zenoh_qos::"
+# The exam's own Rust test, by name: a filter that matches nothing passes silently.
+QOS_TESTS = ("zenoh_qos::the_qos_exam",)
+
+
+def run_qos() -> list[str]:
+    stdout, output = cargo_tests((QOS_FILTER,), {**_os.environ})
+    missing = [name for name in QOS_TESTS if name not in tests_passed(output)]
+    if missing:
+        fail(f"qos: the exam's tests did not run and pass ({len(missing)} of {len(QOS_TESTS)}): {', '.join(missing)}")
+    return exam_lines(stdout)
+
+
+def qos_main(controls_only: bool) -> int:
+    neighbour_controls(subscribers=False)
+    try:
+        refused_controls = zenoh_qos_exam.all_controls()
+        positive, refusals = zenoh_qos_exam.judge(zenoh_qos_exam.good_lines())
+    except zenoh_qos_exam.QosError as error:
+        fail(str(error))
+    if positive + refusals != zenoh_qos_exam.PINNED_CASES:
+        fail(f"qos: an honest transcript is {positive + refusals} cases, the checker pins {zenoh_qos_exam.PINNED_CASES}")
+    if refused_controls != zenoh_qos_exam.PINNED_CONTROLS:
+        fail(f"qos: {refused_controls} controls, the checker pins {zenoh_qos_exam.PINNED_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 qos judge: refused {refused_controls} corrupted records")
+        return 0
+    try:
+        cases, refusals = zenoh_qos_exam.judge(run_qos())
+    except zenoh_qos_exam.QosError as error:
+        fail(str(error))
+    print(f"[zenoh-profile0] slice=qos cases={cases} refusals={refusals} controls={refused_controls}")
+    devloop_observations.record(casesObserved=cases + refusals, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 qos check: a PUSH carries its priority, congestion control and express as upstream writes them")
     return 0
 
 
@@ -3877,7 +3912,7 @@ def lost_holder_main(controls_only: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-client", "rmw-router-link", "rmw-client-put", "rmw-token", "rmw-live", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "lanes", "link-limits-v3", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service-peer", "service-four", "service", "service-link", "holder-fault", "service-stack", "link-v3-reader", "lost-holder"), required=True)
+    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-client", "rmw-router-link", "rmw-client-put", "rmw-token", "rmw-live", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "qos", "lanes", "link-limits-v3", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service-peer", "service-four", "service", "service-link", "holder-fault", "service-stack", "link-v3-reader", "lost-holder"), required=True)
     parser.add_argument("--controls-only", action="store_true")
     arguments = parser.parse_args()
     if arguments.slice == "composition":
@@ -3922,6 +3957,8 @@ def main() -> int:
         return lanes_main(arguments.controls_only)
     if arguments.slice == "link-limits-v3":
         return link_limits_v3_main(arguments.controls_only)
+    if arguments.slice == "qos":
+        return qos_main(arguments.controls_only)
     if arguments.slice == "grants":
         return grants_main(arguments.controls_only)
     if arguments.slice == "client":

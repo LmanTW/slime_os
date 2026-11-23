@@ -224,6 +224,15 @@ zenoh_lanes_check:
 zenoh_link_limits_v3_check: (zenoh_link_v3_limits_gen "--check")
     python3 scripts/check/check-zenoh-profile0.py --slice link-limits-v3
 
+# Judges the QoS a Zenoh PUSH carries: priority, congestion control and express. The encoder writes the
+# network QoS extension as eclipse-zenoh 1.0.0 does (priority in bits 0 to 2, Block in bit 3, express in
+# bit 4, no extension at the PUSH default) and the decoder keeps the value. The host reference
+# scripts/lib/zenoh_wire.py reproduces every frame byte for byte; the expectation is
+# scripts/lib/zenoh_qos_exam.py. Nothing here needs a registry. The recipe fails until the Rust tests land.
+[group('hardware')]
+zenoh_qos_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice qos
+
 # Judges what the Zenoh service may do for each holder. The decoder of
 # contracts/zenoh-service-grants/v1 takes the declarations it must take and refuses the ones it must
 # refuse. Each limit is held on both sides of its bound. Each check is removed in turn, and the
