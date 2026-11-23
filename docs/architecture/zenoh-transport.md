@@ -502,7 +502,7 @@ validates the key, the attachment and the payload, and the other session errors 
 | --- | --- | --- |
 | Whole, on a key the peer declared | written | written |
 | Whole, on a key the peer did not declare | refused as `undeclared-key` | written |
-| In fragments, on a key the peer did not declare | refused as `undeclared-key` | refused as `undeclared-key` |
+| In fragments, on a key the peer did not declare, in a session that fragments | refused as `undeclared-key` | refused as `undeclared-key` |
 
 The Put the link writes is the peer form: the sender mapping, the `PUT` header with the attachment extension, and no
 timestamp. `scripts/lib/zenoh_rmw_client_put_exam.py` judges a client-role link through the two handshakes of
@@ -517,8 +517,8 @@ Known limits:
 - Two host probes, on one host and with the Python wire library, ran a client behind `rmw_zenohd` and a ROS `listener`.
   The router delivered a Put only to a listener whose subscription had the same key, type hash included, and dropped
   the others without a reply. The probes are not fixtures, and no Rust link has met a router.
-- A Put in fragments keeps the declared-key check for every session, because no exam observes a client writing
-  fragments.
+- A Put in fragments keeps the declared-key check for every session that fragments, because no exam observes a client
+  writing fragments. A session that does not fragment refuses a Put in fragments as over the bound, before the key check.
 - A client-role session reads a FRAME through the plain decoder, including one that negotiated lanes. The session sends a
   FRAME down the lane path only when it is not a client.
 - The captures show no liveliness token, no `Put` with the encoding flag, no sample larger than one frame and no router
