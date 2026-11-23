@@ -128,6 +128,7 @@ import zenoh_rmw_peer_component_exam
 import zenoh_rmw_data_exam
 import zenoh_rmw_client_exam
 import zenoh_rmw_client_put_exam
+import zenoh_rmw_live_exam
 import zenoh_rmw_router
 import zenoh_rmw_router_data
 import zenoh_rmw_router_link_exam
@@ -2370,6 +2371,56 @@ def rmw_client_put_main(controls_only: bool) -> int:
     return 0
 
 
+LIVE_CRATE = ROOT / "verification" / "zenoh-live"
+# The ROS environment is read from the operator's shell, never from a path this checker invents: the pinned packages are
+# not in `flake.nix`, so the operator names them. A missing variable is a refusal, not a skipped run.
+LIVE_ENVIRONMENT = ("SLIME_ROS_ENV", "SLIME_RMW_ZENOHD", "SLIME_ROS_TALKER", "SLIME_ROS_LISTENER")
+
+
+def run_rmw_live() -> list[str]:
+    missing = [name for name in LIVE_ENVIRONMENT if not _os.environ.get(name)]
+    if missing:
+        fail(f"rmw-live: the operator's environment names no {', '.join(missing)}; a live run needs a router and two ROS nodes")
+    host = subprocess.run(["rustc", "-vV"], capture_output=True, text=True, check=True)
+    target = next(line.split(": ", 1)[1] for line in host.stdout.splitlines() if line.startswith("host: "))
+    built = subprocess.run(
+        ["cargo", "run", "--release", "--target", target, "--manifest-path", str(LIVE_CRATE / "Cargo.toml")],
+        cwd=ROOT, capture_output=True, text=True, env={**_os.environ},
+    )
+    if built.returncode != 0:
+        _sys.stderr.write((built.stdout + built.stderr)[-4000:])
+        fail(f"rmw-live: the live program exited {built.returncode}")
+    return [line.removeprefix("[zenoh-live] ") if line.startswith("[zenoh-live] ") else line for line in built.stdout.splitlines() if line.startswith(("[zenoh-live] ", "ros "))]
+
+
+def rmw_live_main(controls_only: bool) -> int:
+    exam = zenoh_rmw_live_exam
+    try:
+        refused_controls = exam.all_controls()
+        item_cases, item_controls = exam.item_pins()
+    except exam.LiveExamError as error:
+        fail(str(error))
+    if refused_controls != exam.PINNED_CONTROLS:
+        fail(f"rmw-live: {refused_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if item_cases and item_cases != exam.MIN_CASES:
+        fail(f"rmw-live: the item fixes at least {item_cases} cases, the checker pins {exam.MIN_CASES}")
+    if item_controls and item_controls != exam.PINNED_CONTROLS:
+        fail(f"rmw-live: the item requires {item_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 rmw-live judge: refused {refused_controls} corrupted transcripts")
+        return 0
+    try:
+        cases, _ = exam.judge(run_rmw_live())
+    except exam.LiveExamError as error:
+        fail(str(error))
+    if cases < exam.MIN_CASES:
+        fail(f"rmw-live: {cases} cases, the item fixes at least {exam.MIN_CASES}")
+    print(f"[zenoh-profile0] slice=rmw-live cases={cases} controls={refused_controls}")
+    devloop_observations.record(casesObserved=cases, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 rmw-live check: a client-role link exchanged samples with a ROS talker and a ROS listener through rmw_zenohd")
+    return 0
+
+
 def rmw_data_link_main(controls_only: bool) -> int:
     try:
         zenoh_rmw_exam.all_controls()
@@ -3626,7 +3677,7 @@ def lost_holder_main(controls_only: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-client", "rmw-router-link", "rmw-client-put", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "lanes", "link-limits-v3", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service-peer", "service-four", "service", "service-link", "holder-fault", "service-stack", "lost-holder"), required=True)
+    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-client", "rmw-router-link", "rmw-client-put", "rmw-live", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "lanes", "link-limits-v3", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service-peer", "service-four", "service", "service-link", "holder-fault", "service-stack", "lost-holder"), required=True)
     parser.add_argument("--controls-only", action="store_true")
     arguments = parser.parse_args()
     if arguments.slice == "composition":
@@ -3655,6 +3706,8 @@ def main() -> int:
         return rmw_router_link_main(arguments.controls_only)
     if arguments.slice == "rmw-client-put":
         return rmw_client_put_main(arguments.controls_only)
+    if arguments.slice == "rmw-live":
+        return rmw_live_main(arguments.controls_only)
     if arguments.slice == "rmw-data":
         return rmw_data_main(arguments.controls_only)
     if arguments.slice == "rmw-graph":

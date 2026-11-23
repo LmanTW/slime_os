@@ -1,0 +1,66 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a206df-0a4a-7536-be2f-53192d8c9974" "zenoh-rmw-live" "zenoh-transport"
+  "A client-role Slime link exchanges samples with a ROS talker and a ROS listener through a live rmw_zenohd"
+  "Every exam of the client role replays captured bytes or a scripted stream. No Rust link has met a router. Two host probes ran a client behind `rmw_zenohd` with the Python wire library. They are not fixtures. The MVP's goal is a pinned `rmw_zenoh` peer exchanging bounded topics with a Slime component, and nothing yet shows the library doing that.")
+  with {
+    owns = {
+      "verification/zenoh-live/**";
+    };
+    nonGoals = {
+      h.nonGoal "A component, a composition, a system spec, a QEMU gate or a NIC. The program is a host binary built from the library." h.agentDefault;
+      h.nonGoal "Pinning the ROS packages in `flake.nix`. The operator names the router and the nodes in four environment variables, and CI does not run the target." h.agentDefault;
+      h.nonGoal "Any change to the library. A defect the run finds is a finding, and a later item fixes it." h.agentDefault;
+      h.nonGoal "The graph link, a liveliness token, or a ROS node that discovers a Slime node. `ros2 topic list` and `ros2 node list` showed no Slime node in an earlier probe." h.agentDefault;
+      h.nonGoal "A QoS other than the default, a type other than `std_msgs/String`, more than one topic, and a router with a non-default configuration." h.agentDefault;
+      h.nonGoal "A timestamp on a Put the link writes, and an acknowledgement. A router writes nothing back." h.agentDefault;
+    };
+    requirements = {
+      h.req "link-meets-a-router"
+        "The program connects a client-role link to `rmw_zenohd` on `tcp/127.0.0.1:7447`. The router answers with an INIT_ACK of `whatami` 0 and a 512-byte batch, in each of the two directions."
+        { "zenoh_rmw_live_check"; };
+      h.req "inbound-samples-are-delivered"
+        "A `demo_nodes_cpp talker` publishes through the router. The link subscribes on the chatter key and delivers at least 4 samples. Each carries a sequence number that agrees with its `Hello World: N` string, and the numbers rise by one."
+        { "zenoh_rmw_live_check"; };
+      h.req "outbound-puts-are-heard"
+        "A `demo_nodes_cpp listener` subscribes through the router. The link writes 6 Puts on the chatter key, and the listener prints each as `I heard: [Hello Slime N]`, in order."
+        { "zenoh_rmw_live_check"; };
+      h.req "the-ros-side-is-the-nodes-own-output"
+        "The transcript's `ros` lines are the listener's stdout, read by the recipe. The program does not write them. The judge refuses a ROS line that is not a listener's."
+        { "zenoh_rmw_live_check"; };
+      h.req "controls-are-refused"
+        "The judge refuses 26 corrupted transcripts before it judges the run."
+        { "zenoh_rmw_live_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_rmw_live_check" {
+        h.atLeast "casesObserved" 12;
+        h.count "negativeControlsRefused" 26;
+      };
+    };
+    decisions = {
+      h.decided "an-operator-signs-the-live-record"
+        "`zenoh_rmw_live_check` is an operator target. The item closes when an operator in `specs/allowed_signers` runs it and signs the record."
+        "CI has no router and no ROS packages. A done witness for an item named live must rest on a run that met a router"
+        h.agentDefault
+        { "link-meets-a-router"; "inbound-samples-are-delivered"; "outbound-puts-are-heard"; };
+      h.decided "the-operator-names-the-environment"
+        "The recipe reads the router and the nodes from `SLIME_ROS_ENV`, `SLIME_RMW_ZENOHD`, `SLIME_ROS_TALKER` and `SLIME_ROS_LISTENER`. A missing variable fails the run."
+        "the pinned ROS packages are not in `flake.nix`, and a path the checker invented would claim an environment nobody pinned"
+        h.agentDefault
+        { "link-meets-a-router"; };
+      h.decided "the-program-is-a-crate-outside-the-workspace"
+        "The program is `verification/zenoh-live`, with its own `Cargo.toml` and an empty `[workspace]`. It depends on `slime-components` by path."
+        "`verification/zenoh-xcheck` does the same, so the program stays out of the product's lockfile, `just deny` and the closures"
+        h.agentDefault
+        { "link-meets-a-router"; };
+      h.decided "the-cases-are-a-floor"
+        "The acceptance fixes at least 12 cases. A run that delivers more than 4 samples has more cases."
+        "the talker publishes once a second from a point the run does not choose, so the number of samples the link sees varies"
+        h.agentDefault
+        { "inbound-samples-are-delivered"; };
+    };
+  };
+
+item
