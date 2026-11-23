@@ -1,0 +1,92 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a20852-64d5-76b3-acce-bb1e92bc4708" "zenoh-rmw-token" "zenoh-transport"
+  "A Profile 0 link with the client role declares and withdraws the liveliness tokens of a node"
+  "`ros2 node list` and `ros2 topic list` build their graph from liveliness tokens under `@ros2_lv`. A client-role link writes none, so a ROS node hears its Puts and no ROS tool sees it. A host probe declared a node token and a publisher token for a Slime node through `rmw_zenohd` with the Python wire library. `ros2` listed the node and the topic, and listed neither after the tokens were withdrawn. The Rust encoder has no token declaration and no session call writes one.")
+  with {
+    owns = {
+      "components/lib/src/zenoh_profile0.rs";
+      "components/lib/src/zenoh_profile0/**";
+      "components/lib/src/zenoh_link.rs";
+      "components/lib/src/zenoh_link/**";
+    };
+    nonGoals = {
+      h.nonGoal "A live router, a ROS install or a registry. This item judges the bytes the link writes, and the router is not in the exam." h.agentDefault;
+      h.nonGoal "A component, a composition, a system spec, a QEMU gate or a NIC. This item judges the link on the host over a scripted byte stream." h.agentDefault;
+      h.nonGoal "The graph link and the graph session. They take no client role and read tokens, and this item makes the plain link write them." h.agentDefault;
+      h.nonGoal "A subscription token, a service token, a second node, a namespace other than `/` and a QoS other than the default. The probe covered only a node and a publisher." h.agentDefault;
+      h.nonGoal "A token written by key alias. A real peer declares an alias first, and the plain link has no alias writer. The probe's router took the key in full." h.agentDefault;
+      h.nonGoal "Learning whether `ros2` saw a token. The router writes nothing back, so the link cannot tell." h.agentDefault;
+      h.nonGoal "Any change to what a link with no client role writes or accepts." h.agentDefault;
+    };
+    requirements = {
+      h.req "client-link-declares-the-node-and-publisher-tokens"
+        "A link with the client role, open with a router, declares the node token and the publisher token of `slime_node`. Each is one FRAME equal to the bytes the exam builds from `build_token`, with the key in full and the sequence numbers following the OPEN_SYN's."
+        { "zenoh_rmw_token_check"; };
+      h.req "client-link-withdraws-a-token"
+        "The link withdraws the publisher token by its id, in one FRAME equal to the bytes the exam builds. The session stays open and the node token stays declared."
+        { "zenoh_rmw_token_check"; };
+      h.req "token-is-the-plain-form"
+        "A token declaration is a named token with the sender mapping and no QoS extension. A withdrawal carries the extension a real peer writes. The judge refuses a wildcard key, a missing sender mapping, a wrong domain, a wrong id and a missing extension. The router took a withdrawal without the extension in a probe, so the extension follows the capture and not the router."
+        { "zenoh_rmw_token_check"; };
+      h.req "no-role-link-refuses-a-token"
+        "A link with no client role refuses to declare a token as `invalid-config`."
+        { "zenoh_rmw_token_check"; };
+      h.req "client-link-refuses-what-it-must"
+        "A client-role link refuses a token before the session is open as `not-open`. It refuses an id already declared as `token-limit` and a key over the bound as `encode`. It refuses a withdrawal of an id never declared as `unknown-token`, and a token while the send slot is busy as `send-busy`."
+        { "zenoh_rmw_token_check"; };
+      h.req "client-link-closes-on-request"
+        "A local close writes a CLOSE of reason 0. The transcript prints the tokens as none, and the judge refuses any other value."
+        { "zenoh_rmw_token_check"; };
+      h.req "neighbour-exams-pass-unchanged"
+        "The session exam, the stock-peer exam and the Put exam pass unchanged beside the token slice."
+        { "zenoh_session_check"; "zenoh_stock_check"; "zenoh_rmw_client_put_check"; };
+      h.req "controls-are-refused"
+        "The judge refuses 73 corrupted records before it judges the real run: 68 mutated transcripts and 5 corrupted captures."
+        { "zenoh_rmw_token_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_rmw_token_check" {
+        h.count "casesObserved" 26;
+        h.count "negativeControlsRefused" 73;
+      };
+      h.observed "zenoh_session_check";
+      h.observed "zenoh_stock_check";
+      h.observed "zenoh_rmw_client_put_check";
+    };
+    decisions = {
+      h.decided "the-key-is-written-in-full"
+        "The link writes each token with its key in full. A real peer declares a key alias first and refers to it."
+        "the plain link has no alias writer, and the probe's router took the key in full and `ros2` read it"
+        h.agentDefault
+        { "client-link-declares-the-node-and-publisher-tokens"; };
+      h.decided "the-plain-form-without-a-qos-wrapper"
+        "A declaration is a plain DECLARE with no QoS extension. A real peer wraps each declaration with one."
+        "the probe's declarations had no wrapper, and `rmw_zenohd` and `ros2` took them"
+        h.agentDefault
+        { "token-is-the-plain-form"; };
+      h.decided "a-withdrawal-carries-the-captured-extension"
+        "A withdrawal carries the extension of the captured one, `5f 02 00 00`. A probe withdrew a token with and without it, and the router took both."
+        "the capture shows a real peer writing the extension, and no probe showed the router needing it"
+        h.agentDefault
+        { "client-link-withdraws-a-token"; "token-is-the-plain-form"; };
+      h.decided "a-close-withdraws-nothing"
+        "The link writes no withdrawal when it closes. The router dropped a client's tokens with its session in the probe."
+        "`ros2 node list` printed nothing after the client closed"
+        h.agentDefault
+        { "client-link-closes-on-request"; };
+      h.decided "both-tokens-are-written"
+        "The link declares a node token and a publisher token. `ros2` listed the node from the publisher token alone."
+        "a real `rmw_zenoh_cpp` node writes both, and the probe showed the node stays listed while any token of it remains"
+        h.agentDefault
+        { "client-link-declares-the-node-and-publisher-tokens"; };
+      h.decided "the-router-is-not-in-the-exam"
+        "The exam compares the bytes the link writes with the repo's wire reference. Whether `ros2` lists the node is the live run's to show."
+        "the router writes nothing back, so no capture says whether it took a token"
+        h.agentDefault
+        { "client-link-declares-the-node-and-publisher-tokens"; };
+    };
+  };
+
+item

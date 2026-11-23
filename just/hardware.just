@@ -133,6 +133,16 @@ zenoh_rmw_router_link_check:
 zenoh_rmw_client_put_check:
     python3 scripts/check/check-zenoh-profile0.py --slice rmw-client-put
 
+# Judges the liveliness tokens a Profile 0 link with the client role writes. ros2 builds `ros2 node list` and `ros2 topic list`
+# from tokens under @ros2_lv, so a node that writes none is invisible to them. A link with the role declares the node token and
+# the publisher token of a node, withdraws one and closes. The Rust tests drive the link through the handshakes of two runs of
+# rmw_zenohd, captured by scripts/lib/zenoh_rmw_router_data.py, three ways. The key is built by scripts/lib/zenoh_rmw_graph.py
+# and the bytes by scripts/lib/zenoh_rmw_wire.py. The expectation is scripts/lib/zenoh_rmw_token_exam.py. No router runs here.
+# Nothing needs a registry or a ROS install. It fails until the link writes a token.
+[group('hardware')]
+zenoh_rmw_token_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice rmw-token
+
 # Judges a live exchange between a client-role Slime link and two ROS nodes through rmw_zenohd. The checker starts the
 # router and a ROS node for each direction and runs the host program in verification/zenoh-live against them. A ROS talker
 # publishes on the chatter key and the link delivers its samples, then a ROS listener subscribes and the link writes 6 Puts.
