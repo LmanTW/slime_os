@@ -13,7 +13,6 @@ test = false
 
 [dependencies]
 slime-components = { path = "../../lib" }
-slime-proto = { path = "../../proto" }
 slime-rt = { path = "../../runtime" }
 
 [build-dependencies]
