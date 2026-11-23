@@ -5,7 +5,7 @@ item :: s.Item = (h.task "01a1ef06-fb8b-7046-b24b-47fccf60c29f" "zenoh-link-limi
   "A link configuration declares how many subscriptions of its own the session may hold"
   "A configuration of `contracts/zenoh-link-limits/v1` has no field for the local subscription count. `Params::DEMO` and `Params::from_limits` keep `local` at 1. The Zenoh service sets `Params { local: 3 }` directly, so no contract judges its count against its stack. Item 1 of `docs/decisions/zenoh-service.md` says a count above one needs a new version of the link-limits contract. It also says that version re-admits the links item. Version 2 is in the repository. `zenoh-fragment-lanes` planned it and added `maxRuns`. This item adds version 3 with both fields.")
   with {
-    intent = #planned;
+    intent = #active;
     owns = {
       "components/proto/src/zenoh_link_v3_limits*";
       "components/proto/src/lib.rs";
