@@ -476,6 +476,11 @@ fn fragments(first_sn: u32, size: usize) -> Vec<Vec<u8>> {
 
 /// The same fragments on `priority`: the default has no extension, any other the mandatory one after the number.
 fn fragments_on(priority: u8, first_sn: u32, size: usize) -> Vec<Vec<u8>> {
+    fragments_lane(true, priority, first_sn, size)
+}
+
+/// The same fragments on a lane of either reliability.
+fn fragments_lane(reliable: bool, priority: u8, first_sn: u32, size: usize) -> Vec<Vec<u8>> {
     let mut message = std::vec![0x7du8, 0x00, 0x81, 0x01];
     message.extend_from_slice(KEY.as_bytes());
     message.extend_from_slice(&[0x01 | 0x80, 0x43, 33]);
@@ -493,8 +498,10 @@ fn fragments_on(priority: u8, first_sn: u32, size: usize) -> Vec<Vec<u8>> {
         let room = 200usize;
         let end = (at + room).min(message.len());
         let more = end < message.len();
-        let flags =
-            0x06 | 0x20 | if more { 0x40 } else { 0 } | if priority == 5 { 0 } else { 0x80 };
+        let flags = 0x06
+            | if reliable { 0x20 } else { 0 }
+            | if more { 0x40 } else { 0 }
+            | if priority == 5 { 0 } else { 0x80 };
         let mut body = std::vec![flags, sn as u8];
         if priority != 5 {
             body.extend_from_slice(&[0x31, priority]);
@@ -919,4 +926,324 @@ fn a_refused_fragment_header_ends_the_run_of_its_lane_and_no_other() {
     );
     assert_eq!(receiver.run_slot(lane(7)), Some(0));
     assert_eq!(receiver.lane_next(lane(2)), 100);
+}
+
+/// What one fragment did on a best-effort lane, as the exam spells it: `sample`, or `drop <cause>`.
+fn best_effort_in(
+    session: &mut Two,
+    cells: &mut Cells,
+    batch: &[u8],
+    now: u64,
+) -> Result<Vec<std::string::String>, SessionError> {
+    let header = crate::zenoh_profile0::lane::decode_lane_fragment(batch, None).expect("header");
+    let slot = session.run_slot(header.lane).unwrap_or(0);
+    let outcome = session.on_lane_fragment(batch, now, &mut cells.cells[slot])?;
+    Ok(spell(outcome.events.iter()))
+}
+
+fn spell<'a>(events: impl Iterator<Item = &'a Event<'a>>) -> Vec<std::string::String> {
+    events
+        .map(|event| match event {
+            Event::SampleStored { .. } | Event::SampleDelivered { .. } => "sample".into(),
+            Event::Dropped {
+                cause: DropCause::Completed(class),
+                ..
+            } => std::format!("drop completed:{class}"),
+            Event::Dropped { cause, .. } => std::format!("drop {}", cause.name()),
+            other => std::format!("{other:?}"),
+        })
+        .collect()
+}
+
+fn best_effort(priority: u8) -> Lane {
+    Lane {
+        priority,
+        reliable: false,
+    }
+}
+
+#[test]
+fn a_best_effort_run_joins_into_a_sample_and_moves_its_own_counter() {
+    let (_, mut receiver) = heap_pair();
+    let mut cells = Cells::new();
+    let parts = fragments_lane(false, 2, 100, 300);
+    assert_eq!(parts.len(), 3);
+    for (at, part) in parts.iter().enumerate() {
+        let events = best_effort_in(&mut receiver, &mut cells, part, 10).expect("fragment");
+        assert_eq!(
+            events,
+            if at == 2 {
+                ["sample"].to_vec()
+            } else {
+                Vec::new()
+            }
+        );
+    }
+    assert_eq!(receiver.lane_next(best_effort(2)), 103);
+    assert_eq!(
+        receiver.lane_next(Lane {
+            priority: 2,
+            reliable: true
+        }),
+        100
+    );
+    assert!(!receiver.reassembling());
+}
+
+#[test]
+fn a_gap_in_a_best_effort_run_drops_it_and_discards_through_the_final_fragment() {
+    let (_, mut receiver) = heap_pair();
+    let mut cells = Cells::new();
+    let parts = fragments_lane(false, 2, 100, 900);
+    assert!(parts.len() >= 5);
+    best_effort_in(&mut receiver, &mut cells, &parts[0], 10).expect("first");
+    // The second fragment is lost. The third is ahead but not the run's next number.
+    let broken = best_effort_in(&mut receiver, &mut cells, &parts[2], 10).expect("gap");
+    assert_eq!(broken, ["drop fragment-sequence"]);
+    assert!(!receiver.reassembling());
+    assert_eq!(receiver.lane_next(best_effort(2)), 103);
+    let last = parts.len() - 1;
+    for part in &parts[3..last] {
+        let events = best_effort_in(&mut receiver, &mut cells, part, 10).expect("leftover");
+        assert_eq!(events, ["drop discarded"]);
+    }
+    let events = best_effort_in(&mut receiver, &mut cells, &parts[last], 10).expect("final");
+    assert_eq!(events, ["drop discarded"]);
+    // The discard ended with the final fragment, so the next message is taken.
+    let next = fragments_lane(false, 2, 100 + parts.len() as u32, 300);
+    for (at, part) in next.iter().enumerate() {
+        let events = best_effort_in(&mut receiver, &mut cells, part, 11).expect("next");
+        assert_eq!(
+            events,
+            if at == 2 {
+                ["sample"].to_vec()
+            } else {
+                Vec::new()
+            }
+        );
+    }
+}
+
+#[test]
+fn a_best_effort_fragment_that_is_not_ahead_is_dropped_and_the_run_stays_open() {
+    let (_, mut receiver) = heap_pair();
+    let mut cells = Cells::new();
+    let parts = fragments_lane(false, 2, 100, 300);
+    best_effort_in(&mut receiver, &mut cells, &parts[0], 10).expect("first");
+    let events = best_effort_in(&mut receiver, &mut cells, &parts[0], 11).expect("replay");
+    assert_eq!(events, ["drop stale-sequence"]);
+    assert!(receiver.reassembling());
+    assert_eq!(receiver.lane_next(best_effort(2)), 101);
+    let mut samples = 0;
+    for part in &parts[1..] {
+        samples += best_effort_in(&mut receiver, &mut cells, part, 12)
+            .expect("rest")
+            .len();
+    }
+    assert_eq!(samples, 1);
+}
+
+#[test]
+fn a_best_effort_first_fragment_with_every_run_open_is_dropped_and_discarded() {
+    let (_, mut receiver) = heap_pair();
+    let mut cells = Cells::new();
+    for priority in [2u8, 7] {
+        let parts = fragments_on(priority, 100, 300);
+        fragment_in(&mut receiver, &mut cells, &parts[0], 10).expect("reliable first");
+    }
+    let parts = fragments_lane(false, 5, 100, 300);
+    let events = best_effort_in(&mut receiver, &mut cells, &parts[0], 11).expect("first");
+    assert_eq!(events, ["drop lane-limit"]);
+    assert_eq!(receiver.lane_next(best_effort(5)), 101);
+    for (at, part) in parts[1..].iter().enumerate() {
+        let events = best_effort_in(&mut receiver, &mut cells, part, 11).expect("leftover");
+        assert_eq!(events, ["drop discarded"], "fragment {at}");
+    }
+    // The reliable runs were not disturbed.
+    assert!(receiver.reassembling());
+}
+
+#[test]
+fn a_best_effort_run_that_starts_late_completes_as_a_bad_message_and_is_dropped_by_class() {
+    let (_, mut receiver) = heap_pair();
+    let mut cells = Cells::new();
+    let parts = fragments_lane(false, 2, 100, 300);
+    // The first fragment is lost, so the run starts at the second, which the lane takes as ahead.
+    let mut seen = Vec::new();
+    for part in &parts[1..] {
+        seen.extend(best_effort_in(&mut receiver, &mut cells, part, 10).expect("fragment"));
+    }
+    assert_eq!(seen.len(), 1);
+    assert!(seen[0].starts_with("drop completed:"), "{seen:?}");
+    assert_eq!(receiver.lane_next(best_effort(2)), 103);
+    assert!(!receiver.reassembling());
+}
+
+#[test]
+fn a_best_effort_run_that_outlives_the_timeout_is_dropped_by_the_tick_and_the_lane_discards() {
+    let mut receiver = long_lease_pair();
+    let mut cells = Cells::new();
+    let mut out = [0u8; MAX_BATCH_BYTES];
+    let parts = fragments_lane(false, 2, 100, 300);
+    best_effort_in(&mut receiver, &mut cells, &parts[0], 1000).expect("first");
+    let on_time = receiver.tick(6000, &mut out).expect("on the deadline");
+    assert!(on_time.events.is_empty());
+    assert!(receiver.reassembling());
+    let late = receiver
+        .tick(6001, &mut out)
+        .expect("late is a drop, not a refusal");
+    assert_eq!(spell(late.events.iter()), ["drop reassembly-timeout"]);
+    assert!(!receiver.reassembling());
+    // The leftovers of the message are discarded, and the final one ends the discard.
+    assert_eq!(
+        best_effort_in(&mut receiver, &mut cells, &parts[1], 6002).expect("second"),
+        ["drop discarded"]
+    );
+    assert_eq!(
+        best_effort_in(&mut receiver, &mut cells, &parts[2], 6002).expect("final"),
+        ["drop discarded"]
+    );
+}
+
+#[test]
+fn a_best_effort_fragment_after_the_timeout_reports_the_timeout_and_is_discarded() {
+    let mut receiver = long_lease_pair();
+    let mut cells = Cells::new();
+    let parts = fragments_lane(false, 2, 100, 300);
+    best_effort_in(&mut receiver, &mut cells, &parts[0], 1000).expect("first");
+    let events = best_effort_in(&mut receiver, &mut cells, &parts[1], 6001).expect("late");
+    assert_eq!(events, ["drop reassembly-timeout", "drop discarded"]);
+    assert!(!receiver.reassembling());
+}
+
+#[test]
+fn a_late_best_effort_run_and_a_late_reliable_run_end_differently_in_one_tick() {
+    let mut receiver = long_lease_pair();
+    let mut cells = Cells::new();
+    let mut out = [0u8; MAX_BATCH_BYTES];
+    let be = fragments_lane(false, 2, 100, 300);
+    best_effort_in(&mut receiver, &mut cells, &be[0], 1000).expect("best-effort first");
+    let reliable = fragments_on(5, 100, 300);
+    fragment_in(&mut receiver, &mut cells, &reliable[0], 1000).expect("reliable first");
+    assert_eq!(
+        receiver.tick(6001, &mut out).err(),
+        Some(SessionError::Fragment(FragmentError::ReassemblyTimeout))
+    );
+    assert!(!receiver.reassembling(), "both runs are released");
+    // The best-effort lane discards after the refusal, as it does after a drop.
+    assert_eq!(
+        best_effort_in(&mut receiver, &mut cells, &be[1], 6002).expect("leftover"),
+        ["drop discarded"]
+    );
+}
+
+#[test]
+fn a_best_effort_frame_on_the_lane_of_an_open_run_drops_the_run_and_is_taken() {
+    let (_, mut receiver) = heap_pair();
+    let mut cells = Cells::new();
+    let mut out = [0u8; MAX_BATCH_BYTES];
+    let parts = fragments_lane(false, 2, 100, 300);
+    best_effort_in(&mut receiver, &mut cells, &parts[0], 10).expect("first");
+    let body = put_body(1);
+    let frame = lane_frame(false, 2, 101, &body);
+    let taken = receiver
+        .on_batch_with(&frame, 11, &mut out, &mut cells.cells[1])
+        .expect("frame");
+    assert_eq!(
+        spell(taken.events.iter()),
+        ["drop frame-during-run", "sample"]
+    );
+    assert!(!receiver.reassembling());
+    assert_eq!(receiver.lane_next(best_effort(2)), 102);
+    // A best-effort FRAME on another lane leaves the run alone.
+    best_effort_in(
+        &mut receiver,
+        &mut cells,
+        &fragments_lane(false, 2, 102, 300)[0],
+        12,
+    )
+    .expect("again");
+    let other = lane_frame(false, 3, 100, &body);
+    receiver
+        .on_batch_with(&other, 13, &mut out, &mut cells.cells[1])
+        .expect("other lane");
+    assert!(receiver.reassembling());
+}
+
+#[test]
+fn a_refused_best_effort_header_keeps_the_run_of_its_lane() {
+    let (_, mut receiver) = heap_pair();
+    let mut cells = Cells::new();
+    let parts = fragments_lane(false, 2, 100, 300);
+    best_effort_in(&mut receiver, &mut cells, &parts[0], 10).expect("first");
+    let empty = parts[1][..4].to_vec();
+    assert_eq!(
+        receiver
+            .on_lane_fragment(&empty, 11, &mut cells.cells[0])
+            .err(),
+        Some(SessionError::Decode(Refusal::MalformedMessage))
+    );
+    assert!(receiver.reassembling());
+    assert_eq!(receiver.lane_next(best_effort(2)), 101);
+}
+
+#[test]
+fn a_reliable_and_a_best_effort_run_of_one_priority_are_two_runs() {
+    let (_, mut receiver) = heap_pair();
+    let mut cells = Cells::new();
+    let reliable = fragments_on(2, 100, 300);
+    let be = fragments_lane(false, 2, 100, 300);
+    let mut samples = 0;
+    for at in 0..3 {
+        samples += fragment_in(&mut receiver, &mut cells, &reliable[at], 10).expect("reliable");
+        samples += best_effort_in(&mut receiver, &mut cells, &be[at], 10)
+            .expect("best-effort")
+            .len();
+    }
+    assert_eq!(samples, 2);
+    assert_eq!(
+        receiver.lane_next(Lane {
+            priority: 2,
+            reliable: true
+        }),
+        103
+    );
+    assert_eq!(receiver.lane_next(best_effort(2)), 103);
+}
+
+#[test]
+fn a_gap_on_the_final_fragment_drops_the_run_and_starts_no_discard() {
+    let (_, mut receiver) = heap_pair();
+    let mut cells = Cells::new();
+    let parts = fragments_lane(false, 2, 100, 300);
+    best_effort_in(&mut receiver, &mut cells, &parts[0], 10).expect("first");
+    // The second fragment is lost and the final one arrives: the message is over, so nothing follows to discard.
+    let events = best_effort_in(&mut receiver, &mut cells, &parts[2], 10).expect("final");
+    assert_eq!(events, ["drop fragment-sequence"]);
+    let next = fragments_lane(false, 2, 103, 300);
+    for (at, part) in next.iter().enumerate() {
+        let events = best_effort_in(&mut receiver, &mut cells, part, 11).expect("next");
+        assert_eq!(
+            events,
+            if at == 2 {
+                ["sample"].to_vec()
+            } else {
+                Vec::new()
+            }
+        );
+    }
+}
+
+#[test]
+fn a_tick_that_writes_a_keep_alive_reports_the_drop_of_a_late_best_effort_run_too() {
+    let mut receiver = long_lease_pair();
+    let mut cells = Cells::new();
+    let mut out = [0u8; MAX_BATCH_BYTES];
+    let parts = fragments_lane(false, 2, 100, 300);
+    best_effort_in(&mut receiver, &mut cells, &parts[0], 1000).expect("first");
+    // The lease is 1,000,000 ms, so a quarter of it is long past by the time the run is late.
+    let due = receiver.tick(300_000, &mut out).expect("tick");
+    assert_ne!(due.sent, 0, "a keep-alive is written");
+    assert_eq!(spell(due.events.iter()), ["drop reassembly-timeout"]);
+    assert!(!receiver.reassembling());
 }

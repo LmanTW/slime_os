@@ -518,6 +518,8 @@ pub struct SessionOf<
     /// One run for each of the `R` the session holds, and the lane each open run serves.
     run_table: [Run; R],
     run_lane: [Lane; R],
+    /// Whether a best-effort lane drops fragments through its next final one, because its run broke.
+    discarding: [bool; LANES],
     /// The key aliases a stock peer declared with DeclareKeyExpr, and the keys they stand for.
     aliases: SlotTable<K, B>,
     /// Every subscription, this side's and the peer's, in the `S` slots the configuration declares. A
@@ -647,6 +649,7 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
             lane_sn: [0; LANES],
             run_table: [Run::new(); R],
             run_lane: [Lane::DEFAULT; R],
+            discarding: [false; LANES],
             aliases: SlotTable::new(),
             subs: SlotTable::new(),
             local_n: 0,
@@ -910,6 +913,7 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
         for run in &mut self.run_table {
             run.release();
         }
+        self.discarding = [false; LANES];
     }
 
     /// Stamps a batch this side sent, which restarts the keep-alive cadence.
@@ -1291,6 +1295,19 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
         let mut journal = [None; JOURNAL];
         let mut used = 0;
         let mut events = Events::empty();
+        // A whole FRAME on the best-effort lane of an open run ends the run. The run is dropped, and the FRAME is
+        // taken.
+        let mut frame_ended_run = false;
+        if !lane.reliable
+            && let Some(slot) = self.slot_of(lane)
+        {
+            self.run_table[slot].release();
+            frame_ended_run = true;
+            events.push(Event::Dropped {
+                priority: lane.priority,
+                cause: DropCause::FrameDuringRun,
+            })?;
+        }
         let applied = match frame_of(header.sn, header.body, &self.params.bounds, false) {
             Ok(frame) => self.apply_frame(&frame, &mut journal, &mut used, &mut events),
             Err(refusal) => Err(refusal.into()),
@@ -1315,10 +1332,18 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
                 self.undo(&journal, used);
                 // The number was ahead, so the lane moves past it: the sender will not send it again.
                 self.lane_sn[lane.index()] = header.sn.wrapping_add(1);
-                Ok(Outcome::nothing().with(Event::Dropped {
+                let mut events = Events::empty();
+                if frame_ended_run {
+                    events.push(Event::Dropped {
+                        priority: lane.priority,
+                        cause: DropCause::FrameDuringRun,
+                    })?;
+                }
+                events.push(Event::Dropped {
                     priority: lane.priority,
                     cause: DropCause::Completed(error.class()),
-                }))
+                })?;
+                Ok(Outcome { sent: 0, events })
             }
         }
     }
@@ -1474,7 +1499,9 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
 
     /// One FRAGMENT of a session that negotiated lanes, joined into `cell`, the storage of
     /// [`Self::run_slot`] for the lane the header names. A reliable lane takes the next number of its own
-    /// counter and refuses anything else. A best-effort fragment is refused here: the next change takes it.
+    /// counter and refuses anything else. A best-effort lane counts the gap and drops what it cannot take, as an
+    /// [`Event::Dropped`]. A lane with no free slot has no cell: the caller passes any cell, which that fragment
+    /// does not use.
     pub fn on_lane_fragment<'a>(
         &mut self,
         batch: &[u8],
@@ -1492,24 +1519,123 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
             Err(error) => {
                 // A refused fragment ends the run of its lane, as it does on the one-cell path. A header that
                 // names no lane ends none.
-                if let Some(slot) = peek_fragment_lane(batch).and_then(|lane| self.slot_of(lane)) {
+                // A best-effort lane keeps its run: only a fragment it took can break it.
+                if let Some(slot) = peek_fragment_lane(batch)
+                    .filter(|lane| lane.reliable)
+                    .and_then(|lane| self.slot_of(lane))
+                {
                     self.run_table[slot].release();
                 }
                 return Err(error.into());
             }
         };
-        if !header.lane.reliable {
-            return Err(SessionError::Decode(Refusal::UnsupportedMessage));
-        }
         let fragment = Fragment {
             more: header.more,
             sn: header.sn,
             data: header.data,
         };
-        let outcome = self.take_fragment(header.lane, &fragment, now_ms, cell)?;
+        let outcome = if header.lane.reliable {
+            self.take_fragment(header.lane, &fragment, now_ms, cell)?
+        } else {
+            self.take_best_effort_fragment(header.lane, &fragment, now_ms, cell)?
+        };
         self.last_rx_ms = now_ms;
         self.now_ms = now_ms;
         Ok(outcome)
+    }
+
+    /// Reads the message of a completed run as a Put held to what a whole-frame Put is held to.
+    fn put_event<'a>(&self, message: &[u8]) -> Result<Event<'a>, SessionError> {
+        let subs = &self.subs;
+        let subscribed = |key: &[u8]| subscribed_to(subs, key);
+        let rules = PutRules {
+            max_key: self.params.bounds.key,
+            max_payload: self.params.bounds.payload as u64,
+            aliases: Some(&self.aliases),
+            subscribed: &subscribed,
+        };
+        let view = decode_put(message, &rules)?;
+        let offset = (view.payload.as_ptr() as usize).saturating_sub(message.as_ptr() as usize);
+        Ok(Event::SampleStored {
+            sequence: view.attachment.sequence,
+            timestamp: view.attachment.timestamp,
+            offset,
+            len: view.payload.len(),
+        })
+    }
+
+    /// One best-effort fragment. The lane counts past every number that is ahead, so the sender's next number is
+    /// the one it expects, and what it cannot take it drops and reports. A run that breaks makes the lane discard
+    /// fragments through the next final one, so the leftovers of the message never join into a sample.
+    fn take_best_effort_fragment<'a>(
+        &mut self,
+        lane: Lane,
+        fragment: &Fragment<'_>,
+        now_ms: u64,
+        cell: &mut [u8],
+    ) -> Result<Outcome<'a, E>, SessionError> {
+        let index = lane.index();
+        let (timeout, limit) = (self.params.timeout_ms, self.params.message_limit);
+        let dropped = |cause| Event::Dropped {
+            priority: lane.priority,
+            cause,
+        };
+        let mut events = Events::empty();
+        let mut slot = self.slot_of(lane);
+        if let Some(open) = slot.filter(|open| self.run_table[*open].expired(now_ms, timeout)) {
+            self.run_table[open].release();
+            self.discarding[index] = true;
+            events.push(dropped(DropCause::ReassemblyTimeout))?;
+            slot = None;
+        }
+        // The same measure as a FRAME: ahead of the last number taken by 1 to 2^31 - 1.
+        if fragment.sn.wrapping_sub(self.lane_sn[index]) >= HALF - 1 {
+            events.push(dropped(DropCause::StaleSequence))?;
+            return Ok(Outcome { sent: 0, events });
+        }
+        self.lane_sn[index] = fragment.sn.wrapping_add(1);
+        if self.discarding[index] {
+            self.discarding[index] = fragment.more;
+            events.push(dropped(DropCause::Discarded))?;
+            return Ok(Outcome { sent: 0, events });
+        }
+        let broken = match slot {
+            Some(open) if self.run_table[open].next_sn() != fragment.sn => {
+                self.run_table[open].release();
+                Some(DropCause::FragmentSequence)
+            }
+            None if self.free_slot().is_none() => Some(DropCause::LaneLimit),
+            _ => None,
+        };
+        if let Some(cause) = broken {
+            self.discarding[index] = fragment.more;
+            events.push(dropped(cause))?;
+            return Ok(Outcome { sent: 0, events });
+        }
+        let open = slot
+            .or_else(|| self.free_slot())
+            .ok_or(SessionError::LaneLimit)?;
+        let progress =
+            self.run_table[open].accept(fragment, cell, fragment.sn, now_ms, timeout, limit);
+        let result = match progress {
+            Ok(Progress::Open) => {
+                self.run_lane[open] = lane;
+                return Ok(Outcome { sent: 0, events });
+            }
+            Ok(Progress::Complete(_)) => self.run_table[open]
+                .finish(cell)
+                .map_err(SessionError::from)
+                .and_then(|(message, _)| self.put_event(message)),
+            Err(error) => Err(error.into()),
+        };
+        match result {
+            Ok(event) => events.push(event)?,
+            Err(error) => {
+                self.discarding[index] = fragment.more;
+                events.push(dropped(DropCause::Completed(error.class())))?;
+            }
+        }
+        Ok(Outcome { sent: 0, events })
     }
 
     /// Joins one fragment into the run of `lane` and, when the last arrives, reads the message as a Put held to
@@ -1540,22 +1666,7 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
             return Ok(Outcome::nothing());
         }
         let (message, next) = self.run_table[slot].finish(cell)?;
-        let subs = &self.subs;
-        let subscribed = |key: &[u8]| subscribed_to(subs, key);
-        let rules = PutRules {
-            max_key: self.params.bounds.key,
-            max_payload: self.params.bounds.payload as u64,
-            aliases: Some(&self.aliases),
-            subscribed: &subscribed,
-        };
-        let view = decode_put(message, &rules)?;
-        let offset = (view.payload.as_ptr() as usize).saturating_sub(message.as_ptr() as usize);
-        let event = Event::SampleStored {
-            sequence: view.attachment.sequence,
-            timestamp: view.attachment.timestamp,
-            offset,
-            len: view.payload.len(),
-        };
+        let event = self.put_event(message)?;
         self.lane_sn[lane.index()] = next;
         Ok(Outcome::nothing().with(event))
     }
@@ -1577,10 +1688,13 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
             let sent = encode::keep_alive(out)?;
             self.now_ms = self.now_ms.max(now_ms);
             self.sent_now(now_ms);
-            return Ok(Outcome::sending(sent));
+            return Ok(Outcome {
+                sent,
+                events: expired.events,
+            });
         }
         self.now_ms = self.now_ms.max(now_ms);
-        Ok(Outcome::nothing())
+        Ok(expired)
     }
 
     /// The expiry half of [`tick`](Self::tick): closes the session once `now_ms` is past the
@@ -1601,12 +1715,25 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
     fn expire<'a>(&mut self, now_ms: u64, out: &mut [u8]) -> Result<Outcome<'a, E>, SessionError> {
         // A run whose last fragment never came is refused once its deadline has passed and its storage is
         // released; the session itself stays open.
+        // A reliable lane refuses. A best-effort lane drops the run, discards through the next final fragment and
+        // reports it, so the session stays as it was for the caller that counts drops.
         let timeout = self.params.timeout_ms;
         let mut late = false;
-        for run in &mut self.run_table {
-            if run.expired(now_ms, timeout) {
-                run.release();
+        let mut events = Events::empty();
+        for slot in 0..R {
+            if !self.run_table[slot].expired(now_ms, timeout) {
+                continue;
+            }
+            self.run_table[slot].release();
+            let lane = self.run_lane[slot];
+            if lane.reliable {
                 late = true;
+            } else {
+                self.discarding[lane.index()] = true;
+                events.push(Event::Dropped {
+                    priority: lane.priority,
+                    cause: DropCause::ReassemblyTimeout,
+                })?;
             }
         }
         if late {
@@ -1620,7 +1747,7 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
                     reason: CLOSE_EXPIRED,
                 }))
             }
-            _ => Ok(Outcome::nothing()),
+            _ => Ok(Outcome { sent: 0, events }),
         }
     }
 
