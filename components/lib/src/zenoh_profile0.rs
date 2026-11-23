@@ -62,6 +62,11 @@ const OAM_HEADER: u8 = FLAG_Z | FLAG_BIT6 | ID_OAM;
 const OAM_LINK_STATE: u32 = 1;
 /// The largest value the network QoS extension carries: priority, congestion and express.
 const QOS_NETWORK_MAX: u32 = 0x1F;
+const QOS_PRIORITY_MASK: u32 = 0x07;
+const QOS_BLOCK: u32 = 0x08;
+const QOS_EXPRESS: u32 = 0x10;
+/// The priority of a PUSH that states none: `Priority::Data` in eclipse-zenoh 1.0.0.
+const QOS_PUSH_PRIORITY: u8 = 5;
 const RESOLUTION_RESERVED: u8 = 0xF0;
 const PACKED_RESERVED: u8 = 0x0C;
 const U_SUBSCRIBER_HEADER: u8 = FLAG_Z | ID_U_SUBSCRIBER;
@@ -165,6 +170,69 @@ impl Mapping {
     }
 }
 
+/// What the network QoS extension of a PUSH states: a priority of 0 to 7, whether congestion control
+/// is Block rather than Drop, and whether the message is express. `Default` is the value
+/// eclipse-zenoh 1.0.0 gives a PUSH, which it writes as no extension at all.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Qos {
+    priority: u8,
+    block: bool,
+    express: bool,
+}
+
+impl Qos {
+    /// `None` when `priority` is over 7.
+    pub const fn new(priority: u8, block: bool, express: bool) -> Option<Self> {
+        if priority > QOS_PRIORITY_MASK as u8 {
+            None
+        } else {
+            Some(Self {
+                priority,
+                block,
+                express,
+            })
+        }
+    }
+
+    pub const fn priority(self) -> u8 {
+        self.priority
+    }
+
+    pub const fn block(self) -> bool {
+        self.block
+    }
+
+    pub const fn express(self) -> bool {
+        self.express
+    }
+
+    /// The Z64 the extension carries.
+    pub(crate) const fn value(self) -> u32 {
+        self.priority as u32
+            | if self.block { QOS_BLOCK } else { 0 }
+            | if self.express { QOS_EXPRESS } else { 0 }
+    }
+
+    /// `value` must be at most `QOS_NETWORK_MAX`, which the caller has checked.
+    const fn from_value(value: u32) -> Self {
+        Self {
+            priority: (value & QOS_PRIORITY_MASK) as u8,
+            block: value & QOS_BLOCK != 0,
+            express: value & QOS_EXPRESS != 0,
+        }
+    }
+}
+
+impl Default for Qos {
+    fn default() -> Self {
+        Self {
+            priority: QOS_PUSH_PRIORITY,
+            block: false,
+            express: false,
+        }
+    }
+}
+
 /// The 33-byte `rmw_zenoh` attachment: sequence number, source timestamp and a
 /// 16-byte source GID.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -194,6 +262,7 @@ pub enum Network<'a> {
     PushPut {
         mapping: Mapping,
         key: &'a str,
+        qos: Qos,
         attachment: Attachment<'a>,
         payload: &'a [u8],
     },
@@ -209,6 +278,7 @@ pub enum Network<'a> {
     PushPutAlias {
         mapping: Mapping,
         alias: u32,
+        qos: Qos,
         attachment: Attachment<'a>,
         payload: &'a [u8],
     },
@@ -404,13 +474,19 @@ fn init_qos_extension(reader: &mut Reader<'_>) -> Result<(), Refusal> {
 /// optional, id 1, a Z64 value (priority, congestion and express in the low five bits), and the only
 /// extension in its chain.
 fn network_qos_extension(reader: &mut Reader<'_>) -> Result<(), Refusal> {
+    network_qos_value(reader).map(|_| ())
+}
+
+/// The same extension, with the value it carries.
+fn network_qos_value(reader: &mut Reader<'_>) -> Result<Qos, Refusal> {
     if reader.u8()? != EXT_QOS_NETWORK {
         return Err(Refusal::UnsupportedExtension);
     }
-    if reader.leb(p::LEB128_MAX_BITS)? > QOS_NETWORK_MAX {
+    let value = reader.leb(p::LEB128_MAX_BITS)?;
+    if value > QOS_NETWORK_MAX {
         return Err(Refusal::MalformedMessage);
     }
-    Ok(())
+    Ok(Qos::from_value(value))
 }
 
 fn cookie<'a>(reader: &mut Reader<'a>) -> Result<&'a [u8], Refusal> {
@@ -754,8 +830,14 @@ fn push<'a>(
     bounds: &Bounds,
     client: bool,
 ) -> Result<Network<'a>, Refusal> {
-    no_extension(header)?;
     let key = key_reference(reader, header & FLAG_BIT5 != 0, bounds)?;
+    // The network QoS extension sits between the key expression and the Put, and is the only extension
+    // of a PUSH taken. Without it the PUSH has the default QoS.
+    let qos = if header & FLAG_Z != 0 {
+        network_qos_value(reader)?
+    } else {
+        Qos::default()
+    };
     let body = reader.u8()?;
     // The timestamp flag is a Put's own stamp, which `rmw_zenoh_cpp` writes and a router forwards unchanged. Only a
     // session with the client role takes it; the encoding flag is refused for every session.
@@ -803,12 +885,14 @@ fn push<'a>(
         KeyRef::Full(key) => Network::PushPut {
             mapping,
             key,
+            qos,
             attachment,
             payload,
         },
         KeyRef::Alias(alias) => Network::PushPutAlias {
             mapping,
             alias,
+            qos,
             attachment,
             payload,
         },

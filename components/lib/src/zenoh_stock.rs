@@ -415,6 +415,43 @@ fn alias_resolves_to_declared_key() {
     line("ok alias-resolves-to-declared-key");
 }
 
+/// The fixture row that is a captured PUSH with the network QoS extension after its key.
+const QOS_ON_PUSH: &str = "refuse-qos-on-push";
+
+/// The extension `21 08` is priority 0, Block, not express: a value eclipse-zenoh writes on a PUSH, so the
+/// session takes the batch and delivers the sample behind it.
+fn qos_on_push_is_taken() {
+    let (mut ours, now) = opened_listener();
+    let mut out = [0u8; MAX_BATCH_BYTES];
+    ours.send_declare_subscriber(1, KEY, &mut out)
+        .expect("ours");
+    feed_next(
+        &mut ours,
+        &captured("connects-04-declare-keyexpr-declare-subscriber"),
+        now,
+    )
+    .expect("accepted");
+    let batch = captured(QOS_ON_PUSH);
+    let Ok(Message::Frame(frame)) = decode_batch(&batch) else {
+        panic!("{QOS_ON_PUSH} is not a frame");
+    };
+    let Some(Network::PushPutAlias { qos, .. }) = frame.messages().next() else {
+        panic!("{QOS_ON_PUSH} is not an aliased push");
+    };
+    assert_eq!(
+        (qos.priority(), qos.block(), qos.express()),
+        (0, true, false)
+    );
+    let before = ours.expected_rx_sn();
+    let (_, events) = feed_next(&mut ours, &batch, now + 1).expect("accepted");
+    assert!(matches!(
+        events.as_slice(),
+        [Ev::Sample { sequence: 0, .. }]
+    ));
+    assert_eq!(ours.expected_rx_sn(), before.wrapping_add(1));
+    line("ok qos-on-push-is-taken");
+}
+
 // ---------------------------------------------------------------------------------------------
 // Keep-alive and the lease.
 
@@ -747,6 +784,11 @@ fn refusals() {
         now,
     );
     for (name, _) in fixtures::REFUSE {
+        // This row is a PUSH whose QoS extension is where eclipse-zenoh writes it, so the session takes it;
+        // `qos_on_push_is_taken` feeds it with the sequence number the session expects.
+        if name == QOS_ON_PUSH {
+            continue;
+        }
         let before = snapshot(&ours);
         let error = feed(&mut ours, &captured(name), now + 1).expect_err(name);
         assert_eq!(snapshot(&ours), before, "{name} changed the session");
@@ -1113,6 +1155,7 @@ fn the_stock_peer_exam() {
         tick_silent(name, &mut session, entered);
     }
     keep_alive_suppressed_by_traffic();
+    qos_on_push_is_taken();
     refusals();
     for (name, bytes) in fixtures::CONNECTS.iter().chain(fixtures::LISTENS.iter()) {
         properties(name, &unhex(bytes));

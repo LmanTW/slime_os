@@ -1481,6 +1481,7 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
                     alias: named,
                     attachment,
                     payload,
+                    ..
                 } => {
                     let held = resolve(&self.aliases, named, mapping)?;
                     deliver(&self.subs, held, attachment, payload, events)?;
