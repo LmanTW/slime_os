@@ -343,9 +343,11 @@ Known limits of the component:
 - A settled holder gets no answer once every holder has settled, because the service returns when the roster is done.
   No boot shows a settled holder sending. The judge shows only that the statements which cleared the endpoints are gone.
 - A configuration judged by `contracts/zenoh-link-limits/v1` cannot declare more than one local subscription. Version 3 of
-  that contract adds `localSubscriptions` beside `maxRuns`. The contract and its judge exist, and the generated Rust constants
-  and the reader of a version 3 record do not. The component does not use that path: it opens its link with
-  `Params { local: 3 }`.
+  that contract adds `localSubscriptions` beside `maxRuns`. The component opens its link with `SERVICE`, a constant of
+  `zenoh_link_limits_v3` that the contract's decoder accepts. The configuration declares 2 keys, 2 subscribers of the peer
+  and 3 local subscriptions. The service announces a batch of 514 bytes in its INIT, where it announced 512. Its link type
+  declares 2 aliases. No component reads a version 3 record file, and `zenoh-peer`, `zenoh-rmw-peer` and `lidar-publisher`
+  keep their own `Params`.
 - A publisher receives its own publications, and a holder cannot exclude them. Lazy declaration and reliable delivery with
   credits are not implemented. [The decision record](../decisions/zenoh-service.md) gives the reasons.
 
