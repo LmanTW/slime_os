@@ -147,6 +147,7 @@ import zenoh_holder_fault_exam
 import zenoh_lost_holder_exam
 import zenoh_service_arm
 import zenoh_service_component_exam
+import zenoh_service_four_exam
 import zenoh_service_peer_exam
 import zenoh_grants_table_exam
 import zenoh_limits_exam
@@ -3140,6 +3141,44 @@ def service_peer_main(controls_only: bool) -> int:
     return 0
 
 
+SERVICE_FOUR_CONTROLS = 68
+
+
+def service_four_main(controls_only: bool) -> int:
+    """The component and the composition for four holders and six rows. The facts are read first. The arm then boots
+    the image under QEMU, and the judge reads the lines of the service and of the peer against the grants."""
+    exam = zenoh_service_four_exam
+    try:
+        refusals = exam.fact_controls() + exam.controls()
+        if refusals != SERVICE_FOUR_CONTROLS:
+            fail(f"service-four: {refusals} controls, the checker pins {SERVICE_FOUR_CONTROLS}")
+        if controls_only:
+            print(f"zenoh profile 0 service-four judge: refused {refusals} corrupted inputs")
+            return 0
+        cases = exam.check_facts()
+    except exam.FourExamError as error:
+        fail(f"service-four: {error}")
+    with tempfile.TemporaryDirectory() as scratch:
+        transcript = _Path(scratch) / "transcript.txt"
+        arm = subprocess.run(
+            [_sys.executable, str(ROOT / "scripts" / "check" / "check-sel4-io-network-plane.py"), "--arm", "zenoh-service-four", "--transcript", str(transcript)],
+            cwd=ROOT, capture_output=True, text=True, env={**_os.environ},
+        )
+        if arm.returncode != 0:
+            _sys.stderr.write((arm.stdout + arm.stderr)[-4000:])
+            fail(f"service-four: the zenoh-service-four arm exited {arm.returncode}")
+        lines = [line.strip() for line in transcript.read_text(encoding="utf-8").splitlines() if PEER_LINE.match(line.strip())]
+    try:
+        published, denied, received = exam.judge(lines)
+    except exam.FourExamError as error:
+        fail(f"service-four: {error}")
+    observed = cases + published + denied + received
+    print(f"[zenoh-profile0] slice=service-four cases={observed} refusals={refusals} controls={refusals}")
+    devloop_observations.record(casesObserved=observed, negativeControlsRefused=refusals)
+    print("zenoh profile 0 service-four check: four holders exchanged through the service and the service refused the key beta lacks")
+    return 0
+
+
 GRANTS_TABLE_TEST = "every_table_decodes_to_its_rows_or_is_refused"
 TABLE_LINE = re.compile(r"\[zenoh-exam\] (grantstable .*)$")
 
@@ -3519,7 +3558,7 @@ def lost_holder_main(controls_only: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-client", "rmw-router-link", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "lanes", "link-limits-v3", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service-peer", "service", "service-link", "holder-fault", "service-stack", "lost-holder"), required=True)
+    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-client", "rmw-router-link", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "lanes", "link-limits-v3", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service-peer", "service-four", "service", "service-link", "holder-fault", "service-stack", "lost-holder"), required=True)
     parser.add_argument("--controls-only", action="store_true")
     arguments = parser.parse_args()
     if arguments.slice == "composition":
@@ -3582,6 +3621,8 @@ def main() -> int:
         return service_component_main(arguments.controls_only)
     if arguments.slice == "service-booted":
         return service_booted_main(arguments.controls_only)
+    if arguments.slice == "service-four":
+        return service_four_main(arguments.controls_only)
     if arguments.slice == "service-peer":
         return service_peer_main(arguments.controls_only)
     if arguments.slice == "service":

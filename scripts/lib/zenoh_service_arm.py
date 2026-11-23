@@ -25,6 +25,9 @@ from harness import ROOT
 
 GENERATION = 171
 CLOSURE = "sel4-zenoh-service"
+# The composition with four holders and six rows. It has the same judge and its own grants and generation.
+FOUR_GENERATION = 174
+FOUR_CLOSURE = "sel4-zenoh-service-four"
 SPEC_ROOT = ROOT / "contracts" / "system-spec" / "v1" / "systems"
 SERVICE = "zenoh-service"
 SAMPLES = 4

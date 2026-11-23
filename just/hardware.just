@@ -311,6 +311,15 @@ zenoh_service_booted_check:
 zenoh_service_peer_check:
     python3 scripts/check/check-zenoh-profile0.py --slice service-peer
 
+# Judges the composition that runs the Zenoh service with four holders and six rows, and boots it. The judge requires the
+# component constants, the system spec, the manifest, the inventory row and the arm of the network plane checker. The arm
+# requires `alpha` to publish four samples that each reach `beta`, `gamma` and `delta`, with `gamma` and `delta` delivered on
+# their second row, and the peer to receive each once. The service must refuse `beta` once. The expectation is
+# scripts/lib/zenoh_service_four_exam.py. The recipe is in no aggregate. It fails until the composition lands.
+[group('hardware')]
+zenoh_service_four_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice service-four
+
 # Judges the Zenoh service grants table, the form of the grants that the generation carries and the root serves. The
 # judge writes each table again with Python's struct from the schema's layout, requires the encoder, the generated wire
 # records and the Rust decoder to agree with it, and refuses each corruption of a table. The expectation is

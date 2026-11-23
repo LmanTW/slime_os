@@ -662,6 +662,28 @@ ZENOH_SERVICE_CHAINS: tuple[tuple[str, tuple[str, ...]], ...] = (
     )),
 )
 
+# The same service with four holders and six rows. Four holders attach, and alpha's publications reach three of them.
+ZENOH_SERVICE_FOUR_CLOSURE = "sel4-zenoh-service-four"
+ZENOH_SERVICE_FOUR_CHAINS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("zenoh-service-four admission", (rf"SLIME_ROOT generation admitted number={zenoh_service_arm.FOUR_GENERATION} executables=\d+ instances=\d+ grants=\d+ ",)),
+    ("zenoh-service-four grants", (
+        r"\[zenoh-service\] grants rows=6 holders=4",
+        r"\[zenoh-service\] holder attached holder=[a-z-]+ rows=[1-9]\d*",
+        r"\[zenoh-service\] holder attached holder=[a-z-]+ rows=[1-9]\d*",
+        r"\[zenoh-service\] holder attached holder=[a-z-]+ rows=[1-9]\d*",
+        r"\[zenoh-service\] holder attached holder=[a-z-]+ rows=[1-9]\d*",
+    )),
+    ("zenoh-service-four exchange", (
+        r"\[zenoh-service\] published holder=alpha row=0 sequence=0 reached=3 peer=(?:none|sent)",
+        r"\[zenoh-service\] published holder=alpha row=0 sequence=3 reached=3 peer=(?:none|sent)",
+    )),
+    ("zenoh-service-four refusal", (r"\[zenoh-service\] denial class=not-granted holder=beta refused=1",)),
+    ("zenoh-service-four success", (
+        r"\[zenoh-service\] holder detached holder=[a-z-]+",
+        rf"SLIME_GRAPH HEALTHY generation={zenoh_service_arm.FOUR_GENERATION} required=\d+ live=0 completed=\d+ failed=0",
+    )),
+)
+
 # The rmw_zenoh node and its native peer, over the network service's loopback. Each component is a task of its own, and
 # inside one component the loop that publishes also reads, so a publication and a reception have no fixed order, even
 # against each other. The boot plane gate held lines of separate tasks to one order and failed 2 of 10 boots on it. These
@@ -1429,6 +1451,40 @@ def run_zenoh_service_arm(transcript_path: Path | None) -> None:
     devloop_observations.record(casesObserved=samples + denials, negativeControlsRefused=controls)
 
 
+def run_zenoh_service_four_arm(transcript_path: Path | None) -> None:
+    """Boot the Zenoh service with four holders and six rows and judge what it printed.
+
+    The judge is the one of the two-holder arm, held to the grants of this composition's system spec. Two of the holders
+    hold two rows, so a delivery arrives on a row that differs from the row of its publication.
+    """
+    fixture = COMPOSITIONS / f"{zenoh_service_arm.FOUR_CLOSURE}.zti"
+    if not fixture.is_file():
+        fail(f"{fixture.relative_to(ROOT)} does not exist; the {zenoh_service_arm.FOUR_CLOSURE} composition has not landed")
+    try:
+        controls = zenoh_service_arm.controls()
+        grants = zenoh_service_arm.read_grants(closure=zenoh_service_arm.FOUR_CLOSURE)
+    except zenoh_service_arm.ArmError as error:
+        fail(str(error))
+    image = build_image(ZENOH_SERVICE_FOUR_CLOSURE)
+    terminal = re.compile(ZENOH_SERVICE_FOUR_CHAINS[-1][1][-1] + "|" + "|".join(FAILURE_MARKERS))
+    transcript = run_plane(image=image, timeout=TIMEOUT, terminal_condition=terminal, fail=fail, pins_path=PINS)
+    if transcript_path is not None:
+        transcript_path.write_text(transcript, encoding="utf-8")
+    try:
+        match_marker_contract(transcript, ZENOH_SERVICE_FOUR_CHAINS, FAILURE_MARKERS, fail)
+    except SystemExit:
+        print(transcript)
+        raise
+    lines = [line.strip() for line in transcript.splitlines() if line.strip().startswith("[zenoh-service] ")]
+    try:
+        samples, denials = zenoh_service_arm.judge(lines, grants)
+    except zenoh_service_arm.ArmError as error:
+        print(transcript)
+        fail(str(error))
+    print(f"[zenoh-service-four-exchange] samples={samples} denials={denials} controls-refused={controls}")
+    devloop_observations.record(casesObserved=samples + denials, negativeControlsRefused=controls)
+
+
 def run_zenoh_rmw_arm(transcript_path: Path | None) -> None:
     """Boot the rmw_zenoh node and its native peer over the network service's loopback and judge what they printed.
 
@@ -1709,7 +1765,7 @@ def run_http_public_arm(image: Path, transcript_path: Path | None) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Boot and check the seL4 I/O network proof planes")
     parser.add_argument("--no-build", action="store_true")
-    parser.add_argument("--arm", choices=("authority", "tcp", "local", "lifetime", "service-fault", "driver-reset", "tcp-impairment", "tcp-listener", "tcp-options", "tcp-buffers", "root-diagnostics", "root-console", "link-wake", "net", "zenoh", "zenoh-service", "zenoh-rmw", "zenoh-external", "http", "http-public", "all"), default="all")
+    parser.add_argument("--arm", choices=("authority", "tcp", "local", "lifetime", "service-fault", "driver-reset", "tcp-impairment", "tcp-listener", "tcp-options", "tcp-buffers", "root-diagnostics", "root-console", "link-wake", "net", "zenoh", "zenoh-service", "zenoh-service-four", "zenoh-rmw", "zenoh-external", "http", "http-public", "all"), default="all")
     parser.add_argument("--controls-only", action="store_true", help="zenoh-external arm only: run the judges against their mutated evidence, without QEMU or a listener")
     parser.add_argument("--allow-public", action="store_true", help="explicitly authorize the opt-in public DNS/HTTP smoke")
     parser.add_argument("--http-case", choices=tuple(case.name for case in http_peer.cases()))
@@ -1735,8 +1791,8 @@ def main() -> None:
         fail(f"run from repository root: {ROOT}")
     if arguments.arm == "http-public" and not arguments.allow_public:
         fail("public HTTP requires explicit --allow-public; unavailable public access is not a pass")
-    if arguments.controls_only and arguments.arm not in ("zenoh-external", "zenoh-service", "zenoh-rmw"):
-        fail("--controls-only requires --arm zenoh-external, --arm zenoh-service or --arm zenoh-rmw")
+    if arguments.controls_only and arguments.arm not in ("zenoh-external", "zenoh-service", "zenoh-service-four", "zenoh-rmw"):
+        fail("--controls-only requires --arm zenoh-external, --arm zenoh-service, --arm zenoh-service-four or --arm zenoh-rmw")
     if arguments.http_case is not None and arguments.arm != "http":
         fail("--http-case requires --arm http")
     if arguments.arm == "http":
@@ -1909,6 +1965,16 @@ def main() -> None:
     if arguments.arm == "zenoh-service":
         run_zenoh_service_arm(arguments.transcript)
         print("seL4 zenoh service check: the holders exchanged samples through the shared service and the service refused the key a holder lacks")
+    if arguments.arm == "zenoh-service-four" and arguments.controls_only:
+        try:
+            refused = zenoh_service_arm.controls()
+        except zenoh_service_arm.ArmError as error:
+            fail(str(error))
+        print(f"zenoh service judge: refused {refused} mutated transcripts")
+        return
+    if arguments.arm == "zenoh-service-four":
+        run_zenoh_service_four_arm(arguments.transcript)
+        print("seL4 zenoh service check: four holders exchanged samples through the shared service and the service refused the key a holder lacks")
     if arguments.arm == "zenoh-rmw" and arguments.controls_only:
         try:
             refused = zenoh_rmw_arm.controls()
