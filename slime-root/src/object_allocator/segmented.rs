@@ -67,18 +67,6 @@ impl<T: Copy> Segmented<T> {
         }
     }
 
-    #[cfg(test)]
-    pub fn provision_host(&mut self, entries: usize, empty: T) {
-        while self.capacity < entries {
-            let mut page = alloc::boxed::Box::new(HostPage([0; PAGE_BYTES]));
-            let pointer = NonNull::from(&mut page.0).cast();
-            // SAFETY: Box keeps each page stable and exclusively owned until
-            // this storage is dropped. Its page list never exposes the bytes.
-            unsafe { self.append(pointer, empty).expect("host record page") };
-            self.host_pages.push(page);
-        }
-    }
-
     const fn offset() -> usize {
         mem::size_of::<Header>().next_multiple_of(mem::align_of::<T>())
     }
@@ -260,6 +248,20 @@ impl<T: Copy> Segmented<T> {
                 Some(&*entry)
             }
         })
+    }
+}
+
+#[cfg(test)]
+impl<T: Copy> Segmented<T> {
+    pub fn provision_host(&mut self, entries: usize, empty: T) {
+        while self.capacity < entries {
+            let mut page = alloc::boxed::Box::new(HostPage([0; PAGE_BYTES]));
+            let pointer = NonNull::from(&mut page.0).cast();
+            // SAFETY: Box keeps each page stable and exclusively owned until
+            // this storage is dropped. Its page list never exposes the bytes.
+            unsafe { self.append(pointer, empty).expect("host record page") };
+            self.host_pages.push(page);
+        }
     }
 }
 

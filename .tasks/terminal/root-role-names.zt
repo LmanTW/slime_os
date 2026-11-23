@@ -1,0 +1,79 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a2040b-02ce-715e-8411-23d0b103ddcf" "root-role-names" "planes-mechanism"
+  "A role of the size gate holds what its name states"
+  "root_size_check sorts the files of slime-root into roles. The role policy holds no policy: docs/decisions/root-task-scope.md, amendment of 2026-11-22, finds that a component decides a restart and the root enforces. One file of that role, slime-root/src/graph_runtime/services/policy.rs, also holds 176 code lines of clock requests and 187 of task reclaim. The gate counts both as policy. Decision 4 of the amendment has the gate sort the files again.")
+  with {
+    intent = #active;
+    owns = {
+      "slime-root/src/**";
+    };
+    nonGoals = {
+      h.nonGoal "A line that leaves the root. The item moves lines between roles, and the series grows by 6 lines: two files each start with one import, and services.rs declares two modules and imports them." h.agentDefault;
+      h.nonGoal "A new name for slime-root/src/graph_runtime/services/policy.rs. The gate names that file in LONG_FUNCTIONS, and a comment in contracts/capability-rights/model/capability-rights.zt names it too." h.agentDefault;
+      h.nonGoal "A lower ceiling for the role enforcement. It stays 2100 while main holds 2069 lines there. A later planning pull request lowers it to the count this item leaves." h.agentDefault;
+      h.nonGoal "The directory operations that the console thread serves. The design of the console dispatcher decides where they go." h.agentDefault;
+      h.nonGoal "A change to what a moved function does, to its name or to its visibility." h.agentDefault;
+    };
+    requirements = {
+      h.req "clock-requests-count-as-timer"
+        "root_size_check counts at most 1612 code lines in the role timer, and reports the count as timerCodeLines. main holds 1435. The six functions that serve and report clock requests move from services/policy.rs to services/clock_requests.rs, which the gate assigns to timer."
+        { "root_size_check"; };
+      h.req "reclaim-counts-as-core"
+        "root_size_check counts at most 14925 code lines in the role core, and reports the count as coreCodeLines. main holds 14737 after the item root-test-impls. The five functions that record a termination, reclaim a dead task and report the memory census move from services/policy.rs to services/reclaim.rs, which the gate assigns to core."
+        { "root_size_check"; };
+      h.req "enforcement-holds-the-rest"
+        "root_size_check counts at most 1706 code lines in the role enforcement, at most 2514 in dispatch and at most 32899 in the series. It reports them as enforcementCodeLines, dispatchCodeLines and seriesCodeLines. main holds 2069, 2510 and 32893. services/policy.rs keeps the requests of supervision, scheduling and lifecycle."
+        { "root_size_check"; };
+      h.req "the-root-serves-the-same-requests"
+        "test_sel4_root runs at least 398 host tests, and reports the count as hostTests. clock_authority_check passes: a component arms and reads a timer through the moved clock requests. lifecycle_restart_check passes: a supervisor restarts an instance, and the root reclaims the dead task through the moved functions."
+        { "test_sel4_root"; "clock_authority_check"; "lifecycle_restart_check"; };
+    };
+    acceptance = {
+      h.observedWhere "root_size_check" {
+        h.atMost "timerCodeLines" 1612;
+        h.atMost "coreCodeLines" 14925;
+        h.atMost "enforcementCodeLines" 1706;
+        h.atMost "dispatchCodeLines" 2514;
+        h.atMost "seriesCodeLines" 32899;
+      };
+      h.observedWhere "test_sel4_root" {
+        h.atLeast "hostTests" 398;
+      };
+      h.observed "clock_authority_check";
+      h.observed "lifecycle_restart_check";
+    };
+    invariants = {
+      h.invariant "the-item-moves-text"
+        "A moved function keeps its body, its name, its visibility and its doc comment. Outside the three service files the implementation changes module declarations, imports, one path of a re-export and one path in a doc comment."
+        h.agentDefault;
+      h.invariant "the-bounds-hold-every-moved-function"
+        "Each bound is the count that the move leaves, with no line to spare. The shortest moved function holds 9 code lines, so one function that stays in services/policy.rs breaks the bound of enforcement. A function that moves into services.rs breaks the bound of dispatch."
+        h.agentDefault;
+    };
+    decisions = {
+      h.decided "the-role-is-named-enforcement"
+        "The planning pull request renames the role policy to enforcement. The gate then reports enforcementCodeLines, and no longer policyCodeLines."
+        "the amendment of 2026-11-22 finds that the role decides nothing a component could decide: it refuses a restart the generation does not admit, a promotion above a declared ceiling, and a wait on a source the caller does not hold. No open item binds policyCodeLines"
+        h.agentDefault
+        { "enforcement-holds-the-rest"; };
+      h.decided "a-termination-record-goes-with-reclaim"
+        "record_termination moves to services/reclaim.rs, and signal_declared_death stays in services/policy.rs."
+        "record_termination writes the table of slime-root/src/supervision.rs, a file of the core role, on the path that reclaims the task. signal_declared_death wakes the waiters of a wait set, and slime-root/src/wait_set.rs belongs to enforcement"
+        h.agentDefault
+        { "reclaim-counts-as-core"; };
+      h.decided "the-clock-file-is-clock-requests"
+        "The new file of the timer role is services/clock_requests.rs."
+        "services.rs imports the module crate::clock by a glob. A module services::clock would hide it in every service file"
+        h.agentDefault
+        { "clock-requests-count-as-timer"; };
+      h.decided "graders-change-in-the-planning-pull-request"
+        "The planning pull request changes scripts/check/check-root-size.py: the role name, the two new files in their roles, and three ceilings. The ceiling of core goes from 15050 to 14950, that of timer from 1450 to 1650, and that of the series from 33200 to 32950."
+        "the file grades root_size_check, so it changes only in a pull request that adds an item (V4). A role may name a file that does not exist yet. main passes the new ceilings before and after the implementation: it holds 14737, 1435 and 32893 before, and 14925, 1612 and 32899 after"
+        h.agentDefault
+        { "clock-requests-count-as-timer"; "reclaim-counts-as-core"; "enforcement-holds-the-rest"; };
+    };
+  };
+
+item

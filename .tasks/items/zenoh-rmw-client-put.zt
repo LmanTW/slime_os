@@ -1,0 +1,77 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a20383-8a5a-7199-bc29-a7202dc774b5" "zenoh-rmw-client-put" "zenoh-transport"
+  "A Profile 0 link with the client role writes a Put with no declaration from its peer"
+  "A session refuses a Put on a key its peer did not declare, as `undeclared-key`. A router declares no subscription to a client. A client-role link can therefore subscribe through a router and receive, and it cannot publish. A host probe of a Slime client behind `rmw_zenohd` wrote Puts with the Python wire library, and a ROS `listener` printed them. The Rust link has no path that writes those bytes.")
+  with {
+    owns = {
+      "components/lib/src/zenoh_profile0.rs";
+      "components/lib/src/zenoh_profile0/**";
+      "components/lib/src/zenoh_link.rs";
+      "components/lib/src/zenoh_link/**";
+    };
+    nonGoals = {
+      h.nonGoal "A live router, a ROS install or a registry. This item judges the bytes the link writes, and the router is not in the exam." h.agentDefault;
+      h.nonGoal "A component, a composition, a system spec, a QEMU gate or a NIC. This item judges the link on the host over a scripted byte stream." h.agentDefault;
+      h.nonGoal "The graph link and the graph session. They take no client role." h.agentDefault;
+      h.nonGoal "A timestamp on a Put the link writes. The host probe's Puts had none, and the router forwarded them." h.agentDefault;
+      h.nonGoal "Learning whether a router matched a Put. A router writes nothing back, so the link cannot tell a matched Put from a dropped one." h.agentDefault;
+      h.nonGoal "Any change to what a link with no client role writes or accepts, including the check that refuses an undeclared key." h.agentDefault;
+    };
+    requirements = {
+      h.req "client-link-writes-puts-with-no-declaration"
+        "A link with the client role, open with a router, publishes 4 Puts on the chatter key. Each Put is one FRAME equal to what `scripts/lib/zenoh_wire.py` writes, and the sequence numbers follow the OPEN_SYN's."
+        { "zenoh_rmw_client_put_check"; };
+      h.req "client-put-is-the-peer-form"
+        "A Put the link writes has the sender mapping and the peer form of the PUT header, with the attachment and no timestamp. The judge refuses the receiver mapping and the timestamp flag."
+        { "zenoh_rmw_client_put_check"; };
+      h.req "no-role-link-still-refuses-an-undeclared-key"
+        "A link with no client role refuses a Put on a key its peer did not declare as `undeclared-key`."
+        { "zenoh_rmw_client_put_check"; };
+      h.req "neighbour-exams-pass-unchanged"
+        "The session exam and the stock-peer exam pass unchanged beside the client put slice."
+        { "zenoh_session_check"; "zenoh_stock_check"; };
+      h.req "client-link-refuses-what-it-must"
+        "A client-role link refuses a Put before the session is open as `not-open`. It refuses a payload over the bound and a short attachment as `encode`. It refuses a Put while the send slot is busy as `send-busy`."
+        { "zenoh_rmw_client_put_check"; };
+      h.req "client-link-closes-on-request"
+        "A local close writes a CLOSE of reason 0. The transcript prints the subscription as none, and the judge refuses any other value."
+        { "zenoh_rmw_client_put_check"; };
+      h.req "controls-are-refused"
+        "The judge refuses 66 corrupted records before it judges the real run: 61 mutated transcripts and 5 corrupted captures."
+        { "zenoh_rmw_client_put_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_rmw_client_put_check" {
+        h.count "casesObserved" 25;
+        h.count "negativeControlsRefused" 66;
+      };
+      h.observed "zenoh_session_check";
+      h.observed "zenoh_stock_check";
+    };
+    decisions = {
+      h.decided "the-client-role-skips-the-declared-key-check"
+        "A session with the client role writes a Put on any valid key. A session with no role still refuses a key its peer did not declare."
+        "a router never declares a subscription to a client, and the peer-to-peer exams pin the refusal for every other session"
+        h.agentDefault
+        { "client-link-writes-puts-with-no-declaration"; "no-role-link-still-refuses-an-undeclared-key"; };
+      h.decided "the-put-is-the-peer-form"
+        "The link writes the Put it writes to a peer, with no timestamp."
+        "a host probe wrote that form through `rmw_zenohd`, and a ROS `listener` printed all six Puts"
+        h.agentDefault
+        { "client-put-is-the-peer-form"; };
+      h.decided "the-router-is-not-in-the-exam"
+        "The exam compares the bytes the link writes with `scripts/lib/zenoh_wire.py`. A router's acceptance of those bytes is the live run's to show."
+        "the router wrote nothing back in the probe, so no capture says whether it matched a Put"
+        h.agentDefault
+        { "client-link-writes-puts-with-no-declaration"; };
+      h.decided "the-router-matches-the-whole-key"
+        "The link writes the key the owner gives it and does no matching of its own."
+        "the probe's router delivered a Put only to a listener whose subscription had the same key, type hash included, and dropped the others silently"
+        h.agentDefault
+        { "client-link-writes-puts-with-no-declaration"; };
+    };
+  };
+
+item

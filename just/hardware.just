@@ -123,6 +123,16 @@ zenoh_rmw_client_check:
 zenoh_rmw_router_link_check:
     python3 scripts/check/check-zenoh-profile0.py --slice rmw-router-link
 
+# Judges the Put path of a Profile 0 link with the client role. A router declares no subscription to a client, and a link
+# with no role refuses a Put on a key its peer did not declare. A link with the role writes a Put on a valid key with no
+# such declaration. The Rust tests drive the link through the handshakes of two runs of rmw_zenohd, captured by
+# scripts/lib/zenoh_rmw_router_data.py, three ways, and publish four Puts. The bytes equal what scripts/lib/zenoh_wire.py
+# writes. The expectation is scripts/lib/zenoh_rmw_client_put_exam.py. No router runs here. Nothing needs a registry or a
+# ROS install. It fails until the link has the Put path.
+[group('hardware')]
+zenoh_rmw_client_put_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice rmw-client-put
+
 # A Profile 0 graph link that declares its owner's subscription, writes its owner's Puts and holds the samples
 # it receives in a bounded queue. The two captured data sessions of an rmw_zenoh_cpp peer are written to it
 # whole, one byte at a time and all at once. A talker's 11 samples reach the queue in order and 28 other pushes

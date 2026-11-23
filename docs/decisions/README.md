@@ -97,9 +97,11 @@ readable and link to the decision that replaced them.
   proposed; closures record locators, each checkout computes their identities, and attestations
   live in git notes.
 - [Root task scope](root-task-scope.md) — accepted; the root keeps a role only
-  for authority no component may hold or for work before the first component,
-  and its nine series roles reach 28850 code lines, then 23000 after a design
-  for the two memory-mapping roles is accepted.
+  for authority no component may hold or for work before the first component.
+  The policy and timer roles stay since the amendment of 2026-11-22, and the
+  console dispatcher stays until a design moves it. The ioResource and
+  sharedBuffer roles stay since the amendment of 2026-11-23: stage two is
+  withdrawn, and the gate's ceilings replace the target in lines.
 - [Verified kernel profile](verified-kernel-profile.md) — accepted; no target
   profile claims the verified kernel configuration today, and only a new
   `bcm2712-rpi5-verified` profile may, under three gates and one wording.

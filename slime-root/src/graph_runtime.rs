@@ -1677,5 +1677,5 @@ const RESIDENT_CHECKPOINT_ITERATIONS: usize = 32768;
 #[cfg(test)]
 mod launch_tests;
 mod services;
-pub use services::policy::private_memory_cause;
+pub use services::reclaim::private_memory_cause;
 use services::{serve_instance_graph, spawn::resource_label};

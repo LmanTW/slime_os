@@ -2615,40 +2615,6 @@ impl ObjectAllocator {
         }
     }
 
-    #[cfg(test)]
-    fn reset_private_record_visits(&mut self) {
-        self.private_visits = PrivateRecordVisits::default();
-    }
-
-    #[cfg(test)]
-    fn private_record_visits(&self) -> PrivateRecordVisits {
-        self.private_visits
-    }
-
-    /// Present extent records and owned allocation records read since the
-    /// last reset, however they were reached.
-    #[cfg(test)]
-    pub(crate) fn record_reads(&self) -> usize {
-        self.extents.reads() + self.allocations.reads()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn reset_record_reads(&self) {
-        self.extents.set_reads(0);
-        self.allocations.set_reads(0);
-    }
-
-    /// Run `check` without counting what it reads: the recounts a test build
-    /// compares maintained figures with are not part of serving a request.
-    #[cfg(test)]
-    fn uncounted<R>(&self, check: impl FnOnce(&Self) -> R) -> R {
-        let (extents, allocations) = (self.extents.reads(), self.allocations.reads());
-        let result = check(self);
-        self.extents.set_reads(extents);
-        self.allocations.set_reads(allocations);
-        result
-    }
-
     fn push_reusable(&mut self, id: TaskArenaId, position: usize) -> Result<(), AllocError> {
         let kind = self
             .allocations
@@ -3338,35 +3304,6 @@ impl ObjectAllocator {
         Ok((slots, objects, bytes))
     }
 
-    /// Register an arena already owning `slots` root CSlots, for host tests.
-    ///
-    /// `begin_task_arena` retypes its static extent, which needs a live
-    /// kernel; this records the same arena identity and slot ownership without
-    /// one. The arena holds no allocation or extent record, so
-    /// `release_task_arena` reports its slot count without invoking the
-    /// kernel.
-    #[cfg(test)]
-    pub(crate) fn arena_owning_slots_for_test(&mut self, slots: usize) -> TaskArenaId {
-        self.extents.provision_host(MAX_TASK_EXTENTS, None);
-        self.allocations
-            .provision_host(MAX_TASK_ALLOCATIONS, AllocationRecord::EMPTY);
-        let index = self
-            .arenas
-            .iter()
-            .position(|arena| !arena.active)
-            .expect("test arena table has room");
-        let serial = self.next_arena_serial;
-        self.next_arena_serial = self.next_arena_serial.wrapping_add(1).max(1);
-        self.extents.reset_arena(index);
-        self.arenas[index] = ArenaRecord {
-            serial,
-            active: true,
-            slot_len: slots,
-            ..ArenaRecord::empty()
-        };
-        self.arenas[index].id(index)
-    }
-
     pub fn provision_private_backing(
         &mut self,
         id: TaskArenaId,
@@ -3981,6 +3918,66 @@ impl ObjectAllocator {
 
     fn regions(&self) -> &[Option<UntypedRegion>] {
         self.untypeds.get(..self.untyped_len).unwrap_or(&[])
+    }
+}
+
+#[cfg(test)]
+impl ObjectAllocator {
+    fn reset_private_record_visits(&mut self) {
+        self.private_visits = PrivateRecordVisits::default();
+    }
+
+    fn private_record_visits(&self) -> PrivateRecordVisits {
+        self.private_visits
+    }
+
+    /// Present extent records and owned allocation records read since the
+    /// last reset, however they were reached.
+    pub(crate) fn record_reads(&self) -> usize {
+        self.extents.reads() + self.allocations.reads()
+    }
+
+    pub(crate) fn reset_record_reads(&self) {
+        self.extents.set_reads(0);
+        self.allocations.set_reads(0);
+    }
+
+    /// Run `check` without counting what it reads: the recounts a test build
+    /// compares maintained figures with are not part of serving a request.
+    fn uncounted<R>(&self, check: impl FnOnce(&Self) -> R) -> R {
+        let (extents, allocations) = (self.extents.reads(), self.allocations.reads());
+        let result = check(self);
+        self.extents.set_reads(extents);
+        self.allocations.set_reads(allocations);
+        result
+    }
+
+    /// Register an arena already owning `slots` root CSlots, for host tests.
+    ///
+    /// `begin_task_arena` retypes its static extent, which needs a live
+    /// kernel; this records the same arena identity and slot ownership without
+    /// one. The arena holds no allocation or extent record, so
+    /// `release_task_arena` reports its slot count without invoking the
+    /// kernel.
+    pub(crate) fn arena_owning_slots_for_test(&mut self, slots: usize) -> TaskArenaId {
+        self.extents.provision_host(MAX_TASK_EXTENTS, None);
+        self.allocations
+            .provision_host(MAX_TASK_ALLOCATIONS, AllocationRecord::EMPTY);
+        let index = self
+            .arenas
+            .iter()
+            .position(|arena| !arena.active)
+            .expect("test arena table has room");
+        let serial = self.next_arena_serial;
+        self.next_arena_serial = self.next_arena_serial.wrapping_add(1).max(1);
+        self.extents.reset_arena(index);
+        self.arenas[index] = ArenaRecord {
+            serial,
+            active: true,
+            slot_len: slots,
+            ..ArenaRecord::empty()
+        };
+        self.arenas[index].id(index)
     }
 }
 

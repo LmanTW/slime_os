@@ -44,7 +44,7 @@ pub(super) fn serve_instance_graph(
     #[cfg(slime_boot_selector)] block_devices: &mut device::BlockDevices,
     #[cfg(slime_boot_selector)] boot_runtime: &mut boot_selector::BootRuntime,
 ) -> Result<(), Stop> {
-    policy::report_memory_census(allocator, tasks, 0);
+    reclaim::report_memory_census(allocator, tasks, 0);
     let report_backing =
         generation.boot_action == boot_contracts::generation::BootAction::PrivateMemory;
     if report_backing {
@@ -2093,9 +2093,13 @@ fn serve_adaptive_growth(
 }
 
 mod capability;
+mod clock_requests;
 pub(super) mod policy;
+pub(super) mod reclaim;
 pub(super) mod spawn;
 
 use capability::*;
+use clock_requests::*;
 use policy::*;
+use reclaim::*;
 use spawn::*;

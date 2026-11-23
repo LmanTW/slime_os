@@ -56,7 +56,7 @@ pub(super) fn clock_served(task: u32, label: u64) -> bool {
 }
 
 /// Whether to print `SLIME_CLOCK refused` for this request; a repeat is counted.
-/// `class` is the refusal's index in `policy::clock_error_index`.
+/// `class` is the refusal's index in `clock_requests::clock_error_index`.
 pub(super) fn clock_refused(task: u32, label: u64, class: u8) -> bool {
     let key = (u64::from(task) << 32) | ((label & 0xff_ffff) << 8) | u64::from(class);
     let print = first(&REFUSED, key);

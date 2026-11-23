@@ -146,15 +146,16 @@ class Role:
 
 
 # Each role ceiling is the role's count on the commit that landed this script,
-# rounded up to a multiple of 50. Three are newer. `boot` is 5650: the role
+# rounded up to a multiple of 50. Four are newer. `boot` is 5650: the role
 # holds 5600 lines since `src/boot.rs` carries the boot sequence and the 440
 # lines that build and settle the fixture tasks left `main`. `fixture` is 1050
-# with those lines. `timer` is 1450: a draft of the BCM2835 system timer
-# backend adds 91 lines to the 1345 the role held.
+# with those lines. `core` is 14950 and `timer` is 1650: each is the count the
+# role holds with its part of `services/policy.rs`, 14925 and 1612, rounded up
+# to a multiple of 50.
 ROLES: dict[str, Role] = {
     # Kernel-object allocation, address spaces, tasks, faults and the graph.
     "core": Role(
-        ceiling=15050,
+        ceiling=14950,
         files=(
             "src/lib.rs",
             "src/object_allocator.rs",
@@ -174,6 +175,7 @@ ROLES: dict[str, Role] = {
             "src/graph_runtime/adaptive.rs",
             "src/graph_runtime/state.rs",
             "src/graph_runtime/services/spawn.rs",
+            "src/graph_runtime/services/reclaim.rs",
         ),
         trees=("src/object_allocator/", "src/private_memory/"),
     ),
@@ -219,8 +221,9 @@ ROLES: dict[str, Role] = {
         ceiling=2550,
         files=("src/ipc.rs", "src/graph_runtime/services.rs"),
     ),
-    # Lifecycle, scheduling class, directory, notification and wait-set policy.
-    "policy": Role(
+    # What the root enforces on a request and decides for no one: restart
+    # admission, scheduling class, directory scope, notifications and wait sets.
+    "enforcement": Role(
         ceiling=2100,
         files=(
             "src/lifecycle.rs",
@@ -231,10 +234,15 @@ ROLES: dict[str, Role] = {
             "src/graph_runtime/services/policy.rs",
         ),
     ),
-    # The platform timer, the timer queue and the clock service.
+    # The platform timer, the timer queue, the clock service and its requests.
     "timer": Role(
-        ceiling=1450,
-        files=("src/timer.rs", "src/platform_timer.rs", "src/clock.rs"),
+        ceiling=1650,
+        files=(
+            "src/timer.rs",
+            "src/platform_timer.rs",
+            "src/clock.rs",
+            "src/graph_runtime/services/clock_requests.rs",
+        ),
     ),
     # The root side of the fixture. Its child program is `components/root-child`.
     "fixture": Role(
@@ -262,11 +270,12 @@ ROLES: dict[str, Role] = {
     ),
 }
 
-SERIES = ("core", "boot", "ioResource", "sharedBuffer", "dispatch", "policy", "timer", "fixture", "console")
+SERIES = ("core", "boot", "ioResource", "sharedBuffer", "dispatch", "enforcement", "timer", "fixture", "console")
 # The series held 34294 code lines on the commit that landed this script,
 # 33941 after the fixture's child crate left `slime-root/`, and 33073 once a
-# product root compiled no fixture.
-SERIES_CEILING = 33200
+# product root compiled no fixture. It held 32893 once the test-only functions
+# of product types stood in test items.
+SERIES_CEILING = 32950
 # The binary alone compiled 9301 code lines, in 13 files, on the commit that
 # landed this measure, and 1119 lines, in `src/main.rs` and
 # `src/fixture_runtime.rs`, once the library held the graph runtime and the

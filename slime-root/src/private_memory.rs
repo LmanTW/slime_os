@@ -234,26 +234,6 @@ impl Region {
         ))
     }
 
-    /// The same window, with its span record taken from the host-test store.
-    #[cfg(test)]
-    pub(crate) fn reserve_for_test(
-        base: usize,
-        reservation: usize,
-        quota: usize,
-        elastic: bool,
-    ) -> Result<Self, AllocError> {
-        let spans = Self::admit_window(base, reservation)?;
-        let leaf_spans = crate::object_allocator::host_leaf_spans(spans)
-            .ok_or(AllocError::PrivateRegionSpans { spans, limit: 0 })?;
-        Ok(Self::with_spans(
-            base,
-            reservation,
-            quota,
-            elastic,
-            leaf_spans,
-        ))
-    }
-
     /// Admit a window's shape, answering the spans it needs tracked.
     fn admit_window(base: usize, reservation: usize) -> Result<usize, AllocError> {
         if reservation == 0 || !base.is_multiple_of(LARGE_FRAME_BYTES) {
@@ -326,20 +306,6 @@ impl Region {
 
     fn has_leaf_table(self, span: usize) -> bool {
         self.leaf_spans.get(span)
-    }
-
-    /// Apply a priced shape to this region without a kernel, for host tests of
-    /// the pricing itself: the mapping paths stay the seL4 gates' to prove.
-    #[cfg(test)]
-    fn commit_shape_for_test(&mut self, shape: elastic::Shape) {
-        let mut page = self.pages;
-        for _ in 0..shape.tables {
-            self.mark_leaf_table(page / LARGE_FRAME_PAGES);
-        }
-        page += shape.pages();
-        self.pages = page;
-        self.large_frames += shape.large_frames;
-        self.base_frames += shape.base_pages;
     }
 
     fn mark_leaf_table(&mut self, span: usize) {
@@ -440,6 +406,41 @@ impl Region {
             });
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+impl Region {
+    /// The same window, with its span record taken from the host-test store.
+    pub(crate) fn reserve_for_test(
+        base: usize,
+        reservation: usize,
+        quota: usize,
+        elastic: bool,
+    ) -> Result<Self, AllocError> {
+        let spans = Self::admit_window(base, reservation)?;
+        let leaf_spans = crate::object_allocator::host_leaf_spans(spans)
+            .ok_or(AllocError::PrivateRegionSpans { spans, limit: 0 })?;
+        Ok(Self::with_spans(
+            base,
+            reservation,
+            quota,
+            elastic,
+            leaf_spans,
+        ))
+    }
+
+    /// Apply a priced shape to this region without a kernel, for host tests of
+    /// the pricing itself: the mapping paths stay the seL4 gates' to prove.
+    fn commit_shape_for_test(&mut self, shape: elastic::Shape) {
+        let mut page = self.pages;
+        for _ in 0..shape.tables {
+            self.mark_leaf_table(page / LARGE_FRAME_PAGES);
+        }
+        page += shape.pages();
+        self.pages = page;
+        self.large_frames += shape.large_frames;
+        self.base_frames += shape.base_pages;
     }
 }
 
@@ -740,15 +741,6 @@ impl Table {
         pages
     }
 
-    /// The accounting half, for host tests that hold no allocator.
-    #[cfg(test)]
-    pub(crate) fn reclaim_for_test(&mut self, region: &mut Region) -> usize {
-        let released = region.leaf_spans;
-        let pages = self.reclaim_accounting(region);
-        crate::object_allocator::host_release_leaf_spans(released);
-        pages
-    }
-
     fn reclaim_accounting(&mut self, region: &mut Region) -> usize {
         let pages = region.pages;
         region.pages = 0;
@@ -758,6 +750,17 @@ impl Table {
         region.leaf_spans = LeafSpanBits::NONE;
         self.total_pages = self.total_pages.saturating_sub(pages);
         self.reclaimed_pages += pages;
+        pages
+    }
+}
+
+#[cfg(test)]
+impl Table {
+    /// The accounting half, for host tests that hold no allocator.
+    pub(crate) fn reclaim_for_test(&mut self, region: &mut Region) -> usize {
+        let released = region.leaf_spans;
+        let pages = self.reclaim_accounting(region);
+        crate::object_allocator::host_release_leaf_spans(released);
         pages
     }
 }
