@@ -1,19 +1,22 @@
 """Judge the TLS dependency of the Zenoh transport before any link uses it.
 
-`docs/decisions/zenoh-link-transports.md` lets the TLS slice start only when a TLS stack builds `no_std`, passes
-`cargo deny` under the policy as it stands, and reaches no component that does not use it. This module owns what the
-commands must show. Nothing here reads the Rust of the dependency.
+`docs/decisions/zenoh-link-transports.md` holds the TLS slice until a TLS stack builds `no_std` and passes `cargo deny`
+under the policy as it stands. This module owns what the commands must show. Nothing here reads the Rust of the
+dependency.
 
 * `slime-components` builds for `aarch64-unknown-none` with and without the `tls` feature.
-* `cargo deny check` reports no error in advisories, bans, licenses or sources, and `deny.toml` holds the same allow
-  list, skip list and git sources as when the exam was written, with no advisory ignore and no ban skip.
-* Only `slime-components` declares the TLS crates, as optional dependencies. The `tls` feature is off by default and no
-  workspace member enables it, so the default graph of every component holds none of them.
-* The `tls` graph holds `rustls` and `getrandom`, and holds no crate that needs a C toolchain or an operating system
+* `cargo deny check` reports no error in advisories, bans, licenses or sources.
+* The parsed `deny.toml` equals the document pinned here, key for key. A key the exam does not name is a change. A graph
+  setting, a license exception, a clarification, a severity or a source rule cannot move without a new exam.
+* Only `slime-components` declares the TLS crates, as optional dependencies. The `tls` feature is off by default, and no
+  workspace member enables it.
+* The default graph of the workspace holds none of the TLS crates.
+* The `tls` graph holds `rustls` and `getrandom`. It holds no crate that needs a C toolchain or an operating system
   random source.
+* Both graphs are resolved for every target, so a crate behind a `cfg` is counted.
 
-The parsers read what `cargo` prints. A judge is trusted after it refuses a corrupted observation and a corrupted
-output, so the controls below run before any command does.
+The parsers read what `cargo` prints. The controls below run before any command does. A judge is trusted after it
+refuses a corrupted observation and a corrupted output.
 """
 
 from __future__ import annotations
@@ -35,13 +38,33 @@ CHECKS = ("advisories", "bans", "licenses", "sources")
 WATCHED = ("rustls", "rustls-webpki", "rustls-rustcrypto", "getrandom", "ring", "aws-lc-rs", "aws-lc-sys")
 FORBIDDEN = ("ring", "aws-lc-rs", "aws-lc-sys", "openssl", "openssl-sys", "native-tls")
 DECLARED = ("rustls", "getrandom")
-# The policy of `deny.toml` when the exam was written. A change is a new decision, not an edit to the dependency.
-LICENSES = (
-    "0BSD", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-1-Clause", "BSD-2-Clause", "BSD-3-Clause", "CC0-1.0",
-    "ISC", "MIT", "MPL-2.0", "Unicode-3.0",
-)
-SKIP_TREE = ("sel4", "sel4-root-task", "sel4-runtime-common")
-ALLOW_GIT = ("https://github.com/iceice666/dango.git", "https://github.com/iceice666/zutai.git")
+# `deny.toml` as it stood when the exam was written. The judge compares the whole parsed file with this document.
+POLICY = {'graph': {'all-features': True},
+ 'advisories': {'version': 2, 'yanked': 'deny'},
+ 'licenses': {'version': 2,
+              'private': {'ignore': True},
+              'allow': ['MIT',
+                        'Apache-2.0',
+                        'ISC',
+                        'Apache-2.0 WITH LLVM-exception',
+                        'BSD-1-Clause',
+                        'BSD-2-Clause',
+                        'BSD-3-Clause',
+                        'Unicode-3.0',
+                        'CC0-1.0',
+                        'MPL-2.0',
+                        '0BSD'],
+              'confidence-threshold': 0.8},
+ 'bans': {'multiple-versions': 'warn',
+          'wildcards': 'deny',
+          'allow-wildcard-paths': True,
+          'skip-tree': [{'name': 'sel4', 'depth': 20},
+                        {'name': 'sel4-root-task', 'depth': 20},
+                        {'name': 'sel4-runtime-common', 'depth': 20}]},
+ 'sources': {'unknown-registry': 'deny',
+             'unknown-git': 'deny',
+             'allow-git': ['https://github.com/iceice666/zutai.git',
+                           'https://github.com/iceice666/dango.git']}}
 KEYS = ("build", "deny", "config", "declared", "features", "enablers", "defaultGraph", "tlsGraph")
 
 
@@ -59,10 +82,7 @@ def honest() -> dict:
     return {
         "build": {"tls": 0, "plain": 0},
         "deny": {"exit": 0, "advisories": 0, "bans": 0, "licenses": 0, "sources": 0},
-        "config": {
-            "licenses": list(LICENSES), "skipTree": list(SKIP_TREE), "allowGit": list(ALLOW_GIT),
-            "advisoriesIgnore": 0, "bansSkip": 0,
-        },
+        "config": copy.deepcopy(POLICY),
         "declared": {"rustls": [[OWNER, True, False]], "getrandom": [[OWNER, True, False, True]]},
         "features": {"default": ["component-runtime"], "all": ["component-runtime", FEATURE]},
         "enablers": [],
@@ -84,12 +104,8 @@ def judge(obs: dict) -> int:
     for name in CHECKS:
         _need(deny.get(name) == 0, f"deny {name}: {deny.get(name)} errors, the exam requires none")
         count += 1
-    _need(sorted(config.get("licenses", [])) == sorted(LICENSES), f"config: the license allow list is {config.get('licenses')}, the exam pins {list(LICENSES)}")
-    _need(sorted(config.get("skipTree", [])) == sorted(SKIP_TREE), f"config: the skip-tree list is {config.get('skipTree')}, the exam pins {list(SKIP_TREE)}")
-    _need(sorted(config.get("allowGit", [])) == sorted(ALLOW_GIT), f"config: the git sources are {config.get('allowGit')}, the exam pins {list(ALLOW_GIT)}")
-    _need(config.get("advisoriesIgnore") == 0, f"config: deny.toml ignores {config.get('advisoriesIgnore')} advisories")
-    _need(config.get("bansSkip") == 0, f"config: deny.toml skips {config.get('bansSkip')} crates in bans")
-    count += 5
+    _need(config == POLICY, f"config: deny.toml differs from the pinned policy at {_difference(config, POLICY)}")
+    count += 1
     declared = obs["declared"]
     rustls = declared.get("rustls", [])
     _need(len(rustls) == 1 and rustls[0][0] == OWNER, f"declared: rustls is declared by {[row[0] for row in rustls]}, the exam requires only {OWNER}")
@@ -180,14 +196,24 @@ def parse_metadata(text: str) -> tuple[dict, dict, list]:
 
 
 def parse_config(text: str) -> dict:
-    document = tomllib.loads(text)
-    return {
-        "licenses": list(document.get("licenses", {}).get("allow", [])),
-        "skipTree": [row["name"] for row in document.get("bans", {}).get("skip-tree", [])],
-        "allowGit": list(document.get("sources", {}).get("allow-git", [])),
-        "advisoriesIgnore": len(document.get("advisories", {}).get("ignore", [])),
-        "bansSkip": len(document.get("bans", {}).get("skip", [])),
-    }
+    try:
+        return tomllib.loads(text)
+    except tomllib.TOMLDecodeError as error:
+        raise TlsError(f"config: deny.toml does not parse ({error})") from error
+
+
+def _difference(found: object, pinned: object, path: str = "deny.toml") -> str:
+    """The first key at which `found` differs from `pinned`, in document order."""
+    if isinstance(found, dict) and isinstance(pinned, dict):
+        for key in pinned:
+            if key not in found:
+                return f"{path}.{key} (missing)"
+            if found[key] != pinned[key]:
+                return _difference(found[key], pinned[key], f"{path}.{key}")
+        for key in found:
+            if key not in pinned:
+                return f"{path}.{key} (not pinned)"
+    return path
 
 
 def _run(command: list[str]) -> subprocess.CompletedProcess:
@@ -202,9 +228,9 @@ def observe() -> dict:
     deny = _run(["cargo", "deny", "--format", "json", "check"])
     metadata = _run(["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"])
     _need(metadata.returncode == 0, f"metadata: `cargo metadata` exited {metadata.returncode}")
-    default_tree = _run(["cargo", "tree", "--locked", "--workspace", "-e", "normal", "--prefix", "none"])
+    default_tree = _run(["cargo", "tree", "--locked", "--workspace", "-e", "normal", "--prefix", "none", "--target", "all"])
     _need(default_tree.returncode == 0, f"tree: `cargo tree --workspace` exited {default_tree.returncode}")
-    tls_tree = _run(["cargo", "tree", "--locked", "-p", OWNER, "--no-default-features", "-F", FEATURE, "-e", "normal", "--prefix", "none", "--target", TARGET])
+    tls_tree = _run(["cargo", "tree", "--locked", "-p", OWNER, "--no-default-features", "-F", FEATURE, "-e", "normal", "--prefix", "none", "--target", "all"])
     declared, features, enablers = parse_metadata(metadata.stdout)
     config = parse_config((ROOT / "deny.toml").read_text(encoding="utf-8"))
     tls_names = parse_tree(tls_tree.stdout, OWNER) if tls_tree.returncode == 0 else set()
@@ -248,13 +274,6 @@ def observation_controls() -> int:
         ("one ban error", ("deny", "bans"), 1),
         ("one license error", ("deny", "licenses"), 1),
         ("one source error", ("deny", "sources"), 1),
-        ("a license added to the allow list", ("config", "licenses"), [*LICENSES, "Zlib"]),
-        ("a license removed from the allow list", ("config", "licenses"), list(LICENSES[1:])),
-        ("a crate added to the skip tree", ("config", "skipTree"), [*SKIP_TREE, "rustls"]),
-        ("a crate removed from the skip tree", ("config", "skipTree"), list(SKIP_TREE[1:])),
-        ("a git source added", ("config", "allowGit"), [*ALLOW_GIT, "https://github.com/example/crate.git"]),
-        ("one advisory ignored", ("config", "advisoriesIgnore"), 1),
-        ("one crate skipped in bans", ("config", "bansSkip"), 1),
         ("rustls declared by two packages", ("declared", "rustls"), [[OWNER, True, False], ["zenoh-service", True, False]]),
         ("rustls declared by another package", ("declared", "rustls"), [["zenoh-service", True, False]]),
         ("rustls not optional", ("declared", "rustls"), [[OWNER, False, False]]),
@@ -276,6 +295,28 @@ def observation_controls() -> int:
         ("a tls graph with openssl-sys", ("tlsGraph",), ["getrandom", "openssl-sys", "rustls"]),
     ):
         refused += _refused(label, _changed(path, value))
+    for label, edit in (
+        ("a license added to the allow list", lambda c: c["licenses"]["allow"].append("Zlib")),
+        ("a license removed from the allow list", lambda c: c["licenses"]["allow"].pop(0)),
+        ("a license exception for one crate", lambda c: c["licenses"].update(exceptions=[{"allow": ["Zlib"], "crate": "foldhash"}])),
+        ("a license clarification", lambda c: c["licenses"].update(clarify=[{"crate": "foldhash", "expression": "MIT", "license-files": []}])),
+        ("a lower license confidence", lambda c: c["licenses"].update({"confidence-threshold": 0.5})),
+        ("all features off in the graph", lambda c: c["graph"].update({"all-features": False})),
+        ("a crate excluded from the graph", lambda c: c["graph"].update(exclude=["rustls"])),
+        ("yanked crates only warned about", lambda c: c["advisories"].update(yanked="warn")),
+        ("one advisory ignored", lambda c: c["advisories"].update(ignore=["RUSTSEC-2024-0399"])),
+        ("a crate added to the skip tree", lambda c: c["bans"]["skip-tree"].append({"name": "rustls", "depth": 20})),
+        ("a crate removed from the skip tree", lambda c: c["bans"]["skip-tree"].pop(0)),
+        ("one crate skipped in bans", lambda c: c["bans"].update(skip=[{"name": "rustls-webpki"}])),
+        ("wildcards only warned about", lambda c: c["bans"].update(wildcards="warn")),
+        ("a git source added", lambda c: c["sources"]["allow-git"].append("https://github.com/example/crate.git")),
+        ("an unknown git source only warned about", lambda c: c["sources"].update({"unknown-git": "warn"})),
+        ("an organisation allowed", lambda c: c["sources"].update({"allow-org": {"github": ["rustls"]}})),
+        ("an empty policy", lambda c: c.clear()),
+    ):
+        obs = honest()
+        edit(obs["config"])
+        refused += _refused(label, obs)
     for key in KEYS:
         obs = honest()
         del obs[key]
@@ -313,6 +354,7 @@ def parser_controls() -> int:
     _need(declared == {"rustls": [[OWNER, True, False]], "getrandom": [[OWNER, True, False, True]]}, "control: honest cargo metadata declarations were misread")
     _need(features == {"default": ["component-runtime"], "all": sorted(["component-runtime", FEATURE, "default"])}, "control: honest cargo metadata features were misread")
     _need(enablers == [], "control: honest cargo metadata enablers were misread")
+    _need(parse_config("[graph]\nall-features = true\n") == {"graph": {"all-features": True}}, "control: an honest deny.toml was misread")
     refused = 0
     for label, call in (
         ("a cargo deny with no summary", lambda: parse_deny("not json\n{}")),
@@ -325,6 +367,7 @@ def parser_controls() -> int:
         ("a cargo tree for another package", lambda: parse_tree("rustls v0.23.46\n", OWNER)),
         ("cargo metadata that is not JSON", lambda: parse_metadata("error: no manifest")),
         ("cargo metadata with no package", lambda: parse_metadata('{"packages": []}')),
+        ("a deny.toml that does not parse", lambda: parse_config("[graph\nall-features")),
         ("cargo metadata without the owner", lambda: parse_metadata('{"packages": [{"name": "other", "dependencies": []}]}')),
     ):
         try:
@@ -339,8 +382,8 @@ def parser_controls() -> int:
     return refused
 
 
-CASES = 24
-CONTROLS = 53
+CASES = 20
+CONTROLS = 64
 
 
 def all_controls() -> int:

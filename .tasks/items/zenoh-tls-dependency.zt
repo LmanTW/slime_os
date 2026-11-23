@@ -9,7 +9,6 @@ item :: s.Item = (h.task "01a2099c-3fd1-727a-9943-3bad1d9e3370" "zenoh-tls-depen
     owns = {
       "components/lib/Cargo.toml";
       "Cargo.lock";
-      "components/lib/src/zenoh_tls*";
     };
     nonGoals = {
       h.nonGoal "A TLS handshake, a TLS link, a certificate check or a session over TLS. This item adds a dependency and shows that it builds and passes `cargo deny`." h.agentDefault;
@@ -17,31 +16,32 @@ item :: s.Item = (h.task "01a2099c-3fd1-727a-9943-3bad1d9e3370" "zenoh-tls-depen
       h.nonGoal "A build for `x86_64-unknown-none`. `slime-components` does not build there today, because `sha2` fails in LLVM with `Do not know how to split the result of this operator!`." h.agentDefault;
       h.nonGoal "A build for the seL4 JSON targets, and a component that enables the `tls` feature." h.agentDefault;
       h.nonGoal "The serial link and the validation time of a certificate. Each has its own item." h.agentDefault;
+      h.nonGoal "A Rust module that uses the TLS crates. `components/lib/src/lib.rs` is not in `owns`, so no module can join the crate in this item." h.agentDefault;
     };
     requirements = {
       h.req "the-feature-builds"
         "`slime-components` builds for `aarch64-unknown-none` with `--no-default-features`, both with and without its `tls` feature."
         { "zenoh_tls_dependency_check"; };
       h.req "deny-passes-unchanged"
-        "`cargo deny check` reports no error in advisories, bans, licenses or sources. `deny.toml` holds the license allow list, skip-tree list and git sources the exam pins, with no advisory ignore and no ban skip."
+        "`cargo deny check` reports no error in advisories, bans, licenses or sources. The parsed `deny.toml` equals the document the exam pins, so no key changes: no ignore, skip, exception, clarification, severity, graph setting or source rule."
         { "zenoh_tls_dependency_check"; };
       h.req "only-the-library-declares-tls"
         "Only `slime-components` declares `rustls` and `getrandom`, each optional with default features off, and `getrandom` enables `custom`. The `tls` feature is off by default and no workspace member enables it."
         { "zenoh_tls_dependency_check"; };
       h.req "the-default-graph-holds-no-tls-crate"
-        "The workspace graph without the `tls` feature holds none of `rustls`, `rustls-webpki`, `rustls-rustcrypto`, `getrandom`, `ring`, `aws-lc-rs` or `aws-lc-sys`."
+        "The workspace graph without the `tls` feature, resolved for every target, holds none of `rustls`, `rustls-webpki`, `rustls-rustcrypto`, `getrandom`, `ring`, `aws-lc-rs` or `aws-lc-sys`."
         { "zenoh_tls_dependency_check"; };
       h.req "the-tls-graph-needs-no-c-toolchain"
-        "The graph with the `tls` feature holds `rustls` and `getrandom`, and holds none of `ring`, `aws-lc-rs`, `aws-lc-sys`, `openssl`, `openssl-sys` or `native-tls`."
+        "The graph with the `tls` feature, resolved for every target, holds `rustls` and `getrandom`, and holds none of `ring`, `aws-lc-rs`, `aws-lc-sys`, `openssl`, `openssl-sys` or `native-tls`."
         { "zenoh_tls_dependency_check"; };
       h.req "controls-are-refused"
-        "The judge refuses 53 inputs: 42 corrupted observations and 11 corrupted outputs of `cargo deny`, `cargo tree` and `cargo metadata`."
+        "The judge refuses 64 inputs: 52 corrupted observations and 12 corrupted outputs of `cargo deny`, `cargo tree`, `cargo metadata` and `deny.toml`."
         { "zenoh_tls_dependency_check"; };
     };
     acceptance = {
       h.observedWhere "zenoh_tls_dependency_check" {
-        h.count "casesObserved" 24;
-        h.count "negativeControlsRefused" 53;
+        h.count "casesObserved" 20;
+        h.count "negativeControlsRefused" 64;
       };
     };
     decisions = {
@@ -51,10 +51,15 @@ item :: s.Item = (h.task "01a2099c-3fd1-727a-9943-3bad1d9e3370" "zenoh-tls-depen
         (h.fromDecision "docs/decisions/zenoh-link-transports.md")
         { "deny-passes-unchanged"; };
       h.decided "the-policy-is-pinned-by-value"
-        "The exam pins the license allow list, the skip-tree list and the git sources by value. A new license, skip or source fails the exam, and so does an advisory ignore or a ban skip."
-        "a license allow for the dependency's graph would pass `just deny` without a decision by the owner. The owner did not answer whether such an entry is acceptable, so the exam refuses it"
+        "The exam pins the whole parsed `deny.toml` by value. Any added, removed or changed key fails it, whether an allow, an ignore, a skip, an exception, a clarification, a severity or a graph setting."
+        "a license allow, a license exception or `all-features = false` would pass `just deny` without a decision by the owner. The owner did not answer whether such an entry is acceptable, so the exam refuses every one"
         h.agentDefault
         { "deny-passes-unchanged"; };
+      h.decided "unused-optional-dependencies-are-ignored-for-machete"
+        "The dependency entries carry a `[package.metadata.cargo-machete] ignored` entry in `components/lib/Cargo.toml`, as `components/system/sysinfo` does, because no module uses the crates in this item."
+        "CI runs `cargo-machete` and reports an optional dependency that no source file uses. `lib.rs` is outside `owns`, so no module can use them"
+        h.agentDefault
+        { "only-the-library-declares-tls"; };
       h.decided "build-for-aarch64-only"
         "The exam builds for `aarch64-unknown-none` only."
         "`slime-components` fails to build for `x86_64-unknown-none` on `sha2` before this item, and a build that fails for that reason says nothing about the TLS crates"
