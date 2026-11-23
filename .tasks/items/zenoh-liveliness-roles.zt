@@ -10,6 +10,7 @@ item :: s.Item = (h.task "01a208ef-1ac1-73c3-91bb-2a4315bf72a4" "zenoh-livelines
       "components/lib/src/zenoh_profile0*";
       "components/lib/src/zenoh_link*";
       "components/lib/src/zenoh_liveliness*";
+      "components/lib/src/lib.rs";
       "components/proto/src/zenoh_profile.rs";
       "contracts/zenoh-profile/**";
     };
@@ -31,7 +32,7 @@ item :: s.Item = (h.task "01a208ef-1ac1-73c3-91bb-2a4315bf72a4" "zenoh-livelines
         "Every admitted token and interest message encodes to the bytes the upstream eclipse-zenoh 1.0.0 encoder produces, and the host reference reproduces those bytes before it judges the Rust encoder."
         { "zenoh_liveliness_check"; };
       h.req "client-role"
-        "A session built as Client sends INIT with whatami Client and holds no declaration of the peer's other than the ones its own INTEREST requested. A listener accepts a Client INIT only when its configuration admits clients, and refuses it as unsupported-whatami otherwise. Router stays refused in both directions."
+        "A session announced as Client sends INIT_SYN with whatami Client and can only connect: a Client listener is refused at construction as invalid-config. A listener accepts a Client INIT_SYN only when its configuration admits clients, and refuses it as unsupported-whatami otherwise. A Client never sends INIT_ACK, so an INIT_ACK that names Client is refused. Router stays refused in both directions."
         { "zenoh_liveliness_check"; };
       h.req "defaults-unchanged"
         "A session and a link built from an existing configuration behave as before: the 17 corpus batches, the stock peer's session and every existing refusal are reproduced unchanged."

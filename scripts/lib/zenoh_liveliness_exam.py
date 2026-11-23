@@ -42,8 +42,9 @@ OK_SCENARIOS = (
     "default-configuration-unchanged",
 )
 
-# (name, bytes the session wrote). Frames are the listener's, in sequence from LISTENER_SN. An answer to an
-# INTEREST is one frame: a DECLARE_TOKEN for each held token carrying the interest id, then the DeclareFinal.
+# (name, bytes the session wrote). Every frame is the listener's, from a listener built for its scenario, so a
+# frame's sequence number is LISTENER_SN plus the frames that listener sent before it. An answer to an INTEREST
+# is one frame: a DECLARE_TOKEN for each held token carrying the interest id, then the DeclareFinal.
 FRAMES = (
     ("declare-token-1", zenoh_wire.frame(LISTENER_SN, zenoh_wire.declare_token(1, KEY, True)).hex()),
     ("undeclare-token-1", zenoh_wire.frame(LISTENER_SN + 1, zenoh_wire.undeclare_token(1, KEY)).hex()),
@@ -59,13 +60,13 @@ FRAMES = (
     (
         "answer-current-future-interest-8",
         zenoh_wire.frame(
-            LISTENER_SN + 3,
+            LISTENER_SN + 2,
             zenoh_wire.declare_token(1, KEY, True, 8),
             zenoh_wire.declare_token(2, KEY_SECOND, True, 8),
             zenoh_wire.declare_final(8),
         ).hex(),
     ),
-    ("answer-empty-interest-9", zenoh_wire.frame(LISTENER_SN + 4, zenoh_wire.declare_final(9)).hex()),
+    ("answer-empty-interest-9", zenoh_wire.frame(LISTENER_SN, zenoh_wire.declare_final(9)).hex()),
     ("client-init-syn", zenoh_wire.init_as(zenoh_wire.WHATAMI_CLIENT, ZID, 512).hex()),
 )
 
@@ -99,7 +100,7 @@ REFUSED_SCENARIOS = (
     ("client-init-to-a-listener-that-admits-none", "unsupported-whatami"),
     ("router-init-ack-to-a-connector", "unsupported-whatami"),
     ("reserved-role-init", "malformed-message"),
-    ("client-with-no-token-slot", "invalid-config"),
+    ("client-as-a-listener", "invalid-config"),
 )
 
 SHAPES = {
