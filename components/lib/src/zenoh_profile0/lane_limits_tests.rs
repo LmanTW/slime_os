@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::zenoh_profile0::limits::{DEMO, HEAP, LARGE};
-use crate::zenoh_profile0::reassembly::Reassembly;
+use crate::zenoh_profile0::reassembly::Run;
 
 fn exact(base: Limits, runs: usize) -> LaneLimits {
     let mut lanes = heap(base, runs);
@@ -120,8 +120,8 @@ fn a_declaration_the_version_one_rules_refuse_is_refused_here() {
 
 #[test]
 fn the_margins_cover_the_state_a_run_and_the_lanes_hold() {
-    // One run's state is a `Reassembly` and a slot's worth of bookkeeping, and the contract charges 64 bytes.
-    assert!(core::mem::size_of::<Reassembly>() as u64 <= RUN_OVERHEAD_BYTES);
+    // A table of runs holds one `Run` for each, and the contract charges 64 bytes for it.
+    assert!(core::mem::size_of::<Run>() as u64 <= RUN_OVERHEAD_BYTES);
     // The counters are one 32-bit sequence number for each of the 16 lanes, which is all the contract charges.
     assert_eq!(
         (MAX_RUNS_LIMIT * core::mem::size_of::<u32>()) as u64,
