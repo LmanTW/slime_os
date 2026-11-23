@@ -4,8 +4,8 @@ Every other exam of the client role replays captured bytes. This one judges a ru
 starts `rmw_zenohd` and a ROS node for each direction, runs the host program in `verification/zenoh-live` against them,
 and kills each process it started by its recorded PID. The program prints one `[zenoh-live] ...` line for each thing it
 did. The checker reads the listener's output itself, stdout and stderr together, and adds one `ros listener ...` line for
-each `I heard:` line the listener printed. The program never writes a `ros` line, and the checker drops any it prints. This module judges the whole
-transcript.
+each `I heard:` line the listener printed. The program never writes a `ros` line, and the checker fails the run on any
+program line that is not a `live` line. This module judges the whole transcript.
 
 Two directions run one after the other, each against its own router:
 
