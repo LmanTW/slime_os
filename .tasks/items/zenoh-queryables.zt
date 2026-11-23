@@ -1,0 +1,89 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a208f8-8fee-75a7-a7db-ea499dafbd6a" "zenoh-queryables" "zenoh-transport"
+  "Zenoh Profile 0 carries one query: a queryable declaration, a request, its responses and the final response"
+  "Profile 0 refuses a queryable declaration, a request and a response as unsupported-message, so a Slime OS peer can publish and subscribe but cannot answer or ask a query. docs/decisions/zenoh-service.md names the queryable as the Zenoh equivalent of a fabric call and lists it out of scope because no stock-peer capture shows one. This item adds the capture. A stock eclipse-zenoh 1.0.0 peer that declared a queryable on slime_demo/query and answered one get, and a stock peer that asked it, put 14 batches on a TCP link; the exam replays them into sessions of ours, reproduces each query message byte for byte from the field layouts, and requires 15 refusals by name and class. The frozen requirement 01a1b49c-abf1-7139-b388-c6f26fe240c7 pins the queryable declaration and the request as refused, so this item supersedes it, restates it as stock-exam-takes-queries with the stock-peer checker amended in the same pull request, and keeps every other refusal it names.")
+  with {
+    intent = #planned;
+    supersedes = { "01a1b49c-abf1-7139-b388-c6f26fe240c7"; };
+    owns = {
+      "components/lib/src/zenoh_profile0.rs";
+      "components/lib/src/zenoh_profile0/**";
+      "components/lib/src/zenoh_stock*";
+      "components/lib/src/zenoh_queries.rs";
+      "components/lib/src/zenoh_queries/**";
+      "components/lib/src/lib.rs";
+      "components/proto/src/zenoh_profile.rs";
+      "contracts/zenoh-profile/v1/**";
+      "contracts/zenoh-stock-queries/v1/gen_rust.zt";
+      "scripts/generate/generate-zenoh-queries-bindings.py";
+    };
+    nonGoals = {
+      h.nonGoal "Wildcard key expressions in a queryable, a request or a response; each stays refused as wildcard-keyexpr." h.agentDefault;
+      h.nonGoal "Liveliness tokens, INTEREST, aggregated interest and any declaration other than a queryable; each stays refused." h.agentDefault;
+      h.nonGoal "A request with query parameters, a target, a budget, a consolidation other than latest, or an error reply; each stays refused." h.agentDefault;
+      h.nonGoal "A reply that is a Delete, a fragmented reply and a best-effort request or response." h.agentDefault;
+      h.nonGoal "More than one outstanding query on a session, and a router or client peer." h.agentDefault;
+      h.nonGoal "Serving a query from the Zenoh service, its grants or its client protocol. The service keeps refusing queries until a later item." h.agentDefault;
+      h.nonGoal "rmw_zenoh service interoperability. The capture is one peer, eclipse-zenoh 1.0.0, in peer mode, on the plain demo key." h.agentDefault;
+    };
+    requirements = {
+      h.req "replays-both-captures"
+        "The 14 batches the two stock peers sent are each accepted, in capture order, by a session of ours that plays the other side, and the decoder's three properties hold on each: every prefix of the batch is refused unless it is a shorter frame, a flipped bit never panics or exceeds a bound, and every two-chunk split reassembles."
+        { "cases-observed"; "recipe-passed"; };
+      h.req "reproduces-the-queries"
+        "The host encoders in scripts/lib/zenoh_queries_exam.py reproduce the captured request, both responses, the final response, the queryable undeclaration and the queryable declaration byte for byte, so the capture is not taken on trust from the peer that wrote it."
+        { "controls-refused"; "recipe-passed"; };
+      h.req "three-scenarios"
+        "Three scenarios run in this order: our query is answered by a stock queryable with both payloads delivered, then a stock peer's query is answered by our queryable, then a queryable is undeclared by id."
+        { "cases-observed"; };
+      h.req "refuses-what-stays-out"
+        "The session refuses 15 named variants with the class the exam fixes for each, and a refused call leaves the session unchanged: a wildcard suffix, an unknown alias, query parameters, a target extension, a mandatory QoS extension, a request id over 32 bits, a truncated request, an error reply, a Delete reply, a wildcard reply key, a wildcard queryable, a token declaration, a request with no queryable declared, a response nobody asked for, and a repeated final response."
+        { "cases-observed"; "controls-refused"; };
+      h.req "stock-exam-takes-queries"
+        "The stock-peer exam keeps every refusal of the area requirement this item supersedes, except for three: the captured DeclareQueryable through an alias is taken and the exam reports the scenario queryable-declaration-is-taken, and the corpus vectors declare_queryable, frame_network_request and frame_network_response may leave the corpus or stay refused with their captured bytes and class, but never become accepted rows. The captured request is refused as undeclared-key, because no queryable of ours holds its key. The other 97 pinned refused vectors keep their name, class and bytes, the 17 accepted batches and the 14 stream rows are unchanged, and the exam still reports 69 cases."
+        { "zenoh_stock_check"; };
+      h.req "judge-refuses-corruption"
+        "The judge refuses a transcript that drops, duplicates, reorders or invents a replay, scenario, property or refusal, reports a refusal with another class, or has a line of a recognised kind that is incomplete or has extra fields; and the hand-off contract refuses each corrupted record. The count is exact."
+        { "controls-refused"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_stock_check" {
+        h.count "casesObserved" 69;
+        h.atLeast "negativeControlsRefused" 138;
+      };
+      h.observedAs "cases-observed" "zenoh_queries_check" { h.count "casesObserved" 32; };
+      h.observedAs "controls-refused" "zenoh_queries_check" { h.count "negativeControlsRefused" 105; };
+      h.observedAs "recipe-passed" "zenoh_queries_check" h.noPredicates;
+    };
+    decisions = {
+      h.decided "supersede-the-refusal"
+        "The item supersedes requirement 01a1b49c-abf1-7139-b388-c6f26fe240c7, which pins the queryable declaration and the request as unsupported-message, and does not edit specs/zenoh-transport.zt"
+        "V10 freezes area requirements; a promise that the implementation must break is replaced through supersedes, and the file stays as it is"
+        h.agentDefault
+        { "refuses-what-stays-out"; };
+      h.decided "stock-amendment-in-this-item"
+        "This planning pull request amends the stock-peer checker itself: three refused vectors leave STOCK_FIXED_NAMES and join STOCK_MAY_CHANGE (declare_queryable, frame_network_request, frame_network_response), the stock exam reports the scenario queryable-declaration-is-taken and no longer lists refuse-queryable as refused, and refuse-request is refused as undeclared-key"
+        "the stock checker grades promises, so V4 refuses a change to it unless a new item supersedes them in the same pull request; the amendment keeps the exam at 69 cases and raises the controls from 138 to 158, so no count that another requirement pins moves"
+        h.agentDefault
+        { "stock-exam-takes-queries"; };
+      h.decided "one-capture-per-direction"
+        "The exam holds two captures, one for each side of a query, and not one capture of both"
+        "a peer that answered and a peer that asked write different batches, and a session of ours plays the opposite role in each"
+        h.agentDefault
+        { "replays-both-captures"; "three-scenarios"; };
+      h.decided "dump-by-proxy"
+        "The captures were taken through a recording TCP proxy between two eclipse-zenoh 1.0.0 peers, with multicast scouting, gossip and unicast QoS off, and the exam reads the bytes the proxy recorded"
+        "the Profile 0 encoder cannot yet play a queryable or a getter, so a stock peer cannot be driven by our side; two stock peers talk to each other and the proxy records what crosses the link"
+        h.agentDefault
+        { "replays-both-captures"; "reproduces-the-queries"; };
+    };
+    knownLimits = {
+      h.knownLimit "zenoh_queries_check"
+        "The batches come from one peer, eclipse-zenoh 1.0.0 in peer mode on the loopback of one x86_64 Linux host, and from a proxy between two of its sessions rather than from a Slime OS peer. The responder identity extension (0x43) and the request's QoS value 0x0d were seen once and are accepted only in the form captured. Nothing here shows rmw_zenoh service traffic, a router, or a second outstanding query."
+        h.agentDefault;
+    };
+  };
+
+item

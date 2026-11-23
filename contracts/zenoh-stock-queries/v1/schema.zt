@@ -1,0 +1,92 @@
+-- The stock peers' sessions about queries, handed from the queries exam's checker to its Rust tests.
+--
+-- `check-zenoh-profile0.py --slice queries` writes one record of this shape to
+-- `build/zenoh-queries/fixtures.zti`; the `zenoh_queries::` tests read it. The bytes are eclipse-zenoh's,
+-- not ours: `queryablePeer` is the batch bodies (no 2-byte stream length) a stock 1.0.0 peer that
+-- declared a queryable and answered one query sent, `getterPeer` is what a stock 1.0.0 peer that asked
+-- that query sent, both in order, and `refuse` is what the exam builds from them. Only the container is
+-- fixed here.
+
+Row :: type {
+  name : Text;
+  hex : Text;
+};
+
+Session :: type {
+  formatVersion : Int;
+  queryablePeer : List Row;
+  getterPeer : List Row;
+  refuse : List Row;
+};
+
+FromData @Row :: derive
+FromData @Session :: derive
+
+formatVersion :: Int = 1;
+queryablePeerCount :: Int = 8;
+getterPeerCount :: Int = 6;
+refuseCount :: Int = 15;
+maxBatchBytes :: Int = 512;
+maxNameBytes :: Int = 64;
+
+d ::= import stdlib.data;
+r ::= import stdlib.result;
+
+-- `decode` ignores a field it does not know, so the field set is closed here: every record, at the top
+-- level and in each row, may name only the fields below.
+topFields :: List Text = { "formatVersion"; "queryablePeer"; "getterPeer"; "refuse"; };
+rowFields :: List Text = { "name"; "hex"; };
+
+isAllowed :: Text -> List Text -> Bool
+  = wanted allowed => match allowed {
+    | {;} => false;
+    | {head; ...tail} => if head == wanted then true else isAllowed wanted tail;
+  };
+
+onlyThese :: List Text -> List d.DataField -> Bool
+  = allowed found => match found {
+    | {;} => true;
+    | {head; ...tail} => isAllowed head.name allowed && onlyThese allowed tail;
+  };
+
+recordIsClosed :: List Text -> Data -> Bool
+  = allowed data => match d.asRecord data {
+    | #ok { value = found; } => onlyThese allowed found;
+    | #err { error = _; } => true;
+  };
+
+everyRowClosed :: List Data -> Bool
+  = rows => match rows {
+    | {;} => true;
+    | {head; ...tail} => recordIsClosed rowFields head && everyRowClosed tail;
+  };
+
+rowsAreClosed :: Text -> Data -> Bool
+  = group data => match d.field group data {
+    | #ok { value = value; } => match d.asList value {
+      | #ok { value = rows; } => everyRowClosed rows;
+      | #err { error = _; } => true;
+    };
+    | #err { error = _; } => true;
+  };
+
+closedSession :: Data -> Bool
+  = data => recordIsClosed topFields data && rowsAreClosed "queryablePeer" data && rowsAreClosed "getterPeer" data && rowsAreClosed "refuse" data;
+
+extraField :: DecodeIssue
+  = { path = {;}; error = #custom { message = "a field the contract does not name"; }; };
+
+decodeSession :: Data -> Validation DecodeIssue Session
+  = data => if closedSession data then decode data else r.invalidOne extraField;
+
+{
+  Row =;
+  Session =;
+  decodeSession =;
+  formatVersion =;
+  queryablePeerCount =;
+  getterPeerCount =;
+  refuseCount =;
+  maxBatchBytes =;
+  maxNameBytes =;
+}

@@ -73,6 +73,15 @@ zenoh_links_check:
 zenoh_undeclare_check:
     python3 scripts/check/check-zenoh-profile0.py --slice undeclare
 
+# A Zenoh Profile 0 session carrying queries: the sessions a stock eclipse-zenoh 1.0.0 queryable peer and
+# a stock peer that asks sent, replayed into sessions of ours, with the host reference reproducing each
+# queryable declaration, request, response and final response byte for byte
+# (scripts/lib/zenoh_queries_exam.py, contracts/zenoh-stock-queries/v1), and fifteen variants refused by
+# name and class. Nothing here needs a registry. Fails until the session takes queries.
+[group('hardware')]
+zenoh_queries_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice queries
+
 # Judges a Zenoh Profile 0 session that holds several subscriptions of its own. The session refused
 # a second one as subscriber-limit, whatever its parameters said. Params.local now says how many it
 # holds. The links exam and the stock-peer exam run beside it, because both pin the subscriber limit.
