@@ -50,12 +50,14 @@ failed TLS check. The owner dropped vsock: this record plans no vsock link.
 
 ### TLS over TCP
 
-- **The stack is a pinned dependency.** The candidate is `rustls` with a `no_std`-capable provider, as upstream 1.0.0 uses
-  `rustls` 0.23.13. The work item must show that the dependency builds `no_std` on the target and passes `just deny`. It must
-  also show that the dependency stays out of every closure that does not use it. If any of these fails, this slice
-  stops and the record is revised.
+- **The stack is a pinned dependency.** The candidate is `rustls` with a `no_std`-capable provider. The record does not
+  pin a version, because `rustls` 0.23.13, the version upstream 1.0.0 uses, carries five advisories. The work item must
+  show three facts. The dependency builds `no_std` on the target. `just deny` reports no advisory for it. It stays out
+  of every closure that does not use it. The owner chose zero advisories as the exit condition. `deny.toml` gains no
+  ignore for this dependency. If a fact fails, the item stays open until a crate release fixes it.
 - **Entropy comes from a granted capability.** The handshake needs random bytes. It takes them from `entropy-service`. A
-  holder with no entropy grant cannot open a TLS link.
+  holder with no entropy grant cannot open a TLS link. `getrandom` has no backend on a bare-metal target, so the
+  component supplies one through its `custom` feature.
 - **The validation time is fixed by the generation.** The repository has no calendar-time source. `clock-authority/v2`
   grants timers and simulated time, and a monotonic read measures time since boot. The generation therefore declares one
   time, and the link checks each certificate's validity window against it. A certificate that expired after that time is
@@ -111,13 +113,28 @@ failed TLS check. The owner dropped vsock: this record plans no vsock link.
 
 ## Consequences
 
-- The TLS slice may not be possible without a new dependency. Its first work item decides that, before any other TLS work.
+- The TLS slice may not be possible today. A probe found no combination that builds and passes `just deny` (see below).
+  The first TLS work item holds the slice until one does.
 - The serial slice needs three new things: a UART receive path, a framer, and a source-built stock peer. Only the
   framer is Rust codec work.
-- If the TLS dependency check fails, the serial slice still proceeds, because the two slices share no code.
+- While the TLS dependency check fails, the serial slice proceeds, because the two slices share no code.
 - The two slices share no code beyond `ByteLink`, so either can land alone.
 - A TLS link carries Zenoh keys and samples under a confidentiality claim for the first time. The exam must judge from a
   capture that the stream holds no Zenoh plaintext.
+
+## What a dependency probe observed
+
+A scratch crate outside the repository, built with the repository's nightly toolchain and its `deny.toml`, gave these
+results on 2026-11-23.
+
+| Combination | Build on `aarch64-unknown-none` | `cargo deny` |
+| --- | --- | --- |
+| `rustls` 0.23.13 with `ring` | Fails: no `getrandom` backend, then no `SecureRandom` for `ring` | Not run |
+| `rustls` 0.23.13 with `rustls-rustcrypto` 0.0.2-alpha | Builds with `getrandom` `custom` and `hashbrown` | Refuses: five advisories on `rustls`, five on `rustls-webpki` 0.102.8, and one each on `rsa`, `crypto-bigint` and `paste` |
+| `rustls` 0.23.46 with `rustls-rustcrypto` 0.0.2-alpha | Builds, and on `x86_64-unknown-none` | Refuses: `rustls-webpki` 0.102.8 stays in the graph with five advisories, plus `rsa`, `crypto-bigint`, `paste` and the Zlib license of `foldhash` |
+
+`rustls` 0.23.46 clears the five `rustls` advisories. The probe's lockfile still held `rustls-webpki` 0.102.8, `rsa` 0.9.10
+and `crypto-bigint` 0.5.5, each with an open advisory. The probe did not try to resolve newer versions of them.
 
 ## Not observed
 
@@ -125,7 +142,8 @@ failed TLS check. The owner dropped vsock: this record plans no vsock link.
 - The `is_reliable` value that upstream returns for `serial` was not read, so the effect of a lossy line on `FRAME`
   reliability is unresolved. The serial work item must settle it before any claim about delivery.
 - Whether `zenoh` 1.0.0 with `transport_serial` accepts a pseudo-terminal that QEMU exposes was not tried.
-- Whether `rustls` builds `no_std` for the seL4 target was not tried.
+- Whether `rustls` builds for the seL4 JSON targets was not tried. Only `aarch64-unknown-none` and `x86_64-unknown-none` were.
+- A TLS handshake was not run. A build shows that the crate compiles and nothing more.
 
 ## Revisit when
 
