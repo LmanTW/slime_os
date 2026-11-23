@@ -214,3 +214,28 @@ fn every_session_error_has_one_class_and_the_new_one_is_lane_limit() {
         assert_eq!(GraphError::Session(error).class(), class);
     }
 }
+
+#[test]
+fn a_session_written_without_the_run_count_is_the_session_with_one() {
+    use crate::zenoh_profile0::session::SessionOf;
+    // Every caller that spells `SessionOf<K, S, B, E>` gets `R = 1`, so the two names are one type.
+    fn same<T>(_: &T, _: &T) {}
+    let config = Config {
+        zid: &ZID,
+        lease_ms: 2000,
+        initial_sn: 0,
+        cookie: &[],
+    };
+    let plain = SessionOf::<1, 2, 129, 4>::with_params(Role::Connector, &config, Params::DEMO)
+        .expect("plain");
+    let one = SessionOf::<1, 2, 129, 4, 1>::with_params(Role::Connector, &config, Params::DEMO)
+        .expect("one run");
+    same(&plain, &one);
+    assert_eq!(
+        core::mem::size_of::<SessionOf<1, 2, 129, 4>>(),
+        core::mem::size_of::<SessionOf<1, 2, 129, 4, 1>>()
+    );
+    // And the alias the first release uses is that same type.
+    let first: Session = plain;
+    same(&first, &one);
+}

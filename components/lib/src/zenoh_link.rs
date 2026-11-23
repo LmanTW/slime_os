@@ -199,9 +199,10 @@ pub struct LinkOf<
     const P: usize,
     const Q: usize,
     const E: usize = MAX_EVENTS,
+    const R: usize = 1,
 > {
     io: L,
-    session: SessionOf<K, S, B, E>,
+    session: SessionOf<K, S, B, E, R>,
     framer: StreamFramerOf<FRAMED>,
     send: [u8; FRAMED],
     send_len: usize,
@@ -247,7 +248,8 @@ impl<
     const P: usize,
     const Q: usize,
     const E: usize,
-> LinkOf<L, FRAMED, K, S, B, P, Q, E>
+    const R: usize,
+> LinkOf<L, FRAMED, K, S, B, P, Q, E, R>
 {
     /// The same link with the client role on its session: it announces itself as a client, takes the INIT_ACK of a
     /// router and takes the timestamp of a Put a router forwards. A listener, and a link that has begun its
@@ -312,7 +314,7 @@ impl<
         self.tap_received.get()
     }
 
-    pub fn session(&self) -> &SessionOf<K, S, B, E> {
+    pub fn session(&self) -> &SessionOf<K, S, B, E, R> {
         &self.session
     }
 

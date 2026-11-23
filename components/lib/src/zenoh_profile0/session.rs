@@ -479,13 +479,15 @@ fn subscribed_to<const S: usize, const B: usize>(subs: &SlotTable<S, B>, key: &[
 }
 
 /// A session over `K` key aliases and `S` subscribers of each side, keys of up to `B` bytes. The
-/// defaults are the first release's.
+/// defaults are the first release's. `R` is the reassembly runs the session is built to hold. It is 1 for
+/// every session written without it, and nothing reads it yet.
 #[derive(Clone, Debug)]
 pub struct SessionOf<
     const K: usize = 1,
     const S: usize = 2,
     const B: usize = MAX_KEY_BYTES,
     const E: usize = MAX_EVENTS,
+    const R: usize = 1,
 > {
     role: Role,
     state: State,
@@ -557,7 +559,9 @@ fn count_events<const E: usize>(frame: &Frame<'_>) -> (usize, usize) {
 /// The first release's session.
 pub type Session = SessionOf<1, 2, MAX_KEY_BYTES, MAX_EVENTS>;
 
-impl<const K: usize, const S: usize, const B: usize, const E: usize> SessionOf<K, S, B, E> {
+impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: usize>
+    SessionOf<K, S, B, E, R>
+{
     /// A session with the first release's parameters, in [`State::Idle`], or
     /// [`SessionError::InvalidConfig`] when the encoder could not announce `config`.
     pub fn new(role: Role, config: &Config<'_>) -> Result<Self, SessionError> {
