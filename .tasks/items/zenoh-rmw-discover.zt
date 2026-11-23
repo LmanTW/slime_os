@@ -29,13 +29,13 @@ item :: s.Item = (h.task "01a2095e-8c5f-717f-af72-60abb7f7ed80" "zenoh-rmw-disco
         "The judge refuses a transcript with lines out of order, a short line, or a listing that is missing or read twice. It refuses a line kind that a run prints once and that appears twice. A run prints the handshake, the two token lines, the two listings while the session is open, the close and the two listings after it."
         { "zenoh_rmw_discover_check"; };
       h.req "controls-are-refused"
-        "The judge refuses 38 corrupted transcripts before it judges the run."
+        "The judge refuses 39 corrupted transcripts before it judges the run."
         { "zenoh_rmw_discover_check"; };
     };
     acceptance = {
       h.observedWhere "zenoh_rmw_discover_check" {
         h.count "casesObserved" 8;
-        h.count "negativeControlsRefused" 38;
+        h.count "negativeControlsRefused" 39;
       };
     };
     decisions = {

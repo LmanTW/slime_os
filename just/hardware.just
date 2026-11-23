@@ -158,7 +158,7 @@ zenoh_rmw_live_check:
 # and `ros2 node list` and `ros2 topic list` show them while the session is open and not after it closes. The checker
 # starts the router, runs the host program in verification/zenoh-live with `discover`, and runs `ros2` itself. The
 # expectation is scripts/lib/zenoh_rmw_discover_exam.py. The operator names the router and the ROS install in
-# SLIME_ROS_ENV and SLIME_RMW_ZENOHD, because the pinned ROS packages are not in flake.nix. CI does not run it. It is an
+# SLIME_ROS_ENV and SLIME_RMW_ZENOHD, because the pinned ROS packages are not in flake.nix. CI does not run it. It is to be an
 # operator target in specs/targets.toml, and an operator signs its record.
 [group('hardware')]
 zenoh_rmw_discover_check:

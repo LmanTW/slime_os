@@ -111,6 +111,7 @@ import argparse
 import hashlib
 import os as _os
 import re
+import select
 import shutil
 import signal as _signal
 import struct
@@ -2521,7 +2522,10 @@ def run_rmw_discover() -> list[str]:
         process = subprocess.Popen([str(program), "discover"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, env=environment, start_new_session=True)
         pids.append(process.pid)
         declared = 0
+        deadline = _time.monotonic() + LIVE_PROGRAM_S
         while declared < DISCOVER_TOKENS:
+            if not select.select([process.stdout], [], [], max(0.0, deadline - _time.monotonic()))[0]:
+                fail(f"rmw-discover: the live program declared {declared} of {DISCOVER_TOKENS} tokens in {LIVE_PROGRAM_S} s")
             line = process.stdout.readline()
             if not line:
                 fail("rmw-discover: the live program ended before it declared both tokens")

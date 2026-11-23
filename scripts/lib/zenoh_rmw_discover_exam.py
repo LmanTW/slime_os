@@ -61,7 +61,12 @@ def good_lines() -> list[str]:
     ]
 
 
-PHASES = ("router-ready", "handshake", "token-declared", "ros", "closed", "ros")
+# The kind of each line, in the order a run prints them. The listings carry their phase, so a listing read before the
+# close cannot stand after it.
+PHASES = (
+    "live router-ready", "live handshake", "live token-declared", "live token-declared",
+    "ros nodes held", "ros topics held", "live closed", "ros nodes closed", "ros topics closed",
+)
 MIN_PARTS = {"router-ready": 3, "handshake": 4, "token-declared": 4, "closed": 3}
 ONCE = ("router-ready", "handshake", "closed")
 
@@ -97,13 +102,8 @@ def parse(lines: list[str]) -> dict:
 
 
 def phases(lines: list[str]) -> list[str]:
-    kinds: list[str] = []
-    for line in lines:
-        parts = line.split(" ")
-        kind = parts[0] if parts[0] == "ros" else parts[1]
-        if not kinds or kinds[-1] != kind:
-            kinds.append(kind)
-    return kinds
+    """The phase of each line: `live <kind>`, or `ros <nodes|topics> <held|closed>`."""
+    return [" ".join(line.split(" ")[:3] if line.startswith("ros ") else line.split(" ")[:2]) for line in lines]
 
 
 def judge(lines: list[str]) -> tuple[int, int]:
@@ -166,6 +166,7 @@ def transcript_mutations() -> list[tuple[str, list[str]]]:
         ("a listing before the router was ready", [*good[4:6], *good[:4], *good[6:]]),
         ("a held listing printed after the close", [*good[:4], good[6], *good[4:6], *good[7:]]),
         ("a node list read twice", [*good, good[4]]),
+        ("the listings after the close read before it", [*good[:4], *good[7:], good[6], *good[4:6]]),
         ("a listing with an unknown phase", replaced(4, "held", "lost")),
         ("a listing that is not a node or topic list", replaced(5, "topics", "services")),
         ("a listing with a missing field", replaced(4, " held /slime_node", " /slime_node")),
@@ -201,7 +202,7 @@ def all_controls() -> int:
 
 # What the item fixes, held here as well so the gate stays correct after the item moves to .tasks/terminal.
 PINNED_CASES = 8
-PINNED_CONTROLS = 38
+PINNED_CONTROLS = 39
 
 
 def item_pins() -> tuple[int, int]:
