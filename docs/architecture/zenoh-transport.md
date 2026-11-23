@@ -532,10 +532,38 @@ own log and adds the `ros` lines, and it fails the run on any program line of an
 `scripts/lib/zenoh_rmw_live_exam.py` judges the transcript and refuses 38 corrupted ones. The controls show that a bad
 transcript is refused. They do not show that a router ran.
 
+A client-role link also writes liveliness tokens. `ros2 node list` and `ros2 topic list` build their graph from tokens under
+`@ros2_lv`. A link that writes none is invisible to them, although a ROS node still hears its Puts.
+`LinkOf::declare_token` declares a token by id and key, and `LinkOf::withdraw_token` withdraws one by id. A session with no
+client role refuses both as `invalid-config`.
+
+| Call | What the link writes | What the session holds |
+| --- | --- | --- |
+| Declare token `id` under `key` | A `DECLARE` with a named token, the sender mapping, the id, the global scope and the key in full | The id, up to 4 at once |
+| Withdraw token `id` | A `DECLARE` with an `UNDECLARE_TOKEN`, the id and the extension `5f 02 00 00` | The other ids stay |
+| Close | A `CLOSE` and nothing for the tokens | None |
+
+A repeated id is refused as `token-limit`, and a withdrawal of an id never declared as `unknown-token`. The key is written in
+full and with no QoS wrapper. A real `rmw_zenoh_cpp` peer declares a key alias first and wraps each declaration, and the plain
+link has no alias writer.
+
+`scripts/lib/zenoh_rmw_token_exam.py` judges a client-role link through the two handshakes of `zenoh_rmw_router_data`, fed
+whole, one byte at a time and all at once. The link declares the node token and the publisher token of `slime_node`, withdraws
+the publisher token and closes. The exam compares every byte with `zenoh_rmw_graph.build_token` and `zenoh_rmw_wire`. The `held`
+line prints the tokens the link holds after the withdrawal, which is the node token alone. The Rust test reads it from the
+link. The judge refuses 87 corrupted records, and the router is not in the exam.
+
+Two host probes used the Python wire library and the repo's token builder. They declared a node token and a publisher token for
+`slime_node` through a live `rmw_zenohd`. A separate `ros2` listed `/slime_node` and `/chatter`, and `ros2 topic info /chatter`
+showed one publisher. A client that closed its session lost both, and a client that withdrew the publisher token while
+connected lost `/chatter` and kept the node. A node token alone listed the node, and a publisher token alone listed the node
+and the topic. The probes are not fixtures, and the Rust link took no part in them.
+
 Known limits:
 
-- The plain session and the plain link take the role. The graph link and the graph session do not. The link is not
-  visible to `ros2 topic list` or `ros2 node list`.
+- The plain session and the plain link take the role. The graph link and the graph session do not.
+- No run has shown `ros2` listing a node from a token the Rust link wrote. The probes above used the Python library. A subscription
+  token, a service token, a second node and a namespace other than `/` are not written, and the link has no alias writer.
 - A router writes nothing back, so the link cannot tell a matched Put from a dropped one.
 - The live target is an operator target in `specs/targets.toml`, and CI does not run it. The router and the nodes come
   from packages `flake.nix` does not pin, which the operator names in four environment variables. The item closes only
@@ -576,8 +604,9 @@ Known limits:
   The graph link does. No component, composition or QEMU gate runs it, so it is judged on the host over a
   scripted byte stream.
 - The graph holds each entity's QoS and does not match a publisher to a subscription. The session and
-  the link answer no query and declare no token. In one run, `ros2 topic list` and `ros2 node list` showed
-  no Slime node, and `ros2 topic echo` received the Puts of a Slime publisher.
+  the link answer no query. A client-role plain link declares tokens, as the client role section says. In one earlier run,
+  with no token declared, `ros2 topic list` and `ros2 node list` showed no Slime node, and `ros2 topic echo` received the
+  Puts of a Slime publisher.
 - The data session is observed by replaying two captured sessions, one talker and one listener, of
   `std_msgs/String` over a direct link. Live probes on one host showed more, with no CI evidence. A
   best-effort subscriber received the Puts. A peer that reconnected sent no second `INTEREST`. A Slime
@@ -639,6 +668,8 @@ Known limits:
   Zlib-licensed transitive crates, which the root `deny.toml` does not allow;
 - `just zenoh_rmw_client_check` — a connector with the client role against two handshakes of `rmw_zenohd`: 13 cases
   and 52 controls. A connector with no role still refuses them; explicit, not part of `all`;
+- `just zenoh_rmw_token_check` — a client-role link declares the node and publisher tokens of a node, withdraws one and
+  closes: 32 cases and 87 controls. No router runs, and a link with no role refuses a token; explicit, not part of `all`;
 - `just zenoh_rmw_live_check` — a client-role link against a live `rmw_zenohd`, a talker and a listener: at least 12
   cases and 38 controls. The checker starts the router and the nodes, the operator names them in four environment
   variables, and CI does not run it; an operator target, explicit, not part of `all`;

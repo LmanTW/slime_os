@@ -138,7 +138,7 @@ zenoh_rmw_client_put_check:
 # the publisher token of a node, withdraws one and closes. The Rust tests drive the link through the handshakes of two runs of
 # rmw_zenohd, captured by scripts/lib/zenoh_rmw_router_data.py, three ways. The key is built by scripts/lib/zenoh_rmw_graph.py
 # and the bytes by scripts/lib/zenoh_rmw_wire.py. The expectation is scripts/lib/zenoh_rmw_token_exam.py. No router runs here.
-# Nothing needs a registry or a ROS install. It fails until the link writes a token.
+# Nothing needs a registry or a ROS install.
 [group('hardware')]
 zenoh_rmw_token_check:
     python3 scripts/check/check-zenoh-profile0.py --slice rmw-token
