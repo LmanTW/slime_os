@@ -1,0 +1,76 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a208ef-1ac1-73c3-91bb-2a4315bf72a4" "zenoh-liveliness-roles" "zenoh-transport"
+  "Admit liveliness tokens and the client role in the Zenoh Profile 0 session"
+  "The session admits Peer as the only role and has no liveliness. INIT with whatami Router or Client is refused as unsupported-whatami, and DECLARE_TOKEN, UNDECLARE_TOKEN and INTEREST are refused as unsupported-message. rmw_zenoh discovers its graph through liveliness tokens, so no ROS 2 node can see this one, and a node behind a router cannot join as a client. Upstream eclipse-zenoh 1.0.0 defines all three messages in zenoh-protocol (network/declare.rs, network/interest.rs).")
+  with {
+    intent = #planned;
+    owns = {
+      "components/lib/src/zenoh_profile0*";
+      "components/lib/src/zenoh_link*";
+      "components/lib/src/zenoh_liveliness*";
+      "components/proto/src/zenoh_profile.rs";
+      "contracts/zenoh-profile/**";
+    };
+    nonGoals = {
+      h.nonGoal "Router role. A router speaks routing tables and gossip that no admitted message carries; refusing it stays." h.agentDefault;
+      h.nonGoal "Queryables, queries and replies." h.agentDefault;
+      h.nonGoal "Scouting, multicast, Join and more than one link." h.agentDefault;
+      h.nonGoal "Wildcard liveliness subscription keys. A token key and an interest key are exact." h.agentDefault;
+      h.nonGoal "A new Zenoh service grant kind for tokens. The service core keeps serving samples only." h.agentDefault;
+    };
+    requirements = {
+      h.req "token-declare"
+        "A session declares a liveliness token under an id and an exact key, and undeclares it by id. A peer's DECLARE_TOKEN and UNDECLARE_TOKEN are held in a table of declared size, and an id the table holds twice or an id it does not hold is refused by name. A frame that is refused changes no token."
+        { "zenoh_liveliness_check"; };
+      h.req "interest-final"
+        "A session answers an INTEREST for tokens, mode Current or CurrentFuture, with one DECLARE_TOKEN for each token it holds, each carrying the interest id, and then one DeclareFinal carrying that id. Mode Future sends no DeclareFinal. An INTEREST for subscribers, queryables or key expressions, a restricted interest and an interest with an extension are refused by name."
+        { "zenoh_liveliness_check"; };
+      h.req "liveliness-wire"
+        "Every admitted token and interest message encodes to the bytes the upstream eclipse-zenoh 1.0.0 encoder produces, and the host reference reproduces those bytes before it judges the Rust encoder."
+        { "zenoh_liveliness_check"; };
+      h.req "client-role"
+        "A session built as Client sends INIT with whatami Client and holds no declaration of the peer's other than the ones its own INTEREST requested. A listener accepts a Client INIT only when its configuration admits clients, and refuses it as unsupported-whatami otherwise. Router stays refused in both directions."
+        { "zenoh_liveliness_check"; };
+      h.req "defaults-unchanged"
+        "A session and a link built from an existing configuration behave as before: the 17 corpus batches, the stock peer's session and every existing refusal are reproduced unchanged."
+        { "zenoh_encoder_check"; "zenoh_session_check"; "zenoh_stock_check"; "zenoh_links_check"; };
+    };
+    acceptance = {
+      h.observed "zenoh_liveliness_check";
+      h.observed "zenoh_encoder_check";
+      h.observed "zenoh_session_check";
+      h.observed "zenoh_stock_check";
+      h.observed "zenoh_links_check";
+    };
+    knownLimits = {
+      h.knownLimit "zenoh_liveliness_check"
+        "verification/zenoh-xcheck is not extended. The upstream bytes of the 16 new batches are pinned in scripts/lib/zenoh_wire.py, written once by the upstream 1.0.0 encoder, and the reference must reproduce them. The decoder and session are not run against the upstream crates for tokens, interests or roles."
+        h.agentDefault;
+    };
+    decisions = {
+      h.decided "client-not-router"
+        "Add the Client role and keep Router refused"
+        "a client needs only INIT, OPEN and the declarations this session already speaks; a router's role is routing, which the bounded session does not do"
+        h.agentDefault
+        { "client-role"; };
+      h.decided "tokens-in-session"
+        "The session owns the token table; liveliness is not a service-core feature in this item"
+        "the session already owns subscriber and alias tables with a journal that undoes a refused frame, and a token table needs the same rollback"
+        h.agentDefault
+        { "token-declare"; "interest-final"; };
+      h.decided "interest-current-only-for-tokens"
+        "Only token interests are admitted"
+        "rmw_zenoh asks for tokens; a subscriber or queryable interest would need declarations this session does not keep"
+        h.agentDefault
+        { "interest-final"; };
+      h.decided "grader-first"
+        "The checker slice, the recipes and the host reference land in this planning pull request, and the implementation pull request changes only the paths in owns"
+        "V3 keeps a grader out of the implementation pull request"
+        h.agentDefault
+        { "liveliness-wire"; };
+    };
+  };
+
+item

@@ -82,6 +82,16 @@ zenoh_undeclare_check:
 zenoh_subscribers_check:
     python3 scripts/check/check-zenoh-profile0.py --slice subscribers
 
+# Judges liveliness tokens and the client role of a Zenoh Profile 0 session: declare and undeclare a
+# token, hold the peer's, answer an INTEREST for tokens with a DECLARE_TOKEN each and a DeclareFinal, and
+# send INIT as a Client. The host reference reproduces 16 batches the upstream eclipse-zenoh 1.0.0 encoder
+# wrote before it judges the session's frames (scripts/lib/zenoh_liveliness_exam.py, zenoh_wire.py). The
+# links and stock-peer exams run beside it. Nothing here needs a registry. The recipe fails until the
+# session takes tokens and the role.
+[group('hardware')]
+zenoh_liveliness_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice liveliness
+
 # Judges what the Zenoh service may do for each holder. The decoder of
 # contracts/zenoh-service-grants/v1 takes the declarations it must take and refuses the ones it must
 # refuse. Each limit is held on both sides of its bound. Each check is removed in turn, and the

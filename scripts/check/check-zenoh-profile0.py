@@ -81,6 +81,11 @@ requires the ten variants of it the profile keeps refusing, by name and class. T
 judge, the retained suites and the stock-peer exam are run beside it, so accepting the bare form
 cannot move a pinned refusal or a stock case.
 
+`--slice liveliness` judges liveliness tokens and the client role. The session declares and undeclares
+tokens, holds the peer's, answers an INTEREST for tokens with one DECLARE_TOKEN each and a DeclareFinal,
+and sends INIT as a Client. `scripts/lib/zenoh_wire.py` first reproduces 16 batches the upstream
+eclipse-zenoh 1.0.0 encoder wrote, then the frames the session wrote. Router stays refused.
+
 `--slice subscribers` judges a session that holds several subscriptions of its own. The session held
 exactly one, whatever the link was declared with; it now holds as many as its parameters say. The exam
 declares three, delivers to each key, undeclares one and keeps the others, reuses the freed slot,
@@ -115,6 +120,7 @@ from typing import NoReturn
 import devloop_observations
 import zenoh_exchange
 import zenoh_links_exam
+import zenoh_liveliness_exam
 import zenoh_grants_exam
 import zenoh_client_exam
 import zenoh_client_abort_exam
@@ -1865,6 +1871,56 @@ def subscribers_main(controls_only: bool) -> int:
     return 0
 
 
+LIVELINESS_FILTER = "zenoh_liveliness::"
+# The exam's own Rust test, by name: a filter that matches nothing passes silently.
+LIVELINESS_TESTS = ("zenoh_liveliness::the_liveliness_exam",)
+assert len(LIVELINESS_TESTS) == 1
+
+
+def run_liveliness() -> list[str]:
+    # Roles and tokens change what INIT may say and which declarations a frame may carry, so the stock-peer
+    # exam and the links exam run beside this one and must still pass unchanged.
+    stock_fixtures()
+    STOCK_FIXTURES.parent.mkdir(parents=True, exist_ok=True)
+    STOCK_FIXTURES.write_text(zenoh_stock_peer.fixture_zti())
+    try:
+        zenoh_links_exam.judge(run_links())
+    except zenoh_links_exam.LinksError as error:
+        fail(str(error))
+    stdout, output = cargo_tests((LIVELINESS_FILTER,), {**_os.environ})
+    passed = tests_passed(output)
+    missing = [name for name in LIVELINESS_TESTS if name not in passed]
+    if missing:
+        fail(f"liveliness: the exam's tests did not run and pass ({len(missing)} of {len(LIVELINESS_TESTS)}): {', '.join(missing[:4])}")
+    return exam_lines(stdout)
+
+
+def liveliness_main(controls_only: bool) -> int:
+    neighbour_controls(subscribers=True)
+    if all(name in tests_passed("") for name in LIVELINESS_TESTS):
+        fail("control: a run with the liveliness exam test missing was read as complete")
+    try:
+        refused_controls = zenoh_liveliness_exam.all_controls()
+        positive, refusals = zenoh_liveliness_exam.judge(zenoh_liveliness_exam.good_lines())
+    except zenoh_liveliness_exam.LivelinessError as error:
+        fail(str(error))
+    if positive + refusals != zenoh_liveliness_exam.PINNED_CASES:
+        fail(f"liveliness: an honest transcript is {positive + refusals} cases, the checker pins {zenoh_liveliness_exam.PINNED_CASES}")
+    if refused_controls != zenoh_liveliness_exam.PINNED_CONTROLS:
+        fail(f"liveliness: {refused_controls} controls, the checker pins {zenoh_liveliness_exam.PINNED_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 liveliness judge: refused {refused_controls} corrupted records")
+        return 0
+    try:
+        cases, refusals = zenoh_liveliness_exam.judge(run_liveliness())
+    except zenoh_liveliness_exam.LivelinessError as error:
+        fail(str(error))
+    print(f"[zenoh-profile0] slice=liveliness cases={cases} refusals={refusals} controls={refused_controls}")
+    devloop_observations.record(casesObserved=cases + refusals, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 liveliness check: the session holds liveliness tokens, answers a token interest and takes the client role")
+    return 0
+
+
 def grants_main(controls_only: bool) -> int:
     try:
         refused_controls = zenoh_grants_exam.all_controls()
@@ -2536,7 +2592,7 @@ def composition_main(controls_only: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "subscribers", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "limits", "service-component", "service-booted", "service", "service-link"), required=True)
+    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "subscribers", "liveliness", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "limits", "service-component", "service-booted", "service", "service-link"), required=True)
     parser.add_argument("--controls-only", action="store_true")
     arguments = parser.parse_args()
     if arguments.slice == "composition":
@@ -2551,6 +2607,8 @@ def main() -> int:
         return undeclare_main(arguments.controls_only)
     if arguments.slice == "subscribers":
         return subscribers_main(arguments.controls_only)
+    if arguments.slice == "liveliness":
+        return liveliness_main(arguments.controls_only)
     if arguments.slice == "grants":
         return grants_main(arguments.controls_only)
     if arguments.slice == "client":
