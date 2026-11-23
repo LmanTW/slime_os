@@ -311,25 +311,35 @@ What is shown under QEMU: one boot of this composition. In it `alpha` published 
 The peer received all four once. The service refused `beta`'s publish, and every instance exited with status 0.
 `just zenoh_service_peer_check` judges the peer's lines beside the service's.
 
+The composition `sel4-zenoh-service-four` (generation 174) runs the service, the peer and four holders. `alpha` may publish the
+exchange key. `beta` holds one row and subscribes to it. `gamma` and `delta` each hold two rows: the command key as row 0 and the
+exchange key as row 1. A delivery to `gamma` or `delta` therefore names row 1, and the booted judge resolves that row against the
+grants of the composition. The peer declares one subscriber. Its session takes up to three subscriptions from the service,
+because the service declares one subscription for each distinct subscribe key. The system spec pins the provision
+endpoints of `delta` and `gamma` at slots 28 and 27 of the service. A boot without those pins refused the loan to `delta`. The
+cause is not isolated. In one boot of this composition `alpha` published four samples, each reached three holders, and the peer
+received each once. The service refused `beta`'s publish once, and every instance exited with status 0.
+`just zenoh_service_four_check` judges it.
+
 What is shown on the host only: a host test of the server half runs a second server, core and link after the first run ended.
 It also sends 28 malformed requests and stalls the link. A second run repeats the first. A malformed request changes no ring,
 session or stream byte. A publication that the stream does not take is answered `link-closed`. A stream that takes one byte in
 two offers leaves the link open after 16 refused offers. The holder is told the publication failed, although the frame stays
 queued. No test shows whether a later pump delivers it. A host test of the roster replays
 eight scripted scenarios of a holder that dies, never attaches or never detaches. A host test measures the stack. At the built
-size of 2 holders and 2 rows the need is about 23100 bytes. At 4 holders, 6 rows and 64-byte samples it is about 26100 bytes.
+size of 4 holders and 6 rows the need is about 24900 bytes. At 4 holders, 6 rows and 64-byte samples it is about 26100 bytes.
 The declared stack is 32768 bytes. The measured depth of the call path varies by tens of bytes between runs, and the judge
 bounds it and does not pin it. The measurement is a debug build on x86_64 and covers the frames of the core, the link, the
 server and the arrays of `main`.
 
-What is not shown: a second boot, a malformed request from a holder component, or a stalled link under QEMU. No boot has a
+What is not shown: a second boot, a boot with more than four holders, a malformed request from a holder component, or a stalled link under QEMU. No boot has a
 holder that faults, because the composition declares no supervision binding for a holder. The release of a reclaimed holder's
 loans, ring and data page is not graded. The stack depth on seL4 is not measured, and neither is the stack of the network
 attachment, `holders::serve` or `holders::drive`.
 
 Known limits of the component:
 
-- It is built for at most two holders and two rows. It refuses a table above that, and it serves a table below it.
+- It is built for at most four holders and six rows. It refuses a table above that, and it serves a table below it.
 - A settled holder gets no answer once every holder has settled, because the service returns when the roster is done.
   No boot shows a settled holder sending. The judge shows only that the statements which cleared the endpoints are gone.
 - A configuration judged by `contracts/zenoh-link-limits/v1` cannot declare more than one local subscription. Version 3 of
