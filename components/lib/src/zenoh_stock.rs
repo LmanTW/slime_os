@@ -66,23 +66,7 @@ fn captured(name: &str) -> Vec<u8> {
 
 /// The refusal class name the exam pins for an error: the decoder's own, or the session's.
 fn class_of(error: SessionError) -> &'static str {
-    match error {
-        SessionError::Decode(refusal) => refusal.name(),
-        SessionError::SubscriberLimit => "subscriber-limit",
-        SessionError::UnknownSubscriber => "unknown-subscriber",
-        SessionError::TooManyMessages => "too-many-messages",
-        SessionError::UnexpectedMessage => "unexpected-message",
-        SessionError::UndeclaredKey => "undeclared-key",
-        SessionError::SequenceMismatch => "sequence-mismatch",
-        SessionError::CookieMismatch => "cookie-mismatch",
-        SessionError::NotOpen => "not-open",
-        SessionError::Closed => "closed",
-        SessionError::InvalidConfig => "invalid-config",
-        SessionError::Encode(_) => "encode",
-        SessionError::Fragment(error) => error.class(),
-        SessionError::OutOfMemory => "out-of-memory",
-        SessionError::NeedsFragments => "needs-fragments",
-    }
+    error.class()
 }
 
 #[derive(Debug, PartialEq, Eq)]

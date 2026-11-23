@@ -576,23 +576,7 @@ impl GraphError {
     pub fn class(self) -> &'static str {
         match self {
             Self::UnknownDeclaration => "unknown-declaration",
-            Self::Session(error) => match error {
-                SessionError::Decode(refusal) => refusal.name(),
-                SessionError::SubscriberLimit => "subscriber-limit",
-                SessionError::UnknownSubscriber => "unknown-subscriber",
-                SessionError::TooManyMessages => "too-many-messages",
-                SessionError::UnexpectedMessage => "unexpected-message",
-                SessionError::UndeclaredKey => "undeclared-key",
-                SessionError::SequenceMismatch => "sequence-mismatch",
-                SessionError::CookieMismatch => "cookie-mismatch",
-                SessionError::NotOpen => "not-open",
-                SessionError::Closed => "closed",
-                SessionError::InvalidConfig => "invalid-config",
-                SessionError::Encode(_) => "encode",
-                SessionError::Fragment(error) => error.class(),
-                SessionError::OutOfMemory => "out-of-memory",
-                SessionError::NeedsFragments => "needs-fragments",
-            },
+            Self::Session(error) => error.class(),
         }
     }
 }

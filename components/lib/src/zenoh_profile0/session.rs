@@ -171,6 +171,9 @@ pub enum SessionError {
     OutOfMemory,
     /// A Put too large for one frame, which a session that fragments sends as fragments.
     NeedsFragments,
+    /// A first fragment on a reliable lane while every run the session holds is open. A best-effort lane
+    /// drops the fragment instead.
+    LaneLimit,
 }
 
 impl SessionError {
@@ -192,6 +195,7 @@ impl SessionError {
             Self::Fragment(error) => error.class(),
             Self::OutOfMemory => "out-of-memory",
             Self::NeedsFragments => "needs-fragments",
+            Self::LaneLimit => "lane-limit",
         }
     }
 }

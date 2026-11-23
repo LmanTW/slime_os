@@ -182,3 +182,35 @@ fn the_run_count_is_at_most_sixteen() {
     );
     assert_eq!(PEER_ZID.len(), 3);
 }
+
+#[test]
+fn every_session_error_has_one_class_and_the_new_one_is_lane_limit() {
+    use super::super::fragment::FragmentError;
+    use crate::zenoh_profile0::graph::GraphError;
+    let errors = [
+        (SessionError::Decode(Refusal::OverBound), "over-bound"),
+        (SessionError::Encode(EncodeError::EmptyFrame), "encode"),
+        (SessionError::InvalidConfig, "invalid-config"),
+        (SessionError::Closed, "closed"),
+        (SessionError::NotOpen, "not-open"),
+        (SessionError::UnexpectedMessage, "unexpected-message"),
+        (SessionError::CookieMismatch, "cookie-mismatch"),
+        (SessionError::SequenceMismatch, "sequence-mismatch"),
+        (SessionError::SubscriberLimit, "subscriber-limit"),
+        (SessionError::UnknownSubscriber, "unknown-subscriber"),
+        (SessionError::UndeclaredKey, "undeclared-key"),
+        (SessionError::TooManyMessages, "too-many-messages"),
+        (
+            SessionError::Fragment(FragmentError::ReassemblyTimeout),
+            "reassembly-timeout",
+        ),
+        (SessionError::OutOfMemory, "out-of-memory"),
+        (SessionError::NeedsFragments, "needs-fragments"),
+        (SessionError::LaneLimit, "lane-limit"),
+    ];
+    for (error, class) in errors {
+        assert_eq!(error.class(), class);
+        // The graph session reports a session error by the same class, from the same list.
+        assert_eq!(GraphError::Session(error).class(), class);
+    }
+}
