@@ -7,6 +7,7 @@
 //! `scripts/lib/zenoh_rmw_client_put_exam.py` judges; each is printed after the assertions of its scenario passed.
 
 use super::*;
+use crate::zenoh_profile0::Bounds;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
@@ -423,4 +424,63 @@ fn encode_peer_open_ack() -> Vec<u8> {
     let mut out = [0u8; MAX_BATCH_BYTES];
     let len = encode::open_ack(&mut out, 30_000, 9).expect("an OPEN_ACK");
     out[..len].to_vec()
+}
+
+/// A heap link, which can write a Put in fragments. Its payload bound is large enough that one Put needs several.
+type HeapLink = LinkOf<Scripted, DEMO_FRAMED, 1, 2, MAX_KEY_BYTES, 0, 4, MAX_EVENTS>;
+
+fn heap_params() -> Params {
+    Params {
+        fragments: true,
+        timeout_ms: 5000,
+        message_limit: 4096,
+        bounds: Bounds {
+            payload: 1024,
+            ..Bounds::DEMO
+        },
+        samples: 2,
+        ..Params::DEMO
+    }
+}
+
+/// A Put in fragments keeps the declared-key check for a client-role session too: no exam observes a client writing
+/// fragments, so that path does not change. This test does not print an exam line.
+#[test]
+fn a_client_role_fragment_keeps_the_declared_key_check() {
+    let rx = Rc::new(RefCell::new(Pipe::default()));
+    let wrote = Rc::new(RefCell::new(Vec::new()));
+    let io = Scripted {
+        rx: rx.clone(),
+        wrote: wrote.clone(),
+        budget: Rc::new(RefCell::new(None)),
+    };
+    let mut link = HeapLink::with_params(io, Role::Connector, &config(&[]), heap_params(), 1)
+        .expect("a heap link")
+        .with_client_role()
+        .expect("a connector takes the client role");
+    let handle = link.handle();
+    link.open(handle, 0).expect("the INIT_SYN is queued");
+    for _ in 0..8 {
+        link.pump(handle, 0).expect("the link takes the stream");
+    }
+    let mut ack = [0u8; MAX_BATCH_BYTES];
+    let len = encode::init_ack(&mut ack, &[0x10; 8], 512, &[0xc0; 8]).expect("an INIT_ACK");
+    // A client takes only a router's INIT_ACK, so the packed byte is rewritten to whatami 0.
+    ack[2] &= !3;
+    rx.borrow_mut().bytes.extend(framed(&ack[..len]));
+    for _ in 0..8 {
+        link.pump(handle, 0).expect("the link takes the stream");
+    }
+    let mut open_ack = [0u8; MAX_BATCH_BYTES];
+    let len = encode::open_ack(&mut open_ack, 60_000, 9).expect("an OPEN_ACK");
+    rx.borrow_mut().bytes.extend(framed(&open_ack[..len]));
+    for _ in 0..8 {
+        link.pump(handle, 0).expect("the link takes the stream");
+    }
+    assert_eq!(link.session().state(), State::Open);
+    let payload = std::vec![0x5a; 900];
+    let error = link
+        .publish_part(handle, KEY, &attachment(0), &payload, 0)
+        .expect_err("a fragment on a key the peer did not declare");
+    assert_eq!(error, Error::Session(SessionError::UndeclaredKey));
 }
