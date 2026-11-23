@@ -421,6 +421,16 @@ zenoh_service_stack_check:
 zenoh_link_v3_reader_check:
     python3 scripts/check/check-zenoh-profile0.py --slice link-v3-reader
 
+# Judges the TLS dependency of the Zenoh transport before any link uses it. `slime-components` must build for
+# aarch64-unknown-none with and without its `tls` feature, `cargo deny check` must report no error under the policy of
+# `deny.toml` as it stood when the exam was written, and only the component library may declare the TLS crates, as
+# optional dependencies that no workspace member enables. The expectation is scripts/lib/zenoh_tls_dependency_exam.py.
+# It needs the crates from a registry, so the recipe is explicit and in no aggregate. It fails until a TLS stack
+# builds and passes `cargo deny`.
+[group('hardware')]
+zenoh_tls_dependency_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice tls-dependency
+
 # Judges what the Zenoh service does with a holder that faults or never detaches. A reference model of the holder roster
 # writes every line of eight scripted scenarios, and the Rust test must print them. The service reclaims a holder whose
 # task the root reports dead, expires a holder that has not detached when the wait ends, refuses a reclaimed holder every

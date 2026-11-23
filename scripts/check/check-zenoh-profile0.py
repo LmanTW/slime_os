@@ -153,6 +153,7 @@ import zenoh_grading_exam
 import zenoh_server_exam
 import zenoh_holder_fault_exam
 import zenoh_lost_holder_exam
+import zenoh_tls_dependency_exam
 import zenoh_service_arm
 import zenoh_service_component_exam
 import zenoh_service_four_exam
@@ -3988,6 +3989,36 @@ def holder_fault_main(controls_only: bool) -> int:
     return 0
 
 
+def tls_dependency_main(controls_only: bool) -> int:
+    """The TLS stack builds for the bare-metal target, passes `cargo deny` under the policy as it stands, and reaches only the
+    component library's optional feature. Every command runs once and the judge reads what it printed."""
+    exam = zenoh_tls_dependency_exam
+    try:
+        refused_controls = exam.all_controls()
+        item_cases, item_controls = exam.item_pins()
+    except exam.TlsError as error:
+        fail(f"tls-dependency: {error}")
+    if refused_controls != exam.CONTROLS:
+        fail(f"tls-dependency: {refused_controls} controls, the checker pins {exam.CONTROLS}")
+    if item_cases and item_cases != exam.CASES:
+        fail(f"tls-dependency: the item fixes {item_cases} cases, the checker pins {exam.CASES}")
+    if item_controls and item_controls != exam.CONTROLS:
+        fail(f"tls-dependency: the item requires {item_controls} controls, the checker pins {exam.CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 tls-dependency judge: refused {refused_controls} corrupted inputs")
+        return 0
+    try:
+        cases = exam.judge(exam.observe())
+    except exam.TlsError as error:
+        fail(f"tls-dependency: {error}")
+    if cases != exam.CASES:
+        fail(f"tls-dependency: the run observed {cases} cases, the checker pins {exam.CASES}")
+    print(f"[zenoh-profile0] slice=tls-dependency cases={cases} controls={refused_controls}")
+    devloop_observations.record(casesObserved=cases, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 tls-dependency check: a TLS stack builds no_std, passes cargo deny and reaches only the optional feature")
+    return 0
+
+
 def lost_holder_main(controls_only: bool) -> int:
     """The service keeps reading the control endpoint of a holder that settled, so the holder gets its denial. The judge
     reads `holders.rs` for the two lines that stop the read. The server half already answers a settled holder, and the
@@ -4019,7 +4050,7 @@ def lost_holder_main(controls_only: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-client", "rmw-router-link", "rmw-client-put", "rmw-token", "rmw-live", "rmw-discover", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "qos", "lanes", "link-limits-v3", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service-peer", "service-four", "service", "service-link", "holder-fault", "service-stack", "link-v3-reader", "lost-holder"), required=True)
+    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-client", "rmw-router-link", "rmw-client-put", "rmw-token", "rmw-live", "rmw-discover", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "qos", "lanes", "link-limits-v3", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service-peer", "service-four", "service", "service-link", "holder-fault", "service-stack", "link-v3-reader", "lost-holder", "tls-dependency"), required=True)
     parser.add_argument("--controls-only", action="store_true")
     arguments = parser.parse_args()
     if arguments.slice == "composition":
@@ -4108,6 +4139,8 @@ def main() -> int:
         return holder_fault_main(arguments.controls_only)
     if arguments.slice == "lost-holder":
         return lost_holder_main(arguments.controls_only)
+    if arguments.slice == "tls-dependency":
+        return tls_dependency_main(arguments.controls_only)
     refused_controls = controls(arguments.slice)
     if arguments.controls_only:
         print(f"zenoh profile 0 {arguments.slice} judge: refused {refused_controls} corrupted transcripts")

@@ -1,0 +1,66 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a2099c-3fd1-727a-9943-3bad1d9e3370" "zenoh-tls-dependency" "zenoh-transport"
+  "A TLS stack builds no_std and passes cargo deny before any Zenoh link uses it"
+  "The TLS slice of `docs/decisions/zenoh-link-transports.md` starts only when a TLS stack builds `no_std` and passes `just deny`. The repository holds no TLS crate. A probe outside the repository built `rustls` 0.23.46 with `rustls-rustcrypto` for `aarch64-unknown-none`. `cargo deny` refused that graph. It named advisories in `rustls-webpki`, `rsa` and `crypto-bigint`, one on `paste`, and the Zlib license of `foldhash`. No combination of crates passes today, so this item holds the slice.")
+  with {
+    intent = #planned;
+    owns = {
+      "components/lib/Cargo.toml";
+      "Cargo.lock";
+      "components/lib/src/zenoh_tls*";
+    };
+    nonGoals = {
+      h.nonGoal "A TLS handshake, a TLS link, a certificate check or a session over TLS. This item adds a dependency and shows that it builds and passes `cargo deny`." h.agentDefault;
+      h.nonGoal "Any change to `deny.toml`. The exam pins its license allow list, skip-tree list and git sources, and it requires no advisory ignore and no ban skip." h.agentDefault;
+      h.nonGoal "A build for `x86_64-unknown-none`. `slime-components` does not build there today, because `sha2` fails in LLVM with `Do not know how to split the result of this operator!`." h.agentDefault;
+      h.nonGoal "A build for the seL4 JSON targets, and a component that enables the `tls` feature." h.agentDefault;
+      h.nonGoal "The serial link and the validation time of a certificate. Each has its own item." h.agentDefault;
+    };
+    requirements = {
+      h.req "the-feature-builds"
+        "`slime-components` builds for `aarch64-unknown-none` with `--no-default-features`, both with and without its `tls` feature."
+        { "zenoh_tls_dependency_check"; };
+      h.req "deny-passes-unchanged"
+        "`cargo deny check` reports no error in advisories, bans, licenses or sources. `deny.toml` holds the license allow list, skip-tree list and git sources the exam pins, with no advisory ignore and no ban skip."
+        { "zenoh_tls_dependency_check"; };
+      h.req "only-the-library-declares-tls"
+        "Only `slime-components` declares `rustls` and `getrandom`, each optional with default features off, and `getrandom` enables `custom`. The `tls` feature is off by default and no workspace member enables it."
+        { "zenoh_tls_dependency_check"; };
+      h.req "the-default-graph-holds-no-tls-crate"
+        "The workspace graph without the `tls` feature holds none of `rustls`, `rustls-webpki`, `rustls-rustcrypto`, `getrandom`, `ring`, `aws-lc-rs` or `aws-lc-sys`."
+        { "zenoh_tls_dependency_check"; };
+      h.req "the-tls-graph-needs-no-c-toolchain"
+        "The graph with the `tls` feature holds `rustls` and `getrandom`, and holds none of `ring`, `aws-lc-rs`, `aws-lc-sys`, `openssl`, `openssl-sys` or `native-tls`."
+        { "zenoh_tls_dependency_check"; };
+      h.req "controls-are-refused"
+        "The judge refuses 53 inputs: 42 corrupted observations and 11 corrupted outputs of `cargo deny`, `cargo tree` and `cargo metadata`."
+        { "zenoh_tls_dependency_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_tls_dependency_check" {
+        h.count "casesObserved" 24;
+        h.count "negativeControlsRefused" 53;
+      };
+    };
+    decisions = {
+      h.decided "a-passing-deny-is-the-exit"
+        "The item is done only when `just deny` passes with the dependency in the graph, and `deny.toml` gains no entry for it."
+        "the owner chose a passing `just deny` as the exit condition, and `deny.toml` guards the verified-boot trust chain"
+        (h.fromDecision "docs/decisions/zenoh-link-transports.md")
+        { "deny-passes-unchanged"; };
+      h.decided "the-policy-is-pinned-by-value"
+        "The exam pins the license allow list, the skip-tree list and the git sources by value. A new license, skip or source fails the exam, and so does an advisory ignore or a ban skip."
+        "a license allow for the dependency's graph would pass `just deny` without a decision by the owner. The owner did not answer whether such an entry is acceptable, so the exam refuses it"
+        h.agentDefault
+        { "deny-passes-unchanged"; };
+      h.decided "build-for-aarch64-only"
+        "The exam builds for `aarch64-unknown-none` only."
+        "`slime-components` fails to build for `x86_64-unknown-none` on `sha2` before this item, and a build that fails for that reason says nothing about the TLS crates"
+        h.agentDefault
+        { "the-feature-builds"; };
+    };
+  };
+
+item
