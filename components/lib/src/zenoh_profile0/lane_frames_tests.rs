@@ -1247,3 +1247,122 @@ fn a_tick_that_writes_a_keep_alive_reports_the_drop_of_a_late_best_effort_run_to
     assert_eq!(spell(due.events.iter()), ["drop reassembly-timeout"]);
     assert!(!receiver.reassembling());
 }
+
+/// A receiver with one event slot and two runs, open and subscribed, with a lease no test clock reaches.
+type OneSlot = SessionOf<1, 2, MAX_KEY_BYTES, 1, 2>;
+
+fn one_slot_receiver() -> OneSlot {
+    let mk = |role, zid: &[u8; 8], sn, cookie: &[u8]| {
+        OneSlot::with_lanes(
+            role,
+            &Config {
+                zid,
+                lease_ms: 1_000_000,
+                initial_sn: sn,
+                cookie,
+            },
+            Params {
+                events: 1,
+                ..heap_params()
+            },
+            2,
+        )
+        .expect("session")
+    };
+    let mut a = mk(Role::Connector, &[0xa1; 8], 100, &[]);
+    let mut b = mk(Role::Listener, &[0xb2; 8], SN0, &[0xc0; 8]);
+    let mut out = [0u8; MAX_BATCH_BYTES];
+    let syn = a.connect(0, &mut out).expect("c").batch(&out).to_vec();
+    let ack = b
+        .on_batch(&syn, 1, &mut out)
+        .expect("s")
+        .batch(&out)
+        .to_vec();
+    let osyn = a
+        .on_batch(&ack, 2, &mut out)
+        .expect("a")
+        .batch(&out)
+        .to_vec();
+    let oack = b
+        .on_batch(&osyn, 3, &mut out)
+        .expect("o")
+        .batch(&out)
+        .to_vec();
+    a.on_batch(&oack, 4, &mut out).expect("oa");
+    let decl = b
+        .send_declare_subscriber(1, KEY, &mut out)
+        .expect("d")
+        .batch(&out)
+        .to_vec();
+    a.on_batch(&decl, 5, &mut out).expect("l");
+    b
+}
+
+#[test]
+fn a_drop_never_costs_the_delivery_of_a_frame_that_fills_the_events() {
+    let mut receiver = one_slot_receiver();
+    let mut cells = Cells::new();
+    let mut out = [0u8; MAX_BATCH_BYTES];
+    let parts = fragments_lane(false, 2, 100, 300);
+    receiver
+        .on_lane_fragment(&parts[0], 10, &mut cells.cells[0])
+        .expect("first");
+    // The FRAME carries one Put and the session has one event slot, so the drop of the run has no room.
+    let frame = lane_frame(false, 2, 101, &put_body(1));
+    let taken = receiver
+        .on_batch_with(&frame, 11, &mut out, &mut cells.cells[1])
+        .expect("a FRAME that fills the events is delivered");
+    assert_eq!(spell(taken.events.iter()), ["sample"]);
+    assert!(!receiver.reassembling(), "the run is gone either way");
+    assert_eq!(receiver.lane_next(best_effort(2)), 102);
+}
+
+#[test]
+fn a_drop_never_costs_a_failed_frame_its_own_drop() {
+    let mut receiver = one_slot_receiver();
+    let mut cells = Cells::new();
+    let mut out = [0u8; MAX_BATCH_BYTES];
+    let parts = fragments_lane(false, 2, 100, 300);
+    receiver
+        .on_lane_fragment(&parts[0], 10, &mut cells.cells[0])
+        .expect("first");
+    // A FRAME of garbage is dropped as `completed`, and that report outranks the one for the run it ended.
+    let frame = lane_frame(false, 2, 101, &[0xff, 0xff]);
+    let taken = receiver
+        .on_batch_with(&frame, 11, &mut out, &mut cells.cells[1])
+        .expect("a best-effort FRAME that fails is a drop");
+    let seen = spell(taken.events.iter());
+    assert_eq!(seen.len(), 1);
+    assert!(seen[0].starts_with("drop completed:"), "{seen:?}");
+    assert!(!receiver.reassembling());
+}
+
+#[test]
+fn late_best_effort_runs_are_released_when_the_events_have_room_for_one_report() {
+    let mut receiver = one_slot_receiver();
+    let mut cells = Cells::new();
+    let mut out = [0u8; MAX_BATCH_BYTES];
+    for (priority, cell) in [(2u8, 0usize), (3, 1)] {
+        let parts = fragments_lane(false, priority, 100, 300);
+        receiver
+            .on_lane_fragment(&parts[0], 1000, &mut cells.cells[cell])
+            .expect("first");
+    }
+    let late = receiver
+        .tick(6001, &mut out)
+        .expect("a drop is not an error when the events are full");
+    assert_eq!(
+        late.events.len(),
+        1,
+        "one report fits, the other is not kept"
+    );
+    assert!(!receiver.reassembling(), "both runs are released");
+    // Both lanes discard their leftovers.
+    for priority in [2u8, 3] {
+        let parts = fragments_lane(false, priority, 100, 300);
+        let events = receiver
+            .on_lane_fragment(&parts[1], 6002, &mut cells.cells[0])
+            .expect("leftover");
+        assert_eq!(spell(events.events.iter()), ["drop discarded"]);
+    }
+}

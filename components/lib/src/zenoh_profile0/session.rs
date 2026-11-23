@@ -320,6 +320,22 @@ impl<'a, const E: usize> Events<'a, E> {
         Ok(())
     }
 
+    /// Adds a report that is the owner's to count: a drop. It takes a free slot and never displaces what the
+    /// session delivered, so a full list loses the report and not the message.
+    fn note(&mut self, event: Event<'a>) {
+        let _ = self.push(event);
+    }
+
+    /// Adds a report ahead of the events that follow it, when a slot is free.
+    fn note_first(&mut self, event: Event<'a>) {
+        if self.len >= E {
+            return;
+        }
+        self.items.copy_within(0..self.len, 1);
+        self.items[0] = Some(event);
+        self.len += 1;
+    }
+
     pub const fn len(&self) -> usize {
         self.len
     }
@@ -1296,17 +1312,13 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
         let mut used = 0;
         let mut events = Events::empty();
         // A whole FRAME on the best-effort lane of an open run ends the run. The run is dropped, and the FRAME is
-        // taken.
+        // taken. The drop is reported after the FRAME is applied, and only if a slot is left.
         let mut frame_ended_run = false;
         if !lane.reliable
             && let Some(slot) = self.slot_of(lane)
         {
             self.run_table[slot].release();
             frame_ended_run = true;
-            events.push(Event::Dropped {
-                priority: lane.priority,
-                cause: DropCause::FrameDuringRun,
-            })?;
         }
         let applied = match frame_of(header.sn, header.body, &self.params.bounds, false) {
             Ok(frame) => self.apply_frame(&frame, &mut journal, &mut used, &mut events),
@@ -1322,6 +1334,12 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
                 self.lane_sn[lane.index()] = header.sn.wrapping_add(1);
                 self.last_rx_ms = now_ms;
                 self.now_ms = now_ms;
+                if frame_ended_run {
+                    events.note_first(Event::Dropped {
+                        priority: lane.priority,
+                        cause: DropCause::FrameDuringRun,
+                    });
+                }
                 Ok(Outcome { sent: 0, events })
             }
             Err(error) if lane.reliable => {
@@ -1333,16 +1351,16 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
                 // The number was ahead, so the lane moves past it: the sender will not send it again.
                 self.lane_sn[lane.index()] = header.sn.wrapping_add(1);
                 let mut events = Events::empty();
-                if frame_ended_run {
-                    events.push(Event::Dropped {
-                        priority: lane.priority,
-                        cause: DropCause::FrameDuringRun,
-                    })?;
-                }
-                events.push(Event::Dropped {
+                events.note(Event::Dropped {
                     priority: lane.priority,
                     cause: DropCause::Completed(error.class()),
-                })?;
+                });
+                if frame_ended_run {
+                    events.note_first(Event::Dropped {
+                        priority: lane.priority,
+                        cause: DropCause::FrameDuringRun,
+                    });
+                }
                 Ok(Outcome { sent: 0, events })
             }
         }
@@ -1585,18 +1603,18 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
         if let Some(open) = slot.filter(|open| self.run_table[*open].expired(now_ms, timeout)) {
             self.run_table[open].release();
             self.discarding[index] = true;
-            events.push(dropped(DropCause::ReassemblyTimeout))?;
+            events.note(dropped(DropCause::ReassemblyTimeout));
             slot = None;
         }
         // The same measure as a FRAME: ahead of the last number taken by 1 to 2^31 - 1.
         if fragment.sn.wrapping_sub(self.lane_sn[index]) >= HALF - 1 {
-            events.push(dropped(DropCause::StaleSequence))?;
+            events.note(dropped(DropCause::StaleSequence));
             return Ok(Outcome { sent: 0, events });
         }
         self.lane_sn[index] = fragment.sn.wrapping_add(1);
         if self.discarding[index] {
             self.discarding[index] = fragment.more;
-            events.push(dropped(DropCause::Discarded))?;
+            events.note(dropped(DropCause::Discarded));
             return Ok(Outcome { sent: 0, events });
         }
         let broken = match slot {
@@ -1609,7 +1627,7 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
         };
         if let Some(cause) = broken {
             self.discarding[index] = fragment.more;
-            events.push(dropped(cause))?;
+            events.note(dropped(cause));
             return Ok(Outcome { sent: 0, events });
         }
         let open = slot
@@ -1632,7 +1650,7 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
             Ok(event) => events.push(event)?,
             Err(error) => {
                 self.discarding[index] = fragment.more;
-                events.push(dropped(DropCause::Completed(error.class())))?;
+                events.note(dropped(DropCause::Completed(error.class())));
             }
         }
         Ok(Outcome { sent: 0, events })
@@ -1730,10 +1748,10 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
                 late = true;
             } else {
                 self.discarding[lane.index()] = true;
-                events.push(Event::Dropped {
+                events.note(Event::Dropped {
                     priority: lane.priority,
                     cause: DropCause::ReassemblyTimeout,
-                })?;
+                });
             }
         }
         if late {
