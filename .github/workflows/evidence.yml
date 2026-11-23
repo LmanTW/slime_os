@@ -6,9 +6,12 @@
 # and an area requirement, an #active item or a terminal item binds it. A
 # #planned item's exam is never run. `plan` balances the claimed targets
 # over at most 8 shards by observed wall time (specs/targets.toml). Each
-# shard records and signs its targets; `publish` gathers them and pushes
-# once, serialised by the concurrency group, retrying once after a
-# non-fast-forward.
+# shard names one host class, and `record` maps the class to a runner:
+# `aarch64` unless specs/targets.toml lists the target under another class.
+# A class with no entry in that map leaves the shard without a runner, so
+# the shard fails instead of running on the wrong host. Each shard records
+# and signs its targets; `publish` gathers them and pushes once, serialised
+# by the concurrency group, retrying once after a non-fast-forward.
 #
 # `witness` then signs a done witness for every #active item whose
 # mandatory acceptances are all enforced, and `closeout` opens one pull
@@ -62,10 +65,10 @@ jobs:
           echo "shards=$(cat "$RUNNER_TEMP/shards.json")" >> "$GITHUB_OUTPUT"
 
   record:
-    name: Record shard ${{ matrix.shard }}
+    name: Record shard ${{ matrix.shard }} (${{ matrix.host }})
     needs: [plan]
     if: needs.plan.outputs.shards != '[]'
-    runs-on: ubuntu-24.04-arm
+    runs-on: ${{ fromJSON('{"aarch64":"ubuntu-24.04-arm","x86_64":"ubuntu-24.04"}')[matrix.host] }}
     # The signing key lives in this environment, whose deployment branch
     # policy admits main only: a workflow edited on a branch cannot reach it.
     environment: evidence

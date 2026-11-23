@@ -154,7 +154,8 @@ an area requirement that is neither planned nor superseded, an `#active` item,
 or a terminal item nobody superseded.
 
 1. It runs each claimed target under `scripts/spec/record`, sharded by the
-   wall times in `specs/targets.toml`.
+   wall times in `specs/targets.toml`. A shard runs on an AArch64 runner,
+   unless `[host]` in that file lists its targets under another host class.
 2. It signs each record as `ci` and commits it to the `evidence` branch at
    `<target>/<closureDigest>.zt`.
 3. It signs a done witness at `done/<item id>/<digest>.zt` for each `#active`
@@ -173,6 +174,12 @@ Run the same steps locally:
 | `just spec_closure` | Prints the closure digest of every bound target. |
 | `just spec_status` | Prints each area requirement's state: enforced, failing, claimed, advisory or superseded. `--local` also reads `build/observations/`. |
 | `just spec_tasks_status` | Prints each item's state from the `evidence` branch. |
+
+A target under `[host]` in `specs/targets.toml` needs a host class other than
+AArch64. The x86-64 recipes that build a pc99 image are listed there, because
+`flake.nix` supplies the pinned OVMF and GRUB on `x86_64-linux` only. Add a new
+target of that kind to the list in the process PR that precedes its first
+record.
 
 A target under `operator` in `specs/targets.toml` needs hardware CI does not
 have. An operator in `specs/allowed_signers` runs it and signs the record:

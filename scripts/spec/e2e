@@ -232,9 +232,32 @@ def build(root: Path, keys: Path) -> Fixture:
     return fixture
 
 
+def plan_hosts(f: Fixture) -> None:
+    """`ci --plan` gives each shard the host class `specs/targets.toml` lists its targets under."""
+    facts = f.root / "specs" / "targets.toml"
+
+    def shards() -> tuple[list, str]:
+        done = f.spec("ci", "--plan", "4")
+        try:
+            return json.loads(done.stdout), done.stdout + done.stderr
+        except json.JSONDecodeError:
+            return [], done.stdout + done.stderr
+
+    rows, detail = shards()
+    ok(rows == [{"shard": "0", "host": "aarch64", "targets": "area_exam"}], "an unlisted target is planned on the aarch64 host class", detail)
+    f.write("specs/targets.toml", '[host]\nx86_64 = ["area_exam"]\n')
+    rows, detail = shards()
+    ok(rows == [{"shard": "0", "host": "x86_64", "targets": "area_exam"}], "a target listed under a host class is planned on that class", detail)
+    f.write("specs/targets.toml", '[host]\nx86_64 = ["area_exam"]\nriscv64 = ["area_exam"]\n')
+    done = f.spec("ci", "--plan", "4")
+    ok(done.returncode != 0 and "under" in done.stdout + done.stderr, "a target listed under two host classes is refused", done.stdout + done.stderr)
+    facts.unlink()
+
+
 def m1_planning(f: Fixture) -> None:
     done = f.spec("check")
     ok(done.returncode == 0, "check passes on the fixture", done.stdout + done.stderr)
+    plan_hosts(f)
     done = f.spec("ci", "--signer", "ci", "--key", f.sign_key("ci"))
     ok(done.returncode == 0 and f.records("area_exam") == 1, "an area target gets a record on the evidence branch", done.stdout + done.stderr)
     listing = f.run("git", "ls-tree", "--name-only", "refs/heads/evidence:area_exam", check=False).stdout.split()

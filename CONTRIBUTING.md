@@ -141,7 +141,10 @@ published.
 A `#human` acceptance stays open until a person listed in
 `specs/allowed_signers` answers it with `scripts/spec/human`. The answer is
 signed and bound to the item's requirements digest, so a reworded statement
-asks again. Automation never infers an answer. Targets CI cannot run, such as
+asks again. Automation never infers an answer. The `Evidence` workflow records
+a target on an AArch64 runner, unless `[host]` in `specs/targets.toml` lists it
+under another host class, as it does the x86-64 recipes that build a pc99
+image. Targets CI cannot run, such as
 board and physical-machine boots, are listed under `operator` in
 `specs/targets.toml`, and an operator signs their records with
 `scripts/spec/record <target> --signer <principal>`.

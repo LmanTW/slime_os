@@ -22,10 +22,26 @@ operator = [
   "zenoh_rmw_live_check",
 ]
 
+# `host`: targets the default `aarch64` host class cannot run, by the class
+# they need. `ci --plan` gives every shard one class, and the workflow maps a
+# class to a runner. Each of these builds a pc99 image, and
+# `scripts/lib/pc99_media.py` refuses to assemble one without the pinned OVMF
+# and GRUB. `flake.nix` supplies both on `x86_64-linux` only.
+# `x86_64_component_link_check` is the exam of the item
+# `x86-64-component-link`, whose planning pull request adds the recipe.
+[host]
+x86_64 = [
+  "framework_media_check",
+  "x86_64_component_link_check",
+  "x86_64_qemu_check",
+  "x86_64_sel4_image_check",
+  "x86_64_sel4_root_boot_check",
+]
+
 # Observed wall time in seconds on the ubuntu-24.04-arm runner, as
 # `scripts/spec/record` printed it in the first full evidence run
 # (2026-11-07, 8 shards); balances evidence shards. A missing target
-# counts as 600.
+# counts as 600. No x86_64 target has an observed time yet.
 [wall_time]
 clock_direct_read_check = 871
 closure_derivation_check = 1503

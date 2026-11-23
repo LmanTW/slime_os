@@ -238,7 +238,9 @@ After the planning PR merges and the item is `#active`, the `Evidence`
 workflow runs the bound recipe on `main`. It writes a signed record to the
 `evidence` branch, keyed by the recipe's closure digest. Locally,
 `just spec_record widget_check` runs the recipe the same way and writes
-`build/observations/widget_check.zt`. A target listed under `operator` in
+`build/observations/widget_check.zt`. The workflow runs a target on an AArch64
+runner, unless `[host]` in `specs/targets.toml` lists it under another host
+class. A target listed under `operator` in
 `specs/targets.toml` needs hardware CI does not have. An operator runs it with
 `scripts/spec/record <target> --signer <principal> --key <key>`.
 
