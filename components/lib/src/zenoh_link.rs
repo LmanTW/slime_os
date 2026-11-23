@@ -25,6 +25,10 @@ mod tests;
 #[path = "zenoh_link/router_tests.rs"]
 mod router_tests;
 
+#[cfg(test)]
+#[path = "zenoh_link/put_tests.rs"]
+mod put_tests;
+
 /// Consecutive stalled sends tolerated before the link gives up; the demo contract's `maxRetries`.
 pub const MAX_RETRIES: u32 = 3;
 /// The framed size of the first release's batch.

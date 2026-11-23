@@ -1606,17 +1606,20 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize> SessionOf<K
         Ok(outcome)
     }
 
-    /// Whether the peer declared a subscriber on `key`, which a Put must name.
+    /// Whether a Put may be written on `key`. A session with no client role needs the peer to have declared a
+    /// subscriber on it. A router declares none to a client, so a session with the client role writes on any key
+    /// that validates.
     fn check_put(
         &self,
         key: &str,
         attachment: &[u8],
         payload_len: usize,
     ) -> Result<(), SessionError> {
-        if self
-            .subs
-            .find_by(|id, held| id & LOCAL == 0 && held == key.as_bytes())
-            .is_none()
+        if !self.client
+            && self
+                .subs
+                .find_by(|id, held| id & LOCAL == 0 && held == key.as_bytes())
+                .is_none()
         {
             return Err(SessionError::UndeclaredKey);
         }

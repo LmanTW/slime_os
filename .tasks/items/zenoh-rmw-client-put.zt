@@ -5,6 +5,7 @@ item :: s.Item = (h.task "01a20383-8a5a-7199-bc29-a7202dc774b5" "zenoh-rmw-clien
   "A Profile 0 link with the client role writes a Put with no declaration from its peer"
   "A session refuses a Put on a key its peer did not declare, as `undeclared-key`. A router declares no subscription to a client. A client-role link can therefore subscribe through a router and receive, and it cannot publish. A host probe of a Slime client behind `rmw_zenohd` wrote Puts with the Python wire library, and a ROS `listener` printed them. The Rust link has no path that writes those bytes.")
   with {
+    intent = #active;
     owns = {
       "components/lib/src/zenoh_profile0.rs";
       "components/lib/src/zenoh_profile0/**";
