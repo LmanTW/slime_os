@@ -42,9 +42,9 @@
     qos = "none";
   };
   test = {
-    testCondition = "the zenoh_service_booted_check gate boots the sel4-zenoh-service composition";
+    testCondition = "the zenoh_service_four_check gate boots the sel4-zenoh-service-four composition";
     expectedResult = "the subscriber receives the four published samples on its second row and then detaches";
-    passFailCriteria = "zenoh profile 0 service-booted check";
-    requiredTestEnvironment = "zenoh_service_booted_check";
+    passFailCriteria = "zenoh profile 0 service-four check";
+    requiredTestEnvironment = "zenoh_service_four_check";
   };
 }
