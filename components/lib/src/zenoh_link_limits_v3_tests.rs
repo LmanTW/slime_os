@@ -1,8 +1,6 @@
-//! The reader exam. Each `[zenoh-exam] linkv3` line is printed after the assertions of its scenario held, and
-//! `scripts/lib/zenoh_link_v3_reader_exam.py` judges them.
+// The reader exam, included into `zenoh_link_limits_v3`. Each `[zenoh-exam] linkv3` line is printed after the assertions of its scenario held, and
+// `scripts/lib/zenoh_link_v3_reader_exam.py` judges them.
 
-use super::*;
-use crate::zenoh_profile0::limits::LimitsError;
 use std::string::String;
 
 fn line(text: &str) {

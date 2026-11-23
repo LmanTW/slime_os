@@ -145,6 +145,7 @@ fn params(payload: usize) -> Params {
         local: 3,
         per_side: 2,
         events: EVENTS,
+        aliases: ALIASES,
         ..Params::DEMO
     }
 }
