@@ -1,0 +1,54 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a206d6-affa-7472-81d5-42e7b0257a4d" "zenoh-stack-four" "zenoh-service-core"
+  "The stack exam measures the built size of the Zenoh service at 4 holders and 6 rows"
+  "The stack exam binds the built size of the Zenoh service to 2 holders and 2 rows, and grades the system spec of `sel4-zenoh-service`. The item `zenoh-service-four` builds the component for 4 holders and 6 rows and runs it in `sel4-zenoh-service-four`. The exam must grade that size and that spec.")
+  with {
+    owns = {
+      "components/lib/src/zenoh_service_stack*";
+    };
+    nonGoals = {
+      h.nonGoal "The stated size. It stays at 4 holders, 6 rows, 4 ring slots and 64-byte samples, with the rows of the robot topology." h.agentDefault;
+      h.nonGoal "`STACK_BYTES`. The measured need of the built size is 24932 bytes, below the declared 32768 bytes, so the declared stack stays." h.agentDefault;
+      h.nonGoal "The stack depth on seL4 and the release build. The exam measures a debug build on x86_64, as the merged exam does." h.agentDefault;
+      h.nonGoal "The counts of the exam. It keeps 12 cases and 147 controls, because the new size adds no line and no control." h.agentDefault;
+    };
+    requirements = {
+      h.req "built-size-is-four-holders-and-six-rows"
+        "The built size is 4 holders, 4 ring slots, 12-byte samples and 6 rows. The test prints that config. The judge requires `HOLDERS` to be 4 and `ROWS` to be 6 in `main.rs`."
+        { "zenoh_service_stack_check"; };
+      h.req "built-rows-follow-the-composition"
+        "The test builds the 6 rows of `sel4-zenoh-service-four`. `alpha` publishes the exchange key. `beta` subscribes to it. `gamma` and `delta` each subscribe to the command key and the exchange key."
+        { "zenoh_service_stack_check"; };
+      h.req "pages-follow-the-four-holder-spec"
+        "The system spec of `sel4-zenoh-service-four` declares 8 buffers, 8 byte pages, 8 loans and 10 mappings for the instance `zenoh-service`. The client contract's page counts give those numbers for 4 holders."
+        { "zenoh_service_stack_check"; };
+      h.req "declared-stack-covers-the-built-need"
+        "The declared `STACK_BYTES` is at least the need of the built size at 4 holders and 6 rows, and of the stated size. It is at most the 65536 bytes that `STACK_SIZE` reserves."
+        { "zenoh_service_stack_check"; };
+      h.req "controls-are-refused"
+        "The judge refuses 147 corrupted transcripts and source files. The four spec edits move to the four-holder counts: 9 buffers, 9 byte pages, 9 loans and 9 mappings."
+        { "zenoh_service_stack_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_service_stack_check" {
+        h.count "casesObserved" 12;
+        h.count "negativeControlsRefused" 147;
+      };
+    };
+    decisions = {
+      h.decided "move-the-built-size-and-keep-the-pins"
+        "The built size becomes 4 holders and 6 rows, and the case and control counts stay at 12 and 147."
+        "the exam's lines and controls are written for each size and not for a holder count, so the new size adds none. The user chose that the built size becomes the new size"
+        (h.fromHuman "Built size becomes the new size (Recommended)" "the user's answer to the question about the stack exam's built size, 2026-11-23")
+        { "built-size-is-four-holders-and-six-rows"; "controls-are-refused"; };
+      h.decided "the-exam-reads-the-four-holder-spec"
+        "The exam reads the system spec of `sel4-zenoh-service-four`. The system spec of `sel4-zenoh-service` stays and is no longer graded by this exam."
+        "the component is built for the four-holder size, and its page counts follow its holder count. The two-holder spec declares the counts of 2 holders, which the component no longer matches"
+        h.agentDefault
+        { "pages-follow-the-four-holder-spec"; };
+    };
+  };
+
+item

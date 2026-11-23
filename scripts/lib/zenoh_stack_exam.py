@@ -26,14 +26,15 @@ from harness import ROOT
 
 MAIN = ROOT / "components" / "services" / "zenoh-service" / "src" / "main.rs"
 RUNTIME = ROOT / "components" / "runtime" / "src" / "runtime.rs"
-SPEC = ROOT / "contracts" / "system-spec" / "v1" / "systems" / "sel4-zenoh-service.zti"
+SPEC = ROOT / "contracts" / "system-spec" / "v1" / "systems" / "sel4-zenoh-service-four.zti"
 CLIENT = ROOT / "contracts" / "zenoh-service-client" / "v1" / "schema.zt"
-ITEM = ROOT / ".tasks" / "items" / "zenoh-service-stack-size.zt"
+ITEM = ROOT / ".tasks" / "items" / "zenoh-stack-four.zt"
 
-# label, holders, ring slots, payload bytes, rows. The built size is the component's. The stated size is the four
+# label, holders, ring slots, payload bytes, rows. The built size is the component's, 4 holders and 6 rows, the size the
+# composition `sel4-zenoh-service-four` runs. The stated size is the four
 # components of the `sel4-robot-runtime` composition, with the 64-byte bound of its `TelemetrySample`.
 CONFIGS = (
-    ("built", 2, 4, 12, 2),
+    ("built", 4, 4, 12, 6),
     ("stated", 4, 4, 64, 6),
 )
 PARTS = ("slot", "row", "holder", "fixed")
@@ -213,12 +214,12 @@ HONEST = {
         "row": 40,
         "holder": 8,
         "fixed": 120,
-        "core": 504,
-        "link": 3768,
+        "core": 936,
+        "link": 3840,
         "over": 56,
-        "server": 2,
-        "locals": 818,
-        "depth": 16194,
+        "server": 4,
+        "locals": 3174,
+        "depth": 16922,
     },
     "stated": {
         "slot": 24,
@@ -564,10 +565,10 @@ def source_controls() -> int:
         return spec.replace(service_line, service_line.replace(old, new, 1))
 
     for old, new in (
-        ("bufferCount = 4;", "bufferCount = 5;"),
-        ("bufferBytePages = 4;", "bufferBytePages = 5;"),
-        ("loanCount = 4;", "loanCount = 5;"),
-        ("mappingCount = 6;", "mappingCount = 5;"),
+        ("bufferCount = 8;", "bufferCount = 9;"),
+        ("bufferBytePages = 8;", "bufferBytePages = 9;"),
+        ("loanCount = 8;", "loanCount = 9;"),
+        ("mappingCount = 10;", "mappingCount = 9;"),
     ):
         refused += _refused(f"a spec with `{new}` for the service", good, spec=edited(old, new))
     judge(good, spec=spec)
