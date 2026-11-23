@@ -1,16 +1,19 @@
-"""Judge the Zenoh Profile 0 exam for liveliness tokens and the client role.
+"""Judge the Zenoh Profile 0 exam for a client-role session that answers a token INTEREST, and a listener that admits clients.
 
-Profile 0 admitted Peer as its only role and refused DECLARE_TOKEN, UNDECLARE_TOKEN and INTEREST. The
-session gains a table of liveliness tokens, answers an INTEREST for tokens, and can be built as a Client.
+A router asks a client for the liveliness tokens it holds with an INTEREST. Upstream's client-role session
+declares and withdraws tokens (`send_declare_token`, `send_undeclare_token`) and refuses that INTEREST as an
+unsupported message. This exam judges the answer: one frame holding a DECLARE_TOKEN for each token the session
+holds, each carrying the interest id, then the DeclareFinal for that id. It also judges a listener that takes a
+Client INIT_SYN only when it is configured to.
 
-The Rust tests under `zenoh_liveliness::` print one `[zenoh-exam] liveliness ...` line for each thing they
-did. This module owns what those lines must be, and nothing here reads the Rust:
+The Rust tests under `zenoh_liveliness::` print one `[zenoh-exam] liveliness ...` line for each thing they did.
+This module owns what those lines must be, and nothing here reads the Rust:
 
 * the scenarios, each printed once and in order;
-* the frames and the INIT the session wrote, which `zenoh_wire` must reproduce byte for byte. The
-  reference is held to bytes the upstream eclipse-zenoh 1.0.0 encoder produced before it judges anything
+* the answer frames the session wrote, which `zenoh_wire` must reproduce byte for byte. The reference is held to
+  bytes the upstream eclipse-zenoh 1.0.0 encoder produced before it judges anything
   (`zenoh_wire.liveliness_self_test`);
-* how many tokens each side held after a step;
+* how many tokens the session held after a step;
 * every refusal, by name and class.
 
 Like the other judges it is trusted only after it refuses a mutation of an honest transcript.
@@ -22,36 +25,31 @@ import re
 
 import zenoh_wire
 
-LISTENER_SN = 7000
+# The sequence number of the first FRAME the answering side sends: the Rust tests configure it with this number.
+ANSWERER_SN = 7000
 ZID = bytes.fromhex("11223344")
 KEY = zenoh_wire.KEY_LIVELINESS
 KEY_SECOND = "@/liveliness/slime/second"
 
 OK_SCENARIOS = (
-    "declare-token-reaches-the-peer",
-    "peer-declares-and-undeclares-a-token",
-    "undeclare-token-by-id",
-    "interest-current-answers-tokens-then-final",
-    "interest-future-answers-no-final",
-    "interest-current-future-answers-then-final",
-    "interest-final-ends-an-interest",
-    "refused-frame-changes-no-token",
-    "close-releases-every-token",
-    "client-sends-a-client-init",
+    "current-interest-answers-each-token-then-final",
+    "current-future-interest-answers-like-current",
+    "future-interest-answers-nothing",
+    "final-interest-answers-nothing",
+    "no-token-answers-final-alone",
+    "withdrawn-token-is-not-answered",
+    "refused-answer-spends-no-sequence-number",
     "listener-admits-a-client-when-configured",
     "default-configuration-unchanged",
 )
 
-# (name, bytes the session wrote). Every frame is the listener's, from a listener built for its scenario, so a
-# frame's sequence number is LISTENER_SN plus the frames that listener sent before it. An answer to an INTEREST
-# is one frame: a DECLARE_TOKEN for each held token carrying the interest id, then the DeclareFinal.
+# (name, bytes the session wrote). Each frame is written by a session built for its scenario, so its sequence
+# number is ANSWERER_SN plus the frames that session sent before it.
 FRAMES = (
-    ("declare-token-1", zenoh_wire.frame(LISTENER_SN, zenoh_wire.declare_token(1, KEY, True)).hex()),
-    ("undeclare-token-1", zenoh_wire.frame(LISTENER_SN + 1, zenoh_wire.undeclare_token(1, KEY)).hex()),
     (
         "answer-current-interest-7",
         zenoh_wire.frame(
-            LISTENER_SN + 2,
+            ANSWERER_SN,
             zenoh_wire.declare_token(1, KEY, True, 7),
             zenoh_wire.declare_token(2, KEY_SECOND, True, 7),
             zenoh_wire.declare_final(7),
@@ -60,53 +58,45 @@ FRAMES = (
     (
         "answer-current-future-interest-8",
         zenoh_wire.frame(
-            LISTENER_SN + 2,
+            ANSWERER_SN,
             zenoh_wire.declare_token(1, KEY, True, 8),
             zenoh_wire.declare_token(2, KEY_SECOND, True, 8),
             zenoh_wire.declare_final(8),
         ).hex(),
     ),
-    ("answer-empty-interest-9", zenoh_wire.frame(LISTENER_SN, zenoh_wire.declare_final(9)).hex()),
-    ("client-init-syn", zenoh_wire.init_as(zenoh_wire.WHATAMI_CLIENT, ZID, 512).hex()),
+    ("answer-empty-interest-9", zenoh_wire.frame(ANSWERER_SN, zenoh_wire.declare_final(9)).hex()),
+    (
+        "answer-after-withdrawal-interest-10",
+        zenoh_wire.frame(ANSWERER_SN, zenoh_wire.declare_token(2, KEY_SECOND, True, 10), zenoh_wire.declare_final(10)).hex(),
+    ),
 )
 
-# (label, tokens this side holds, tokens the peer holds) after a step.
+# (label, tokens the answering session holds) after a step.
 HELD = (
-    ("declared-one", 1, 0),
-    ("peer-declared-one", 0, 1),
-    ("peer-undeclared-it", 0, 0),
-    ("undeclared-one", 0, 0),
-    ("frame-refused", 1, 0),
-    ("closed", 0, 0),
+    ("answered-two", 2),
+    ("after-withdrawal", 1),
+    ("refused-answer", 2),
 )
 
 REFUSED_SCENARIOS = (
-    ("token-declared-twice-under-one-id", "token-limit"),
-    ("token-declared-beyond-the-table", "token-limit"),
-    ("peer-token-repeated-id", "token-limit"),
-    ("peer-token-beyond-the-table", "token-limit"),
-    ("undeclare-unknown-token", "unknown-token"),
-    ("peer-undeclares-unknown-token", "unknown-token"),
-    ("token-with-a-wildcard-key", "wildcard-keyexpr"),
-    ("token-key-over-the-bound", "over-bound"),
-    ("token-before-open", "not-open"),
     ("interest-in-subscribers", "unsupported-message"),
     ("interest-in-queryables", "unsupported-message"),
     ("interest-in-key-expressions", "unsupported-message"),
     ("interest-restricted-to-a-key", "unsupported-message"),
-    ("interest-with-an-extension", "unsupported-extension"),
     ("interest-in-tokens-and-subscribers", "unsupported-message"),
-    ("router-init-to-a-listener", "unsupported-whatami"),
+    ("interest-with-an-extension", "unsupported-extension"),
+    ("interest-to-a-session-with-no-client-role", "unsupported-message"),
+    ("two-interests-in-one-frame", "too-many-messages"),
+    ("answer-beyond-the-peer-batch", "encode"),
     ("client-init-to-a-listener-that-admits-none", "unsupported-whatami"),
-    ("router-init-ack-to-a-connector", "unsupported-whatami"),
+    ("router-init-to-a-listener", "unsupported-whatami"),
     ("reserved-role-init", "malformed-message"),
-    ("client-as-a-listener", "invalid-config"),
 )
 
 SHAPES = {
     ("liveliness", "ok"): 3,
     ("liveliness", "frame"): 4,
-    ("liveliness", "held"): 5,
+    ("liveliness", "held"): 4,
     ("liveliness", "refused"): 4,
 }
 
@@ -124,7 +114,7 @@ def good_lines() -> list[str]:
     return (
         [f"liveliness ok {name}" for name in OK_SCENARIOS]
         + [f"liveliness frame {name} {hexed}" for name, hexed in FRAMES]
-        + [f"liveliness held {label} {mine} {theirs}" for label, mine, theirs in HELD]
+        + [f"liveliness held {label} {count}" for label, count in HELD]
         + [f"liveliness refused {name} {cls}" for name, cls in REFUSED_SCENARIOS]
     )
 
@@ -158,14 +148,11 @@ def judge(lines: list[str]) -> tuple[int, int]:
         _need(re.fullmatch(r"[0-9a-f]+", hexed) is not None, f"liveliness frame {name} is not lowercase hexadecimal")
         _need(hexed == wanted, f"liveliness frame {name} is {hexed}, the host reference writes {wanted}")
 
-    held = [(f[2], f[3], f[4]) for f in split if f[:2] == ["liveliness", "held"]]
-    _exactly("counts", tuple(label for label, _, _ in HELD), [label for label, _, _ in held])
-    _need([label for label, _, _ in held] == [label for label, _, _ in HELD], "liveliness counts are out of order")
-    for (label, mine, theirs), (_, want_mine, want_theirs) in zip(held, HELD, strict=True):
-        _need(
-            (mine, theirs) == (str(want_mine), str(want_theirs)),
-            f"liveliness held {label}: {mine} and {theirs}, the exam requires {want_mine} and {want_theirs}",
-        )
+    held = [(f[2], f[3]) for f in split if f[:2] == ["liveliness", "held"]]
+    _exactly("counts", tuple(label for label, _ in HELD), [label for label, _ in held])
+    _need([label for label, _ in held] == [label for label, _ in HELD], "liveliness counts are out of order")
+    for (label, count), (_, wanted) in zip(held, HELD, strict=True):
+        _need(count == str(wanted), f"liveliness held {label}: {count}, the exam requires {wanted}")
 
     refused = [(f[2], f[3]) for f in split if f[:2] == ["liveliness", "refused"]]
     _exactly("refusals", tuple(name for name, _ in REFUSED_SCENARIOS), [name for name, _ in refused])
@@ -201,10 +188,10 @@ def transcript_mutations() -> list[tuple[str, list[str]]]:
     for name, cls in REFUSED_SCENARIOS:
         other = next(candidate for candidate in classes if candidate != cls)
         out.append((f"{name} refused as {other}", _replaced(good, f"liveliness refused {name} {cls}", f"liveliness refused {name} {other}")))
-    for label, mine, theirs in HELD:
-        line = f"liveliness held {label} {mine} {theirs}"
-        out.append((f"{label}: this side holds {mine + 1}", _replaced(good, line, f"liveliness held {label} {mine + 1} {theirs}")))
-        out.append((f"{label}: the peer holds {theirs + 1}", _replaced(good, line, f"liveliness held {label} {mine} {theirs + 1}")))
+    for label, count in HELD:
+        line = f"liveliness held {label} {count}"
+        out.append((f"{label}: the session holds {count + 1}", _replaced(good, line, f"liveliness held {label} {count + 1}")))
+        out.append((f"{label}: the session holds {count - 1}", _replaced(good, line, f"liveliness held {label} {count - 1}")))
     for name, hexed in FRAMES:
         flipped = hexed[:-1] + ("0" if hexed[-1] != "0" else "1")
         line = f"liveliness frame {name} {hexed}"
@@ -289,5 +276,5 @@ def all_controls() -> int:
 
 
 # The exact counts the exam fixes. The checker compares both with a run.
-PINNED_CASES = 38
-PINNED_CONTROLS = 131
+PINNED_CASES = 25
+PINNED_CONTROLS = 92

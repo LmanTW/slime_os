@@ -81,10 +81,10 @@ requires the ten variants of it the profile keeps refusing, by name and class. T
 judge, the retained suites and the stock-peer exam are run beside it, so accepting the bare form
 cannot move a pinned refusal or a stock case.
 
-`--slice liveliness` judges liveliness tokens and the client role. The session declares and undeclares
-tokens, holds the peer's, answers an INTEREST for tokens with one DECLARE_TOKEN each and a DeclareFinal,
-and sends INIT as a Client. `scripts/lib/zenoh_wire.py` first reproduces 16 batches the upstream
-eclipse-zenoh 1.0.0 encoder wrote, then the frames the session wrote. Router stays refused.
+`--slice liveliness` judges the answer a client-role session gives a router's INTEREST for tokens: one
+DECLARE_TOKEN for each token it holds, each carrying the interest id, then the DeclareFinal. It also judges a
+listener that takes a Client INIT_SYN only where configured to. `scripts/lib/zenoh_wire.py` first reproduces 16
+batches the upstream eclipse-zenoh 1.0.0 encoder wrote, then the frames the session wrote. Router stays refused.
 
 `--slice subscribers` judges a session that holds several subscriptions of its own. The session held
 exactly one, whatever the link was declared with; it now holds as many as its parameters say. The exam
@@ -3056,7 +3056,7 @@ def liveliness_main(controls_only: bool) -> int:
         fail(str(error))
     print(f"[zenoh-profile0] slice=liveliness cases={cases} refusals={refusals} controls={refused_controls}")
     devloop_observations.record(casesObserved=cases + refusals, negativeControlsRefused=refused_controls)
-    print("zenoh profile 0 liveliness check: the session holds liveliness tokens, answers a token interest and takes the client role")
+    print("zenoh profile 0 liveliness check: a client-role session answers a token interest, and a listener admits a client only when configured to")
     return 0
 
 
