@@ -39,8 +39,8 @@ slime_rt::entry!(main);
 /// What the service was built to hold. `Core` is sized by them, so the generation's grants may hold at most `ROWS` rows
 /// for at most `HOLDERS` holders. The generation declares its own limits. A declaration above any of these is refused at
 /// start, and so is one below `SLOTS` or `PAYLOAD`, which the core cannot enforce.
-pub const HOLDERS: usize = 2;
-pub const ROWS: usize = 2;
+pub const HOLDERS: usize = 4;
+pub const ROWS: usize = 6;
 pub const SLOTS: usize = 4;
 pub const PAYLOAD: usize = 12;
 const STACK_BYTES: u32 = 32768;

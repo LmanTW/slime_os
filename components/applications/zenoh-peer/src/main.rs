@@ -9,9 +9,9 @@ use slime_components::network_io::{
     Connection as ServiceConnection, NetworkError, NetworkIo, NetworkNotifications, NetworkReply,
 };
 use slime_components::tick_clock::TickClock;
-use slime_components::zenoh_link::{Link, LinkError, Notice};
+use slime_components::zenoh_link::{LinkError, LinkOf, Notice};
 use slime_components::zenoh_node::{self as node, Connection, Reply, Stream};
-use slime_components::zenoh_profile0::session::{Config, Role};
+use slime_components::zenoh_profile0::session::{Config, Params, Role};
 use slime_proto::network_service as net;
 use slime_rt::console_line::Line;
 use slime_rt::{exit, monotonic_frequency, monotonic_read, resolve_binding, yield_now};
@@ -23,6 +23,9 @@ const RING_BASE: u64 = 0x0000_001c_0000_0000;
 const DATA_BASE: u64 = RING_BASE + 4096;
 const DEADLINE_MS: i64 = 30_000;
 const ZID: [u8; 8] = [0xd4; 8];
+/// The peer's link: the service declares one subscription for each distinct key a holder subscribes to, so the session
+/// takes up to three from the service and declares one of its own. The table holds `3 + 2` subscribers.
+type PeerLink<'a, 'b> = LinkOf<Stream<Wire<'a, 'b>>, 514, 1, 5, 129, 12, 8, 4>;
 /// The key the publisher holder may publish and the peer subscribes to.
 const KEY: &str = "0/slime_service/exchange";
 const SUBSCRIBER_ID: u32 = 1;
@@ -108,8 +111,15 @@ fn main(_: u32) {
             initial_sn: 0,
             cookie: node::COOKIE,
         };
-        let mut link = Link::new(Stream::new(wire), Role::Listener, &config, 1)
-            .unwrap_or_else(|_| fail(b"session config"));
+        let params = Params {
+            local: 2,
+            per_side: 3,
+            events: 4,
+            ..Params::DEMO
+        };
+        let mut link: PeerLink<'_, '_> =
+            LinkOf::with_params(Stream::new(wire), Role::Listener, &config, params, 1)
+                .unwrap_or_else(|_| fail(b"session config"));
         let handle = link.handle();
         let mut declared = false;
         loop {

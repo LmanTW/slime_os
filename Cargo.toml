@@ -668,6 +668,16 @@ opt-level = "s"
 codegen-units = 1
 debug = false
 
+[profile.release.package.slime-component-zenoh-holder-gamma]
+opt-level = "s"
+codegen-units = 1
+debug = false
+
+[profile.release.package.slime-component-zenoh-holder-delta]
+opt-level = "s"
+codegen-units = 1
+debug = false
+
 [profile.release.package.slime-component-zenoh-peer]
 opt-level = "s"
 codegen-units = 1

@@ -624,6 +624,14 @@
       state = "specNative";
       systemSpec = "contracts/system-spec/v1/systems/sel4-zenoh-service.zti";
     };
+    {
+      baseline = "";
+      composition = "sel4-zenoh-service-four";
+      deferralReason = "";
+      owningGate = "zenoh_service_four_check";
+      state = "specNative";
+      systemSpec = "contracts/system-spec/v1/systems/sel4-zenoh-service-four.zti";
+    };
   ];
   formatVersion = 1;
 }

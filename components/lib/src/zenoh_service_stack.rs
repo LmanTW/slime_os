@@ -324,20 +324,22 @@ fn size<const H: usize, const P: usize, const R: usize>(
     line(&format!("depth {label} {depth}"));
 }
 
-fn rows_built() -> [Row<'static>; 2] {
+/// The rows of the composition `sel4-zenoh-service-four`, which the component is built for. `alpha` publishes the exchange key.
+/// `beta` subscribes to it. `gamma` and `delta` each hold the command key as row 0 and the exchange key as row 1.
+fn rows_built() -> [Row<'static>; 6] {
+    let row = |holder, key: usize, publish, subscribe| Row {
+        holder,
+        key: KEYS[key],
+        publish,
+        subscribe,
+    };
     [
-        Row {
-            holder: 0,
-            key: KEYS[0],
-            publish: true,
-            subscribe: false,
-        },
-        Row {
-            holder: 1,
-            key: KEYS[0],
-            publish: false,
-            subscribe: true,
-        },
+        row(0, 0, true, false),
+        row(1, 0, false, true),
+        row(2, 1, false, true),
+        row(2, 0, false, true),
+        row(3, 1, false, true),
+        row(3, 0, false, true),
     ]
 }
 
@@ -372,7 +374,7 @@ fn exam() {
     ));
     let calibration = measure(calibration_frame);
     line(&format!("calibration {CALIBRATION_BYTES} {calibration}"));
-    size::<2, 12, 2>("built", rows_built(), 1);
+    size::<4, 12, 6>("built", rows_built(), 1);
     size::<4, 64, 6>("stated", rows_stated(), 0);
 }
 
