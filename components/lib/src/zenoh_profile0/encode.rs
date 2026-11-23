@@ -7,10 +7,10 @@
 //! refused here with the matching class. Nothing allocates.
 
 use super::{
-    ATTACHMENT_GID_LEN_AT, Bounds, EXT_ATTACHMENT, EXT_QOS_UNIT, EXT_WIRE_EXPR, FLAG_BIT5,
-    FLAG_BIT6, FLAG_Z, GID_BYTES, ID_CLOSE, ID_D_SUBSCRIBER, ID_DECLARE, ID_FRAME, ID_INIT,
-    ID_KEEP_ALIVE, ID_OPEN, ID_PUSH, ID_PUT, MAX_ATTACHMENT_BYTES, MAX_BATCH_BYTES,
-    MAX_COOKIE_BYTES, Mapping, Refusal, STREAM_LENGTH_BYTES, U_SUBSCRIBER_HEADER,
+    ATTACHMENT_GID_LEN_AT, Bounds, EXT_ATTACHMENT, EXT_QOS_NETWORK, EXT_QOS_UNIT, EXT_WIRE_EXPR,
+    FLAG_BIT5, FLAG_BIT6, FLAG_Z, GID_BYTES, ID_CLOSE, ID_D_SUBSCRIBER, ID_DECLARE, ID_FRAME,
+    ID_INIT, ID_KEEP_ALIVE, ID_OPEN, ID_PUSH, ID_PUT, MAX_ATTACHMENT_BYTES, MAX_BATCH_BYTES,
+    MAX_COOKIE_BYTES, Mapping, Qos, Refusal, STREAM_LENGTH_BYTES, U_SUBSCRIBER_HEADER,
     WIRE_EXPR_FLAG_NAMED, WIRE_EXPR_FLAG_SENDER, key_expression,
 };
 use slime_proto::zenoh_profile as p;
@@ -444,6 +444,7 @@ fn push_put(
     writer: &mut Writer<'_>,
     mapping: Mapping,
     key: &str,
+    qos: Qos,
     attachment: &[u8],
     payload: &[u8],
     bounds: Bounds,
@@ -454,9 +455,18 @@ fn push_put(
     if mapping == Mapping::Sender {
         header |= FLAG_BIT6;
     }
+    // eclipse-zenoh 1.0.0 leaves the extension out when the value is the PUSH default.
+    let stated = qos != Qos::default();
+    if stated {
+        header |= FLAG_Z;
+    }
     writer.byte(header)?;
     writer.leb(GLOBAL_SCOPE)?;
     writer.prefixed(key)?;
+    if stated {
+        writer.byte(EXT_QOS_NETWORK)?;
+        writer.leb(qos.value())?;
+    }
     writer.byte(ID_PUT | FLAG_Z)?;
     writer.byte(EXT_ATTACHMENT)?;
     writer.prefixed(attachment)?;
@@ -551,8 +561,20 @@ impl<'a> FrameEncoder<'a> {
         attachment: &[u8],
         payload: &[u8],
     ) -> Result<(), EncodeError> {
+        self.push_put_qos(mapping, key, Qos::default(), attachment, payload)
+    }
+
+    /// [`push_put`](Self::push_put) with the QoS the PUSH states. The default QoS writes no extension.
+    pub fn push_put_qos(
+        &mut self,
+        mapping: Mapping,
+        key: &str,
+        qos: Qos,
+        attachment: &[u8],
+        payload: &[u8],
+    ) -> Result<(), EncodeError> {
         let bounds = self.bounds;
-        self.message(|writer| push_put(writer, mapping, key, attachment, payload, bounds))
+        self.message(|writer| push_put(writer, mapping, key, qos, attachment, payload, bounds))
     }
 
     /// The batch length, once at least one network message is in the frame.

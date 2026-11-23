@@ -41,6 +41,8 @@ mod zenoh_links;
 pub mod zenoh_node;
 pub mod zenoh_profile0;
 #[cfg(test)]
+mod zenoh_qos;
+#[cfg(test)]
 mod zenoh_rmw;
 #[cfg(test)]
 mod zenoh_rmw_data;

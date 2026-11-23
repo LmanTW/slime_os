@@ -20,7 +20,9 @@ use std::time::Duration;
 
 use slime_components::zenoh_profile0::encode as ours;
 use slime_components::zenoh_profile0::session::{Config, Event, Role, Session, State};
-use slime_components::zenoh_profile0::{Mapping as OurMapping, Message, Network, decode_batch};
+use slime_components::zenoh_profile0::{
+    Mapping as OurMapping, Message, Network, Qos, decode_batch,
+};
 
 use zenoh_buffers::{ZBuf, ZSlice, reader::HasReader, writer::HasWriter};
 use zenoh_codec::{RCodec, WCodec, Zenoh080};
@@ -302,6 +304,7 @@ fn same_network(ours: &Network<'_>, theirs: &NetworkMessage) -> Result<(), Strin
                 key,
                 attachment,
                 payload,
+                ..
             },
             NetworkBody::Push(p),
         ) => {
@@ -1246,6 +1249,7 @@ mod tests {
         Network::PushPut {
             mapping: OurMapping::Sender,
             key: "a/b",
+            qos: Qos::default(),
             attachment,
             payload: &[1, 2, 3],
         }
