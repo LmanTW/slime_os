@@ -3,8 +3,8 @@
 Every other exam of the client role replays captured bytes. This one judges a run against a real router. The checker
 starts `rmw_zenohd` and a ROS node for each direction, runs the host program in `verification/zenoh-live` against them,
 and kills each process it started by its recorded PID. The program prints one `[zenoh-live] ...` line for each thing it
-did. The checker reads the listener's stdout itself and adds one `ros listener ...` line for each line the listener
-printed. The program never writes a `ros` line, and the checker drops any it prints. This module judges the whole
+did. The checker reads the listener's output itself, stdout and stderr together, and adds one `ros listener ...` line for
+each `I heard:` line the listener printed. The program never writes a `ros` line, and the checker drops any it prints. This module judges the whole
 transcript.
 
 Two directions run one after the other, each against its own router:
@@ -69,6 +69,12 @@ def good_lines(inbound: int = INBOUND_MIN + 2, first: int = 3) -> list[str]:
     return lines
 
 
+# The fewest space-separated fields of each kind of `live` line, so a short line is the exam's own refusal.
+MIN_PARTS = {"router-ready": 3, "handshake": 4, "subscribed": 3, "sample": 5, "inbound-done": 3, "put": 4, "outbound-done": 3, "closed": 3}
+# The kinds a run prints exactly once, and the ones it prints for each handshake or each sample.
+ONCE = ("router-ready", "subscribed", "inbound-done", "outbound-done", "closed")
+
+
 def parse(lines: list[str]) -> dict:
     """The facts a transcript states, or an error when a line is not one the exam knows."""
     facts: dict = {"handshakes": [], "samples": [], "puts": [], "heard": [], "subscribed": None, "delivered": None, "written": None, "closed": None, "ready": None}
@@ -76,12 +82,14 @@ def parse(lines: list[str]) -> dict:
         _need(line == line.strip() and "  " not in line, f"live: a line with stray spaces: {line!r}")
         parts = line.split(" ")
         _need(parts[0] in ("live", "ros"), f"live: a record that is not a live exam line: {line!r}")
+        _need(len(parts) >= 2, f"live: a line with no kind: {line!r}")
         if parts[0] == "ros":
             match = LISTENER_TEXT.fullmatch(parts[2].replace("_", " ")) if len(parts) == 3 and parts[1] == "listener" else None
             _need(match is not None, f"live: a ROS line that is not a listener's: {line!r}")
             facts["heard"].append(int(match.group(1)))
             continue
         kind = parts[1]
+        _need(len(parts) >= MIN_PARTS.get(kind, 2), f"live: a {kind} line with too few fields: {line!r}")
         if kind == "router-ready":
             facts["ready"] = parts[2]
         elif kind == "handshake":
@@ -127,6 +135,10 @@ def judge(lines: list[str]) -> tuple[int, int]:
     """Returns (facts judged, 0). The live transcript has no refusal lines: the link either did the exchange or it did not."""
     facts = parse(lines)
     _need(phases(lines) == list(PHASES), f"live: the lines come in the order {phases(lines)}, a run prints {list(PHASES)}")
+    for kind in ONCE:
+        count = sum(1 for line in lines if line.split(" ")[1] == kind and line.startswith("live "))
+        _need(count == 1, f"live: {count} {kind} lines, a run prints one")
+    _need(all(line.split(" ")[2] == "outbound" for line in lines if line.startswith("live put ")), "live: a Put line that is not an outbound one")
     _need(facts["ready"] == "tcp/127.0.0.1:7447", "live: no router was reached on tcp/127.0.0.1:7447")
     _need(len(facts["handshakes"]) == 2, f"live: {len(facts['handshakes'])} handshakes, one for each direction")
     for handshake in facts["handshakes"]:
@@ -188,6 +200,13 @@ def transcript_mutations() -> list[tuple[str, list[str]]]:
         ("the inbound samples after the outbound Puts", [*good[: index["sample"][0]], *good[index["put"][0] : index["outbound-done"][0] + 1], *good[index["sample"][0] : index["put"][0]], *good[index["outbound-done"][0] + 1 :]]),
         ("the ROS lines before the Puts", [*good[: index["put"][0]], *good[index["ros"][0] : index["ros"][-1] + 1], *good[index["put"][0] : index["ros"][0]], *good[index["ros"][-1] + 1 :]]),
         ("a ROS line the program printed after the close", [*good, "ros listener I_heard:_[Hello_Slime_0]"]),
+        ("a second close line", [*good, good[index["closed"][0]]]),
+        ("a second router-ready line", [good[0], *good]),
+        ("a second subscription line", [*good[: index["subscribed"][0] + 1], good[index["subscribed"][0]], *good[index["subscribed"][0] + 1 :]]),
+        ("a second inbound-done line", [*good[: index["inbound-done"][0] + 1], good[index["inbound-done"][0]], *good[index["inbound-done"][0] + 1 :]]),
+        ("a second outbound-done line", [*good[: index["outbound-done"][0] + 1], good[index["outbound-done"][0]], *good[index["outbound-done"][0] + 1 :]]),
+        ("a Put line that names the inbound direction", [good[i].replace("put outbound", "put inbound", 1) if i == index["put"][0] else good[i] for i in range(len(good))]),
+        ("a closed line with no reason", [good[i].replace(" reason=0", "", 1) if i == index["closed"][0] else good[i] for i in range(len(good))]),
         ("a close with another reason", [good[i].replace("reason=0", "reason=1") if i == index["closed"][0] else good[i] for i in range(len(good))]),
         ("no close", [line for i, line in enumerate(good) if i != index["closed"][0]]),
     ]
@@ -218,7 +237,7 @@ def all_controls() -> int:
 # .tasks/terminal. A live run delivers at least `INBOUND_MIN` samples and may deliver more, so the cases are a floor.
 # The controls are exact. While the item is open its stored predicates are compared with these.
 MIN_CASES = 12
-PINNED_CONTROLS = 31
+PINNED_CONTROLS = 38
 
 
 def item_pins() -> tuple[int, int]:

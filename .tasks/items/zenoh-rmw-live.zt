@@ -27,19 +27,19 @@ item :: s.Item = (h.task "01a206df-0a4a-7536-be2f-53192d8c9974" "zenoh-rmw-live"
         "A `demo_nodes_cpp listener` subscribes through the router. The link writes 6 Puts on the chatter key, and the listener prints each as `I heard: [Hello Slime N]`, in order."
         { "zenoh_rmw_live_check"; };
       h.req "the-ros-side-is-the-nodes-own-output"
-        "The checker starts the router and the nodes and reads the listener's stdout. The `ros` lines are what it read. The checker drops any `ros` line the program prints, and the judge refuses a ROS line that is not a listener's."
+        "The checker starts the router and the nodes and reads the listener's log, stdout and stderr together. The `ros` lines are what it read. The checker refuses any program line that is not a `live` line, and the judge refuses a ROS line that is not a listener's."
         { "zenoh_rmw_live_check"; };
       h.req "the-run-prints-its-phases-in-order"
-        "The judge refuses a transcript whose lines are out of order, or whose ROS lines follow the close. A run prints the inbound handshake, the subscription, the samples, the outbound handshake, the Puts, the ROS lines and the close, in that order."
+        "The judge refuses a transcript whose lines are out of order, a line kind a run prints once that appears twice, and a short line. A run prints the inbound handshake, the subscription, the samples, the outbound handshake, the Puts, the ROS lines and the close, in that order."
         { "zenoh_rmw_live_check"; };
       h.req "controls-are-refused"
-        "The judge refuses 31 corrupted transcripts before it judges the run."
+        "The judge refuses 38 corrupted transcripts before it judges the run."
         { "zenoh_rmw_live_check"; };
     };
     acceptance = {
       h.observedWhere "zenoh_rmw_live_check" {
         h.atLeast "casesObserved" 12;
-        h.count "negativeControlsRefused" 31;
+        h.count "negativeControlsRefused" 38;
       };
     };
     decisions = {

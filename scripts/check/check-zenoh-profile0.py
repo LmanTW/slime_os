@@ -2397,9 +2397,9 @@ def live_environment() -> dict[str, str]:
     }
 
 
-def live_start(command: list[str], environment: dict[str, str], pids: list[int], stdout) -> subprocess.Popen:
+def live_start(command: list[str], environment: dict[str, str], pids: list[int], stdout, stderr=subprocess.DEVNULL) -> subprocess.Popen:
     """Starts a process in its own session and records its PID, so every process this checker starts is killed by PID."""
-    process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=stdout, stderr=subprocess.DEVNULL, env=environment, start_new_session=True)
+    process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr, env=environment, start_new_session=True)
     pids.append(process.pid)
     return process
 
@@ -2411,6 +2411,23 @@ def live_stop(pids: list[int]) -> None:
         except ProcessLookupError:
             pass
     pids.clear()
+
+
+LIVE_PREFIX = "[zenoh-live] "
+
+
+def live_program_lines(stdout: str) -> list[str]:
+    """The lines the program printed, without their prefix. The program writes `live ...` lines and no other kind: the
+    `ros` lines are the checker's, read from the listener, so a program line of any other kind is refused."""
+    kept: list[str] = []
+    for line in stdout.splitlines():
+        if not line.startswith(LIVE_PREFIX):
+            continue
+        text = line.removeprefix(LIVE_PREFIX)
+        if not text.startswith("live "):
+            fail(f"rmw-live: the program printed a line that is not a `live` line: {text!r}")
+        kept.append(text)
+    return kept
 
 
 def run_rmw_live() -> list[str]:
@@ -2430,22 +2447,23 @@ def run_rmw_live() -> list[str]:
         if inbound.returncode != 0:
             _sys.stderr.write((inbound.stdout + inbound.stderr)[-4000:])
             fail(f"rmw-live: the live program exited {inbound.returncode} in the inbound direction")
-        lines += [line.removeprefix("[zenoh-live] ") for line in inbound.stdout.splitlines() if line.startswith("[zenoh-live] ")]
+        lines += live_program_lines(inbound.stdout)
         live_stop(pids)
-        # Outbound: a new router and a listener, and the program writes. The listener's stdout is read here, not by the program.
+        # Outbound: a new router and a listener, and the program writes. The listener's output is read here, not by the
+        # program. `demo_nodes_cpp` logs through rcutils, which writes to stderr, so the log takes both streams.
         listener_log = ROOT / "build" / "zenoh-live" / "listener.txt"
         listener_log.parent.mkdir(parents=True, exist_ok=True)
         live_start([environment["SLIME_RMW_ZENOHD"]], environment, pids, subprocess.DEVNULL)
         _time.sleep(LIVE_SETTLE_S)
         with listener_log.open("wb") as sink:
-            live_start([environment["SLIME_ROS_LISTENER"]], environment, pids, sink)
+            live_start([environment["SLIME_ROS_LISTENER"]], environment, pids, sink, subprocess.STDOUT)
             _time.sleep(LIVE_SETTLE_S)
             outbound = subprocess.run([*program, "outbound"], cwd=ROOT, capture_output=True, text=True, env=environment, timeout=LIVE_PROGRAM_S)
             _time.sleep(LIVE_SETTLE_S)
         if outbound.returncode != 0:
             _sys.stderr.write((outbound.stdout + outbound.stderr)[-4000:])
             fail(f"rmw-live: the live program exited {outbound.returncode} in the outbound direction")
-        lines += [line.removeprefix("[zenoh-live] ") for line in outbound.stdout.splitlines() if line.startswith("[zenoh-live] ")]
+        lines += live_program_lines(outbound.stdout)
         # The ROS lines are the listener's own, in the order it printed them. They are placed before the close line.
         heard = [match.group(1) for line in listener_log.read_text(errors="replace").splitlines() if (match := LISTENER_LINE.search(line))]
         closed = [line for line in lines if line.startswith("live closed ")]
