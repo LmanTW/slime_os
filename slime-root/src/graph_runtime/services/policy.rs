@@ -21,7 +21,7 @@ pub(super) fn serve_supervision_status(
         table.drop_slot(slot);
     }
     let (kind, detail) = termination.encode();
-    slime_root::diagnostic_println!(
+    crate::diagnostic_println!(
         "SLIME_GRAPH supervision collected task={} child={} kind={kind}",
         id.0,
         capability.task.0
@@ -59,165 +59,12 @@ pub(super) fn serve_supervision_derive(
     }) else {
         return Response::error(IpcError::DestinationSlotsExhausted);
     };
-    slime_root::diagnostic_println!(
+    crate::diagnostic_println!(
         "SLIME_GRAPH supervision derived task={} child={} slot={derived}",
         id.0,
         source.task.0
     );
     Response::success(0, sel4::Word::from(derived))
-}
-
-pub(super) fn serve_clock_request(
-    service: &mut clock::ClockService,
-    timer_adapter: &mut PhysicalTimerAdapter,
-    task: TaskId,
-    label: sel4::Word,
-    operand: sel4::Word,
-) -> Response {
-    let authority = service.authority(task);
-    let mut now = || {
-        timer_adapter
-            .monotonic_now()
-            .map_err(|_| clock::ClockError::TimeOverflow)
-    };
-    let outcome = match label {
-        clock_labels::MONOTONIC_READ => {
-            now().map(|instant| (clock::ClockService::read_monotonic(instant) as i64, 0))
-        }
-        clock_labels::TIMER_ARM => now()
-            .and_then(|instant| service.arm(authority, task, instant, operand))
-            .and_then(|(timer_id, programming)| {
-                apply_deadline_programming(timer_adapter, programming)
-                    .map_err(|_| clock::ClockError::TimeOverflow)?;
-                Ok((timer_id.0 as i64, service.live_timers() as sel4::Word))
-            }),
-        clock_labels::TIMER_CANCEL => now()
-            .and_then(|instant| service.cancel(authority, task, instant, TimerId(operand)))
-            .and_then(|programming| {
-                apply_deadline_programming(timer_adapter, programming)
-                    .map_err(|_| clock::ClockError::TimeOverflow)?;
-                Ok((0, service.live_timers() as sel4::Word))
-            }),
-        clock_labels::SIMULATED_READ => service
-            .read_simulated(authority)
-            .map(|value| (value as i64, 0)),
-        clock_labels::SIMULATED_ADVANCE => service
-            .advance_simulated(authority, operand)
-            .map(|previous| (previous as i64, 0)),
-        clock_labels::RATE_READ => Ok((
-            clock::ClockService::read_rate(timer_adapter.frequency_hz()) as i64,
-            0,
-        )),
-        _ => return Response::error(IpcError::UnsupportedOperation),
-    };
-    match outcome {
-        Ok((result, aux)) => {
-            if super::diagnostic_once::clock_served(task.0, label) {
-                slime_root::diagnostic_println!(
-                    "SLIME_CLOCK served task={} label={label} result={result} live={}",
-                    task.0,
-                    service.live_timers(),
-                );
-            }
-            Response::success(result, aux)
-        }
-        Err(error) => {
-            if super::diagnostic_once::clock_refused(task.0, label, clock_error_index(error)) {
-                slime_root::diagnostic_println!(
-                    "SLIME_CLOCK refused task={} label={label} class={} detail={error:?}",
-                    task.0,
-                    clock_error_class(error),
-                );
-            }
-            Response::error(clock_error_status(error))
-        }
-    }
-}
-
-pub(super) fn service_clock_source(
-    service: &mut clock::ClockService,
-    timer_adapter: &mut PhysicalTimerAdapter,
-) {
-    let clock::TimerSourceOutcome { expired, failure } =
-        service.service_timer_source(timer_adapter);
-    if let Some(failure) = failure {
-        match failure {
-            clock::TimerSourceFailure::Clock(error) => {
-                slime_root::diagnostic_println!("SLIME_CLOCK FAIL expiry clock error={error:?}");
-                return;
-            }
-            clock::TimerSourceFailure::Scheduler(error) => {
-                slime_root::diagnostic_println!(
-                    "SLIME_CLOCK FAIL expiry scheduler error={error:?}"
-                );
-                return;
-            }
-            clock::TimerSourceFailure::Program(error) => slime_root::diagnostic_println!(
-                "SLIME_CLOCK FAIL deadline reprogramming error={error:?} due={}",
-                expired.due(),
-            ),
-            clock::TimerSourceFailure::Acknowledge(error) => slime_root::diagnostic_println!(
-                "SLIME_CLOCK FAIL irq acknowledgement error={error:?} due={}",
-                expired.due(),
-            ),
-        }
-    }
-    let due = expired.due();
-    let mut delivered = 0;
-    for task in expired.tasks() {
-        match service.authority(task).signal_timer() {
-            Ok(()) => delivered += 1,
-            Err(error) => slime_root::diagnostic_println!(
-                "SLIME_CLOCK FAIL expiry signal task={} error={error:?}",
-                task.0,
-            ),
-        }
-    }
-    slime_root::diagnostic_println!(
-        "SLIME_CLOCK expired due={due} delivered={delivered} live={}",
-        service.live_timers(),
-    );
-}
-
-pub(super) fn drop_task_clock(
-    service: &mut clock::ClockService,
-    timer_adapter: &mut PhysicalTimerAdapter,
-    task: TaskId,
-) {
-    let before = service.live_timers();
-    let now = match timer_adapter.monotonic_now() {
-        Ok(now) => now,
-        Err(error) => {
-            slime_root::diagnostic_println!(
-                "SLIME_CLOCK FAIL teardown clock task={} error={error:?}",
-                task.0,
-            );
-            service.clear_task(task);
-            return;
-        }
-    };
-    match service.cancel_task(task, now) {
-        Ok(programming) => {
-            if apply_deadline_programming(timer_adapter, programming).is_err() {
-                slime_root::diagnostic_println!(
-                    "SLIME_CLOCK FAIL teardown programming task={}",
-                    task.0,
-                );
-            }
-        }
-        Err(error) => {
-            slime_root::diagnostic_println!(
-                "SLIME_CLOCK FAIL teardown task={} error={error:?}",
-                task.0,
-            )
-        }
-    }
-    service.clear_task(task);
-    slime_root::diagnostic_println!(
-        "SLIME_CLOCK teardown task={} before={before} live={}",
-        task.0,
-        service.live_timers(),
-    );
 }
 
 /// Wake every waiter whose declared C9.2 supervision source names `dead`, then
@@ -236,46 +83,7 @@ pub(super) fn signal_declared_death(
     let woken = service.signal_death(tasks, dead);
     service.clear_task(dead);
     if woken != 0 {
-        slime_root::diagnostic_println!("SLIME_WAIT death task={} woken={woken}", dead.0);
-    }
-}
-
-pub(super) const fn clock_error_status(error: clock::ClockError) -> IpcError {
-    match error {
-        clock::ClockError::Undeclared | clock::ClockError::InvalidNotification => {
-            IpcError::BadCapability
-        }
-        clock::ClockError::TimerLimit => IpcError::DestinationSlotsExhausted,
-        clock::ClockError::TimerNotFound => IpcError::BadCapability,
-        clock::ClockError::Malformed
-        | clock::ClockError::TimeOverflow
-        | clock::ClockError::SimulatedTimeOverflow => IpcError::InvalidOperation,
-    }
-}
-
-/// The refusal's position in [`clock_error_class`]'s vocabulary, the key the
-/// once-per-key diagnostic gate remembers.
-const fn clock_error_index(error: clock::ClockError) -> u8 {
-    match error {
-        clock::ClockError::Undeclared => 0,
-        clock::ClockError::Malformed => 1,
-        clock::ClockError::InvalidNotification => 2,
-        clock::ClockError::TimerLimit => 3,
-        clock::ClockError::TimerNotFound => 4,
-        clock::ClockError::TimeOverflow => 5,
-        clock::ClockError::SimulatedTimeOverflow => 6,
-    }
-}
-
-pub(super) const fn clock_error_class(error: clock::ClockError) -> &'static str {
-    match error {
-        clock::ClockError::Undeclared => "undeclared",
-        clock::ClockError::Malformed => "malformed",
-        clock::ClockError::InvalidNotification => "notification",
-        clock::ClockError::TimerLimit => "timer-limit",
-        clock::ClockError::TimerNotFound => "timer-absent",
-        clock::ClockError::TimeOverflow => "time-overflow",
-        clock::ClockError::SimulatedTimeOverflow => "simulated-overflow",
+        crate::diagnostic_println!("SLIME_WAIT death task={} woken={woken}", dead.0);
     }
 }
 
@@ -302,7 +110,7 @@ pub(super) fn serve_scheduling_request(
     match label {
         scheduling_labels::CLASS_READ => {
             let class = service.class(task);
-            slime_root::diagnostic_println!(
+            crate::diagnostic_println!(
                 "SLIME_SCHED read task={} class={} priority={}",
                 task.0,
                 class.name(),
@@ -333,14 +141,14 @@ pub(super) fn serve_scheduling_request(
                     )
                 })
             else {
-                slime_root::diagnostic_println!(
+                crate::diagnostic_println!(
                     "SLIME_SCHED refused task={} class=undeclared detail=slot",
                     task.0,
                 );
                 return Response::error(IpcError::BadCapability);
             };
             let Some(subject) = tasks.get(capability.task) else {
-                slime_root::diagnostic_println!(
+                crate::diagnostic_println!(
                     "SLIME_SCHED refused task={} class=absent detail=subject",
                     task.0,
                 );
@@ -348,7 +156,7 @@ pub(super) fn serve_scheduling_request(
             };
             match service.promote(policy, task, capability.task, subject.tcb, class_id) {
                 Ok(class) => {
-                    slime_root::diagnostic_println!(
+                    crate::diagnostic_println!(
                         "SLIME_SCHED promoted task={} subject={} class={} priority={}",
                         task.0,
                         capability.task.0,
@@ -358,7 +166,7 @@ pub(super) fn serve_scheduling_request(
                     Response::success(class.class_id() as i64, class.priority())
                 }
                 Err(error) => {
-                    slime_root::diagnostic_println!(
+                    crate::diagnostic_println!(
                         "SLIME_SCHED refused task={} subject={} class={} detail={error:?}",
                         task.0,
                         capability.task.0,
@@ -433,7 +241,7 @@ pub(super) fn serve_lifecycle_request(
                 service.attempts_remaining(policy, instance, generation)
             });
             let cause = instance.map_or(0, |instance| service.terminal_id(instance));
-            slime_root::diagnostic_println!(
+            crate::diagnostic_println!(
                 "SLIME_LIFECYCLE read task={} state={} attempts={remaining} cause={}",
                 task.0,
                 boot_contracts::lifecycle_policy::state_name(state),
@@ -453,7 +261,7 @@ pub(super) fn serve_lifecycle_request(
             };
             match service.advance(policy, task, state_id) {
                 Ok(state) => {
-                    slime_root::diagnostic_println!(
+                    crate::diagnostic_println!(
                         "SLIME_LIFECYCLE advanced task={} state={}",
                         task.0,
                         boot_contracts::lifecycle_policy::state_name(state),
@@ -461,7 +269,7 @@ pub(super) fn serve_lifecycle_request(
                     Response::success(state as i64, 0)
                 }
                 Err(error) => {
-                    slime_root::diagnostic_println!(
+                    crate::diagnostic_println!(
                         "SLIME_LIFECYCLE refused task={} class={} detail={error:?}",
                         task.0,
                         lifecycle_error_class(error),
@@ -481,14 +289,14 @@ pub(super) fn serve_lifecycle_request(
                 // operation answers, so its task row is already released.
                 true,
             ) else {
-                slime_root::diagnostic_println!(
+                crate::diagnostic_println!(
                     "SLIME_LIFECYCLE refused task={} class=undeclared detail=slot",
                     task.0,
                 );
                 return Response::error(IpcError::BadCapability);
             };
             let Ok(now) = timer_adapter.monotonic_now() else {
-                slime_root::diagnostic_println!(
+                crate::diagnostic_println!(
                     "SLIME_LIFECYCLE FAIL restart clock read task={}",
                     task.0
                 );
@@ -496,7 +304,7 @@ pub(super) fn serve_lifecycle_request(
             };
             match service.admit_restart(policy, generation, subject_instance, now.0) {
                 Ok(admission) => {
-                    slime_root::diagnostic_println!(
+                    crate::diagnostic_println!(
                         "SLIME_LIFECYCLE restart admitted task={} subject={} attempt={} remaining={} ready_at={}",
                         task.0,
                         subject_task.0,
@@ -511,7 +319,7 @@ pub(super) fn serve_lifecycle_request(
                     // marker says so rather than only that a restart was
                     // declined: the two read very differently to an operator.
                     if error == lifecycle::LifecycleError::AttemptsExhausted {
-                        slime_root::diagnostic_println!(
+                        crate::diagnostic_println!(
                             "SLIME_LIFECYCLE terminal task={} subject={} state={} attempts=exhausted",
                             task.0,
                             subject_task.0,
@@ -520,7 +328,7 @@ pub(super) fn serve_lifecycle_request(
                             ),
                         );
                     } else {
-                        slime_root::diagnostic_println!(
+                        crate::diagnostic_println!(
                             "SLIME_LIFECYCLE restart refused task={} subject={} class={} detail={error:?}",
                             task.0,
                             subject_task.0,
@@ -562,7 +370,7 @@ pub(super) fn serve_lifecycle_request(
                 ) {
                     Some((_, instance)) => instance,
                     None => {
-                        slime_root::diagnostic_println!(
+                        crate::diagnostic_println!(
                             "SLIME_LIFECYCLE parameter refused task={} class=undeclared detail=slot",
                             task.0,
                         );
@@ -588,14 +396,14 @@ pub(super) fn serve_lifecycle_request(
             };
             match outcome {
                 Ok(value) => {
-                    slime_root::diagnostic_println!(
+                    crate::diagnostic_println!(
                         "SLIME_LIFECYCLE parameter task={} subject-instance={subject_instance} key={key} write={write} value={value}",
                         task.0,
                     );
                     Response::success(value as i64, 0)
                 }
                 Err(error) => {
-                    slime_root::diagnostic_println!(
+                    crate::diagnostic_println!(
                         "SLIME_LIFECYCLE parameter refused task={} subject-instance={subject_instance} key={key} class={} detail={error:?}",
                         task.0,
                         lifecycle_error_class(error),
@@ -699,255 +507,5 @@ pub(super) const fn lifecycle_error_class(error: lifecycle::LifecycleError) -> &
         lifecycle::LifecycleError::NoParameterAuthority => "no-parameter-authority",
         lifecycle::LifecycleError::UnknownParameter => "unknown-parameter",
         lifecycle::LifecycleError::ParameterTableFull => "parameter-table-full",
-    }
-}
-
-pub(super) fn record_termination(
-    terminations: &mut supervision::Terminations,
-    tasks: &TaskTable<MAX_TASKS>,
-    child: TaskId,
-    termination: supervision::Termination,
-) {
-    if terminations.record(child, termination) {
-        return;
-    }
-    let freed = supervision::sweep(terminations, tasks);
-    if !terminations.record(child, termination) {
-        slime_root::diagnostic_println!(
-            "SLIME_GRAPH FAIL termination lost task={} reason=records-full",
-            child.0
-        );
-    } else {
-        slime_root::diagnostic_println!(
-            "SLIME_GRAPH supervision swept freed={freed} live={}",
-            terminations.len()
-        );
-    }
-}
-
-pub(super) fn reclaim_dead_task(
-    buffers: &mut SharedBufferTable,
-    allocator: &mut ObjectAllocator,
-    id: TaskId,
-    vspace: VSpaceCap,
-) -> bool {
-    let holder = HolderId(u64::from(id.0));
-    let charged = buffers.holder_buffers(holder)
-        + buffers.holder_mappings(holder)
-        + buffers.holder_loans(holder);
-    let mut adapter = BufferAdapter::new(allocator);
-    if buffers.retry_vspace_orphans(&mut adapter, vspace) != 0 {
-        return false;
-    }
-    // Receiver-only loans have no local charge. Settlement must examine the
-    // relationships even when this holder's occupancy is zero.
-    match buffers.reclaim_holder(&mut adapter, holder) {
-        Ok(actions) => {
-            if charged != 0 || !actions.is_empty() {
-                slime_root::diagnostic_println!(
-                    "SLIME_GRAPH holder reclaimed task={} charges={charged} actions={}",
-                    id.0,
-                    actions.len()
-                );
-            }
-        }
-        Err(error) => {
-            slime_root::diagnostic_println!(
-                "SLIME_GRAPH holder reclaim incomplete task={} class={}",
-                id.0,
-                buffer_error_class(error)
-            );
-            return false;
-        }
-    }
-    if adapter.settle_pending_cleanup().is_err() {
-        return false;
-    }
-    if buffers.release_quota(holder) {
-        slime_root::diagnostic_println!(
-            "SLIME_GRAPH quota released task={} live={}",
-            id.0,
-            buffers.quota_count()
-        );
-    }
-    true
-}
-
-/// The half of teardown `reclaim_dead_task` does not do. That function settles
-/// what the task *held* — channels, buffers, loans, in-flight capabilities —
-/// and this returns what the task *is*. Both death paths need both: a task
-/// whose peers were all notified and whose buffers were all reclaimed still
-/// occupies a `TaskTable` entry and still holds every root CSlot its
-/// construction allocated.
-///
-/// Two things depend on it, which is why it is not merely tidiness:
-///
-/// - **`TaskTable::live_children`** counts the table, so a dead child that
-///   stays in it consumes its parent's declared `spawnBudget` forever. The
-///   budget would be a lifetime cap rather than the live-child cap the
-///   generation declares and `sys_spawn` enforces.
-/// - **`CleanupRecord::revoke`** is reachable only from `TaskTable::reclaim`,
-///   so without this every component that exits or faults leaks its root
-///   CSlots for the rest of the boot.
-///
-/// Reported rather than fatal: the objects stay recorded as the table's own
-/// state and the terminal marker's count is what surfaces them, and a graph
-/// whose other components are still running should not be stopped over one
-/// task's cleanup.
-pub(super) fn reclaim_task_objects(
-    generation: &Generation<'_>,
-    launched: &mut LaunchedInstances,
-    tasks: &mut TaskTable<MAX_TASKS>,
-    allocator: &mut ObjectAllocator,
-    mut adaptive: Option<&mut super::super::adaptive::AdaptivePolicy<'_>>,
-    reclaimed: &mut usize,
-    id: TaskId,
-) -> bool {
-    // Read while the record still exists: reclamation clears the entry, and
-    // the entitlement this incarnation returns to is a property of the task
-    // that is about to stop existing.
-    let binding = tasks.private_binding(id);
-    let instance = tasks
-        .get(id)
-        .and_then(|task| task.instance)
-        .and_then(|index| generation.instance(index).ok())
-        .map_or("", |instance| instance.name);
-    let held_pages = tasks.get(id).map_or(0, |task| task.private_memory.pages());
-    // One injected revoke failure for the first published adaptive holder that
-    // dies, so the quarantine-and-retry path is observed on a real task rather
-    // than modelled: a reclamation that did not recover the machine's memory
-    // must refund nothing, and exactly one retry must return it.
-    #[cfg(slime_private_conservation)]
-    if binding.is_some() && launched.instance_for_task(id).is_some() {
-        use core::sync::atomic::{AtomicBool, Ordering};
-        static ARMED: AtomicBool = AtomicBool::new(true);
-        if ARMED.swap(false, Ordering::Relaxed) {
-            crate::object_allocator::elastic::arm_arena_revoke_failure();
-            slime_root::diagnostic_println!(
-                "SLIME_MEM adaptive injected kind=revoke task={} instance={instance}",
-                id.0,
-            );
-        }
-    }
-    match tasks.reclaim(allocator, id) {
-        Ok(record) => {
-            *reclaimed += record.slot_count();
-            // The revoke succeeded, so the pages are genuinely gone and the
-            // entitlement may have them back.
-            if let (Some(policy), Some(binding)) = (adaptive.as_deref_mut(), binding.as_ref()) {
-                policy.retire(allocator, id, instance, binding, true, held_pages);
-            }
-        }
-        Err(error) => {
-            // Capacity the machine has not recovered is never returned: the
-            // incarnation stays charged and quarantined until a retry lands.
-            if let (Some(policy), Some(binding)) = (adaptive, binding.as_ref()) {
-                policy.retire(allocator, id, instance, binding, false, 0);
-            }
-            slime_root::diagnostic_println!(
-                "SLIME_GRAPH task reclaim incomplete task={} error={error:?}",
-                id.0
-            );
-            return false;
-        }
-    }
-    launched.release_by_task(id);
-    slime_root::diagnostic_println!(
-        "SLIME_ROOT image reclaimed task={} instance={} live_slots={} live_objects={} live_bytes={} allocation_descriptors_free={}",
-        id.0,
-        instance,
-        allocator.live_slots(),
-        allocator.live_objects(),
-        allocator.live_bytes(),
-        allocator.allocation_descriptors_free(),
-    );
-    for peer in tasks.tasks() {
-        let Some(peer_instance) = peer
-            .instance
-            .and_then(|index| generation.instance(index).ok())
-        else {
-            continue;
-        };
-        if let Ok((slots, objects, bytes)) = allocator.arena_usage(peer.cleanup.arena) {
-            slime_root::diagnostic_println!(
-                "SLIME_ROOT image peer task={} instance={} slots={} objects={} bytes={}",
-                peer.id.0,
-                peer_instance.name,
-                slots,
-                objects,
-                bytes,
-            );
-        }
-    }
-    report_memory_census(allocator, tasks, id.0);
-    // C10.4: the allocator's own free capacity, printed at the one point in the
-    // boot where a task has just returned everything it held.
-    //
-    // Every count above is of things the root *tracks* — CSlots reclaimed,
-    // tasks live, buffers released — and each is reported by the same
-    // bookkeeping that would be wrong if reclamation were broken. B9 is the
-    // standing evidence that this is not a hypothetical: terminated tasks were
-    // marked terminated and their buffers reclaimed while thirteen frames per
-    // spawn were never returned, and every counter the root printed agreed with
-    // every other one throughout.
-    //
-    // These three are read from the allocator's watermarks instead, so a leak
-    // shows up as a number that fails to come back rather than as a
-    // disagreement between two tallies that share an author. `slots` and
-    // `bytes` are what a repeated spawn/exit workload must return to its
-    // starting value; `live_objects` is what must return to *its* starting
-    // value even though the arena is reused rather than freed.
-    slime_root::diagnostic_println!(
-        "SLIME_ROOT reclaim census task={} slots={} bytes={} live_objects={} extent_reuses={}",
-        id.0,
-        allocator.slots_remaining(),
-        allocator.untyped_bytes_remaining(),
-        allocator.live_objects(),
-        allocator.extents_reused(),
-    );
-    true
-}
-
-pub(super) fn report_memory_census(
-    allocator: &ObjectAllocator,
-    tasks: &TaskTable<MAX_TASKS>,
-    retired: u32,
-) {
-    slime_root::diagnostic_println!(
-        "SLIME_MEM census retired={} free_slots={} live_objects={} live_bytes={} untyped={} reusable={} anchors={} mapped_pages={} allocations_free={} extents_free={} shared_reusable={} shared_retained={} shared_anchors={} active_extent_bytes={} preserved_bytes={} preserved_anchors={} infrastructure_owned={}",
-        retired,
-        allocator.free_slots(),
-        allocator.live_objects(),
-        allocator.live_bytes(),
-        allocator.untyped_bytes_remaining(),
-        allocator.reusable_extent_bytes(),
-        allocator.reusable_extent_anchors(),
-        tasks.private_memory().total_pages(),
-        allocator.allocation_descriptors_free(),
-        allocator.extent_descriptors_free(),
-        allocator.reusable_shared_bytes(),
-        allocator.retained_shared_bytes(),
-        allocator.retained_shared_anchors(),
-        allocator.active_extent_bytes(),
-        allocator.preserved_bytes_remaining(),
-        allocator.preserved_anchor_count(),
-        allocator.infrastructure_owned_bytes(),
-    );
-}
-
-/// Stable name for a private-memory refusal, for the root's own marker (C10.1).
-///
-/// A short token rather than the `Debug` rendering, because a gate asserts on
-/// it: the fields inside each variant are diagnostic detail that varies with
-/// the request, while the *cause* is the thing a check must be able to pin.
-/// Both are emitted — this as `cause=`, the full variant as `detail=` — so the
-/// marker names the class without hiding the numbers.
-pub(crate) fn private_memory_cause(error: &private_memory::GrowError) -> &'static str {
-    match error {
-        private_memory::GrowError::DeltaOverflow { .. } => "delta-overflow",
-        private_memory::GrowError::ReservationExceeded { .. } => "reservation",
-        private_memory::GrowError::QuotaExceeded { .. } => "quota",
-        private_memory::GrowError::TotalExceeded { .. } => "root-ceiling",
-        private_memory::GrowError::Frames { .. } => "frames",
     }
 }

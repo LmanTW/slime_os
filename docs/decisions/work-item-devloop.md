@@ -6,6 +6,8 @@
 [`specs/legacy.zt`](../../specs/legacy.zt))
 **Supersedes:** [`mandatory-spec-driven-work-items.md`](mandatory-spec-driven-work-items.md)
 and [`spec-driven-work-item-bodies.md`](spec-driven-work-item-bodies.md)
+**Amended by:** [`independent-review.md`](independent-review.md), which widens
+who may give the V4 approval and adds V11
 
 ## Decision
 
@@ -55,13 +57,14 @@ judge that judges it.
 | V1 class | A pull request with more than one class, or a path the class table does not list. |
 | V2 planning first | An implementation path that no `owns` covers of an item that is on base and `#active` on head. |
 | V3 no self-grading | An implementation pull request that touches the grader set of any bound target. |
-| V4 grader approval | A grader-set change, an area invariant change, an existing contract schema change, or a change to `scripts/spec/`, `HUMAN_OWNERS`, `AGENT_ACCOUNTS` or `specs/allowed_signers`, without one approval on the head from `HUMAN_OWNERS` by someone other than the author. Any pull request while `HUMAN_OWNERS` lists fewer than two people. |
+| V4 grader approval | A grader-set change, an area invariant change, an existing contract schema change, or a change to `scripts/spec/`, `HUMAN_OWNERS`, `AGENT_ACCOUNTS`, `REVIEW_AGENTS` or `specs/allowed_signers`, without one approval on the head from `HUMAN_OWNERS` or `REVIEW_AGENTS` by someone other than the author. Any pull request while `HUMAN_OWNERS` lists fewer than two people. |
 | V5 legal intent | An `intent` change outside `EDGES`. Entering `#deferred` or `#cancelled` without a V4 approval. |
 | V6 closeout | A move to `terminal/` without a signed done witness, unless the item is `#cancelled`. Any later change to a terminal item. |
 | V7 backlog first | A milestone, or an item under one, entering `#active` while a backlog bug is `#planned` or `#active`, or while a promise fails. |
-| V8 R4 floor (M5) | A lowered `negativeControlsRefused` predicate, without an approved R4 known limit. |
+| V8 R4 floor | A bound target whose floor on `negativeControlsRefused` drops, or loses its predicate, unless the same pull request adds an R4 known limit for that target. Adding a known limit needs a V4 approval. |
 | V9 provenance | A `#human` quote shorter than 8 characters or a blanket answer, or a source that is a pull request number. Warning until three real features close. |
 | V10 frozen promises | An added, changed or removed area requirement. An item's `supersedes` replaces one instead. |
+| V11 independent review | Any pull request but a closeout whose head has no approval from `HUMAN_OWNERS` or `REVIEW_AGENTS` by someone other than the author. |
 
 A **bound target** is one that an item in `.tasks/items/` that is not
 cancelled, a terminal item nobody superseded, or an area requirement binds.
@@ -80,7 +83,9 @@ not unrelated pull requests.
 `CG-AA`. At the GitLab move, it lists at least two people of the team that
 continues. `AGENT_ACCOUNTS` lists the agent accounts. The validator tells a
 person from an agent by the pull request's author account, never by a
-trailer.
+trailer. `REVIEW_AGENTS` lists the accounts whose approval is the review
+agent's verdict. Today it lists `github-actions[bot]`, the account the
+`Agent review` workflow submits its review with.
 
 On GitHub, agents have no account of their own, and `AGENT_ACCOUNTS` is empty.
 The person whose account an agent session pushes with is the author, and
@@ -109,11 +114,11 @@ recipes. `scripts/spec/check` became the only judge, and it blocks.
 - A pull request can edit the workflow that runs the judge, or add one that
   reports a passing check of the same name. A personal-account GitHub
   repository cannot require a workflow from `main`; only an organization
-  ruleset can. So the `main` ruleset requires the `Devloop v1.5 judge` and
-  `CI` status checks and Code Owner review, and `.github/CODEOWNERS` lists
-  `.github/`, `scripts/spec/` and the owner lists. A pull request that
-  touches them needs an approval from a person in `HUMAN_OWNERS` other than
-  its author. On GitLab, a protected pipeline definition replaces both.
+  ruleset can. The `main` ruleset requires the `Devloop v1.5 judge` and `CI`
+  status checks and allows no bypass of the judge check. It required Code
+  Owner review until 2026-11-17. [`independent-review.md`](independent-review.md)
+  replaced that with a blocking finding of the review, which is a rule and
+  not a mechanism. On GitLab, a protected pipeline definition replaces it.
 
 ## Revisit when
 

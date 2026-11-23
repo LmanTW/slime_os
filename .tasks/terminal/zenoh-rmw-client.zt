@@ -1,0 +1,65 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a1f66e-957a-70f7-b2b6-4a9c500c5c27" "zenoh-rmw-client" "zenoh-transport"
+  "A Profile 0 connector takes the client role and opens a session with a router"
+  "A Profile 0 session announces itself as a peer and refuses an INIT whose `whatami` is a client or a router. `rmw_zenohd` answers a client INIT with an INIT_ACK of `whatami` 0. A session built today refuses that answer, so no Slime component can connect to a router. A host probe of a Slime client against the pinned router exchanged samples 12 of 12 times, and the same peer got none. The encoder cannot write the client form either.")
+  with {
+    intent = #active;
+    owns = {
+      "components/lib/src/zenoh_profile0.rs";
+      "components/lib/src/zenoh_profile0/**";
+    };
+    nonGoals = {
+      h.nonGoal "A component, a composition, a system spec or a QEMU gate that runs the role. This item judges the session on the host." h.agentDefault;
+      h.nonGoal "A client role on a link, on the graph session or on a listener. A later item carries the role up to the link a component uses." h.agentDefault;
+      h.nonGoal "A live router, a ROS install or a registry. The exam replays two handshakes that `rmw_zenohd` wrote." h.agentDefault;
+      h.nonGoal "What a router forwards after the handshake, its liveliness tokens, or a router that is not on its default configuration." h.agentDefault;
+      h.nonGoal "A field on `Params` or on `Config`. About a dozen files build those by literal, and they are outside this item's `owns`." h.agentDefault;
+      h.nonGoal "Any change to what a session with no client role writes or accepts. The existing vectors and the stock-peer exam pin it." h.agentDefault;
+    };
+    requirements = {
+      h.req "client-writes-the-client-form"
+        "A connector with the client role writes the peer form of INIT_SYN with the two low bits of its packed byte set to 2. No other byte differs."
+        { "zenoh_rmw_client_check"; };
+      h.req "client-opens-with-a-router"
+        "That connector takes each captured INIT_ACK of `whatami` 0, writes an OPEN_SYN that echoes the router's cookie, takes the OPEN_ACK and is open."
+        { "zenoh_rmw_client_check"; };
+      h.req "default-is-unchanged"
+        "A connector with no client role writes the peer form and refuses an INIT_ACK of `whatami` 0 as `unsupported-whatami`. Its written bytes equal what it wrote before."
+        { "zenoh_rmw_client_check"; "zenoh_session_check"; "zenoh_stock_check"; };
+      h.req "client-refuses-what-it-must"
+        "A client refuses an INIT_ACK of `whatami` 1 or 2 as `unsupported-whatami`. A listener built as a client is `invalid-config`. A refused batch leaves the connector awaiting its INIT_ACK, and the transcript prints that state."
+        { "zenoh_rmw_client_check"; };
+      h.req "controls-are-refused"
+        "The judge refuses 52 corrupted records before it judges the real run: 44 mutated transcripts and 8 corrupted captures."
+        { "zenoh_rmw_client_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_rmw_client_check" {
+        h.count "casesObserved" 13;
+        h.count "negativeControlsRefused" 52;
+      };
+      h.observed "zenoh_session_check";
+      h.observed "zenoh_stock_check";
+    };
+    decisions = {
+      h.decided "the-role-is-a-call-on-the-session"
+        "A session takes the client role through a builder call on the connector, and `Params` and `Config` stay as they are."
+        "a new field on `Params` needs an edit in about a dozen files outside this item's `owns`. A default of peer keeps every existing session as it is"
+        h.agentDefault
+        { "client-writes-the-client-form"; "default-is-unchanged"; };
+      h.decided "a-client-takes-only-a-router"
+        "A client accepts an INIT_ACK of `whatami` 0 and refuses 1 and 2."
+        "the only peer captured is `rmw_zenohd`, and a client that took a peer would accept a form no capture shows"
+        h.agentDefault
+        { "client-refuses-what-it-must"; };
+      h.decided "the-router-captures-are-two-runs-on-one-host"
+        "The exam replays two handshakes of `rmw_zenohd` 0.6.10-r1 that differ in the ZID, the cookie and the sequence number. The OPEN_SYN is this side's and is not a fixture."
+        "the router wrote the INIT_ACK and the OPEN_ACK, and the client wrote the rest"
+        h.agentDefault
+        { "client-opens-with-a-router"; };
+    };
+  };
+
+item

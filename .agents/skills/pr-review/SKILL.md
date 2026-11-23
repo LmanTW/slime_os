@@ -1,12 +1,12 @@
 ---
 name: pr-review
-description: Rules that bound any review of a Slime OS pull request and any answer to one — what counts as a finding, how severity is assigned, one review per head, consistency across rounds, and how an author reproduces, fixes, or declines a finding. Use when asked to review a PR, to triage or answer review threads (including Codex findings), or to decide whether a PR is ready. For the adversarial procedure against a task/v2 work item, use `spec-review` alongside this.
+description: Rules that bound any review of a Slime OS pull request and any answer to one — what counts as a finding, how severity is assigned, one review per head, consistency across rounds, and how an author reproduces, fixes, or declines a finding. Use when asked to review a PR, to triage or answer review threads (including review-bot findings), or to decide whether a PR is ready. For the adversarial procedure against a task/v2 work item, use `spec-review` alongside this.
 ---
 
 # PR review
 
-These rules bind every reviewer of a PR — a person, a review bot such as
-Codex, or an agent asked to review — and the author answering the review.
+These rules bind every reviewer of a PR — a person, a review bot, or an
+agent asked to review — and the author answering the review.
 `AGENTS.md` carries the summary that review bots read; this skill is the full
 text. `.agents/skills/spec-review/SKILL.md` is the procedure for an
 implementation PR against its task/v2 work item; the rules here bound what any
@@ -53,7 +53,9 @@ A finding is **blocking** only when:
 - a refused input is accepted;
 - an authority, lifetime, or determinism rule is broken;
 - a format crossing a boundary has no Zutai contract;
-- the recipe cannot pass as landed.
+- the recipe cannot pass as landed;
+- the PR adds a workflow or a job whose check name equals a required check,
+  or that submits a review, because either could report the PR's own verdict.
 
 A real defect in the diff whose fix is local is a **non-blocking** finding.
 
@@ -126,8 +128,8 @@ linking [`HUMAN.md`](../../../HUMAN.md), when either holds:
   findings, and the decision that would close the whole class (for example:
   require storage to equal the declared configuration instead of bounding it
   from below).
-- A non-blocking finding (Codex P2) lands on process or verification text or
-  code: `scripts/`, `.tasks/`, `specs/`, `.agents/`, `AGENTS.md`, or
+- A non-blocking finding lands on process or verification text or code:
+  `scripts/`, `.tasks/`, `specs/`, `.agents/`, `AGENTS.md`, or
   `docs/` outside `docs/architecture/`. These are collected into one
   follow-up comment for the human to accept or drop, not fixed in the PR.
 

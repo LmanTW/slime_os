@@ -92,13 +92,16 @@ fn network_summary(message: &Network<'_>) -> String {
 
 fn summary(message: &Message<'_>) -> String {
     match message {
-        Message::InitSyn { zid, batch_size } => {
+        Message::InitSyn {
+            zid, batch_size, ..
+        } => {
             format!("INIT_SYN;v=9;zid={};batch={batch_size}", hex(zid))
         }
         Message::InitAck {
             zid,
             batch_size,
             cookie,
+            ..
         } => format!(
             "INIT_ACK;v=9;zid={};batch={batch_size};cookie={}",
             hex(zid),

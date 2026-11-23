@@ -1,0 +1,50 @@
+{
+  formatVersion = 1;
+  name = "zenoh-rmw-peer";
+  componentType = "application";
+  version = "1.0.0";
+  owner = "root";
+  purpose = "Dials the rmw_zenoh node, runs a plain Zenoh Profile 0 link, subscribes to one topic, publishes four strings to the subscribed node, and closes with it.";
+  implementation = {
+    provider = "workspace";
+    binary = "zenoh-rmw-peer";
+    contentHash = "";
+  };
+  provides = [];
+  requires = [ "endpoint"; ];
+  interfaces = [];
+  dependencies = [ "network-service"; ];
+  communication = { semantic = "none"; qos = []; };
+  configuration = [];
+  lifecycle = [ "Initialize"; "Start"; "Running"; "Error"; ];
+  runtime = {
+    executionEnvironment = "aarch64-sel4-qemu-virt";
+    resource = {
+      stackBytes = 16384;
+      spawnBudget = 0;
+      extraThreads = 0;
+      bufferBytePages = 0;
+      bufferCount = 0;
+      mappingCount = 2;
+      loanCount = 2;
+      privatePageQuota = 0;
+    };
+    devices = [];
+  };
+  health = "required";
+  lifetime = "bounded";
+  compatibility = {
+    platform = "aarch64-sel4-qemu-virt";
+    interface = "contracts/interface-schema/v1";
+    dependency = "exact";
+    resource = "atMost";
+    runtime = "exact";
+    qos = "none";
+  };
+  test = {
+    testCondition = "the zenoh_rmw_peer_check gate finds the crate, its registration and the library calls it stands on";
+    expectedResult = "every file fact holds and each synthetic file set missing a fact is refused";
+    passFailCriteria = "zenoh profile 0 rmw-peer check";
+    requiredTestEnvironment = "zenoh_rmw_peer_check";
+  };
+}

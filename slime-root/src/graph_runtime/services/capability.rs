@@ -1,5 +1,5 @@
 use super::*;
-use slime_root::io_resource::LeaseId;
+use crate::io_resource::LeaseId;
 
 pub(super) fn capability_kind(capability: graph::CapabilityEntry) -> u32 {
     use slime_proto::capability_transfer::*;
@@ -63,7 +63,7 @@ pub(super) fn serve_capability_export(
             || rights & !(RIGHT_SEND | RIGHT_RECV) != 0
             || rights & declared != rights
         {
-            slime_root::diagnostic_println!(
+            crate::diagnostic_println!(
                 "SLIME_GRAPH endpoint export rejected task={} source_slot={} carrier={} rights={rights:#x} declared={declared:#x} transferable={}",
                 sender.0,
                 source_slot,
@@ -202,7 +202,7 @@ pub(super) fn serve_capability_export(
         finalized: false,
     });
     exports.exported = exports.exported.saturating_add(1);
-    slime_root::diagnostic_println!(
+    crate::diagnostic_println!(
         "SLIME_GRAPH capability exported task={} id={} kind={} rights={rights:#x} retain={}",
         sender.0,
         id,
@@ -325,7 +325,7 @@ pub(super) fn serve_capability_import(
     if generation::recording_declares_deterministic(generation, receiver_instance)
         && export.capability.rights_bits() & boot_contracts::generation::RIGHT_UNRECORDED != 0
     {
-        slime_root::diagnostic_println!(
+        crate::diagnostic_println!(
             "SLIME_RECORD refused import task={} kind={} rights={:#x} class=unrecorded-source",
             receiver.0,
             export.capability.kind_name(),
@@ -348,7 +348,7 @@ pub(super) fn serve_capability_import(
     };
     cleanup_export_ticket(allocator, tasks, export);
     exports.imported = exports.imported.saturating_add(1);
-    slime_root::diagnostic_println!(
+    crate::diagnostic_println!(
         "SLIME_GRAPH capability imported task={} id={} kind={} rights={:#x} retain={}",
         receiver.0,
         id,
@@ -573,7 +573,7 @@ pub(super) fn serve_buffer_loan(
             match resolved {
                 Some((receiver, true)) => Some(receiver),
                 Some((_receiver, false)) => {
-                    slime_root::diagnostic_println!(
+                    crate::diagnostic_println!(
                         "SLIME_GRAPH loan refused task={} slot={receiver_slot} class=undelegated",
                         id.0,
                     );
@@ -585,7 +585,7 @@ pub(super) fn serve_buffer_loan(
         Some(_) => None,
     };
     let Some(peer) = resolved else {
-        slime_root::diagnostic_println!(
+        crate::diagnostic_println!(
             "SLIME_GRAPH loan refused task={} slot={receiver_slot} class=absent",
             id.0
         );
@@ -602,7 +602,7 @@ pub(super) fn serve_buffer_loan(
     let handle = match buffers.loan(lender, receiver, handle, offset, length, writable) {
         Ok(handle) => handle,
         Err(error) => {
-            slime_root::diagnostic_println!(
+            crate::diagnostic_println!(
                 "SLIME_GRAPH loan refused task={} slot={buffer_slot} class={}",
                 id.0,
                 buffer_error_class(error),
@@ -633,11 +633,11 @@ pub(super) fn serve_buffer_loan(
         // property of the table, not something this call site should encode.
         let mut adapter = BufferAdapter::new(allocator);
         let _ = buffers.revoke_loan(&mut adapter, lender, handle);
-        slime_root::diagnostic_println!("SLIME_GRAPH loan slot unavailable task={}", id.0);
+        crate::diagnostic_println!("SLIME_GRAPH loan slot unavailable task={}", id.0);
         return Response::error(IpcError::DestinationSlotsExhausted);
     };
     *served += 1;
-    slime_root::diagnostic_println!(
+    crate::diagnostic_println!(
         "SLIME_GRAPH loan created task={} slot={slot} id={} to={} offset={offset} length={length}",
         id.0,
         handle.id.0,
@@ -716,7 +716,7 @@ pub(super) fn serve_loan_lifecycle(
                 id,
                 LeaseId(handle.id.0),
             ) {
-                slime_root::diagnostic_println!(
+                crate::diagnostic_println!(
                     "SLIME_IO loan revoke accounting failed task={} lease={} error={error:?}",
                     id.0,
                     handle.id.0,
@@ -739,7 +739,7 @@ pub(super) fn serve_loan_lifecycle(
                     LoanLifecycleRequest::Map => {}
                 }
             }
-            slime_root::diagnostic_println!(
+            crate::diagnostic_println!(
                 "SLIME_GRAPH loan {} task={} slot={slot} id={}",
                 loan_operation_name(operation),
                 id.0,
@@ -754,7 +754,7 @@ pub(super) fn serve_loan_lifecycle(
             {
                 table.drop_slot(slot);
             }
-            slime_root::diagnostic_println!(
+            crate::diagnostic_println!(
                 "SLIME_GRAPH loan {} refused task={} slot={slot} class={}",
                 loan_operation_name(operation),
                 id.0,
@@ -1058,7 +1058,7 @@ pub(super) fn admit_mapping_destination(
     };
     if task.private_memory.overlaps(&(base..end)) {
         let window = task.private_memory.window();
-        slime_root::diagnostic_println!(
+        crate::diagnostic_println!(
             "SLIME_MEM mapping refused task={} base={base:#x} end={end:#x} window={:#x}..{:#x}",
             task.id.0,
             window.start,
@@ -1108,7 +1108,7 @@ pub(super) fn finish_buffer_lifecycle(
             // check refused it. A gate asserting that the mapping quota bites
             // at ceiling+1 needs the second, and the wire status cannot carry
             // it — see `buffer_error_class`.
-            slime_root::diagnostic_println!(
+            crate::diagnostic_println!(
                 "SLIME_GRAPH buffer {} refused task={} slot={slot} class={}",
                 buffer_operation_name(operation),
                 id.0,

@@ -3,7 +3,7 @@
 | | |
 | --- | --- |
 | Route | hardware |
-| Depends on | [Hardware H track](../../roadmap/04-platform-hardware.md); explicitly an optional optimization that does not block the track's exit conditions |
+| Depends on | [Hardware H track](../plans/framework-hardware.md#slice-acceptance); explicitly an optional optimization that does not block the track's exit conditions |
 | Enables | a third isolation tier between full components and same-address-space code |
 
 ## Motivation

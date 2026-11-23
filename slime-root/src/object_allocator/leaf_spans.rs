@@ -174,11 +174,6 @@ impl LeafSpanStore {
         Segmented::<LeafSpanRun>::entries_per_page()
     }
 
-    #[cfg(test)]
-    pub(crate) fn provision_host(&mut self, records: usize) {
-        self.runs.provision_host(records, LeafSpanRun::EMPTY);
-    }
-
     /// Hand one region a cleared record covering `spans`.
     ///
     /// Returns `None` when the window needs more spans than a record addresses,
@@ -231,6 +226,13 @@ impl LeafSpanStore {
         record.live = false;
         record.free_next = head;
         self.free = index as u32;
+    }
+}
+
+#[cfg(test)]
+impl LeafSpanStore {
+    pub(crate) fn provision_host(&mut self, records: usize) {
+        self.runs.provision_host(records, LeafSpanRun::EMPTY);
     }
 }
 

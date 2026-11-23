@@ -32,6 +32,10 @@ The root-diagnostics arm boots the same composition and, besides everything the
 tcp-buffers arm judges, holds the root's per-operation diagnostic lines to once
 per key and its repeat counters to the frames the peer saw
 (`scripts/lib/root_diagnostics.py`); it is also explicit.
+The root-console arm holds the root's own console UART (`scripts/lib/root_console.py`):
+the actual `slime-root/src/diagnostic.rs` on the host, with an installed UART and a
+counting kernel sink, the root's sources, and the raw serial bytes of one boot of the
+local composition; it is also explicit.
 The link-wake arm holds every composition whose network-service has a wait set
 and a virtio-net driver to one declared `device` wait-set source, then boots
 `sel4-io-tcp-buffers` and requires the guest to acknowledge the rx-window
@@ -70,6 +74,7 @@ import tcp_impairment_peer  # noqa: E402
 import tcp_listener_peer  # noqa: E402
 import tcp_options_peer  # noqa: E402
 import tcp_buffers_peer  # noqa: E402
+import root_console  # noqa: E402
 import root_diagnostics  # noqa: E402
 import link_wake  # noqa: E402
 import http_peer  # noqa: E402
@@ -79,6 +84,7 @@ import devloop_observations  # noqa: E402
 import zenoh_capture  # noqa: E402
 import zenoh_exchange  # noqa: E402
 import zenoh_service_arm  # noqa: E402
+import zenoh_rmw_arm  # noqa: E402
 import zenoh_listener_peer  # noqa: E402
 from sel4_gate_markers import match_marker_contract  # noqa: E402
 from sel4_plane import run_plane  # noqa: E402
@@ -644,9 +650,9 @@ ZENOH_SERVICE_CHAINS: tuple[tuple[str, tuple[str, ...]], ...] = (
         r"\[zenoh-service\] holder attached holder=[a-z-]+ rows=[1-9]\d*",
     )),
     ("zenoh-service exchange", (
-        r"\[zenoh-service\] published holder=[a-z-]+ row=\d+ sequence=0 reached=1 peer=none",
+        r"\[zenoh-service\] published holder=[a-z-]+ row=\d+ sequence=0 reached=1 peer=(?:none|sent)",
         r"\[zenoh-service\] delivered holder=[a-z-]+ row=\d+ sequence=0",
-        r"\[zenoh-service\] published holder=[a-z-]+ row=\d+ sequence=3 reached=1 peer=none",
+        r"\[zenoh-service\] published holder=[a-z-]+ row=\d+ sequence=3 reached=1 peer=(?:none|sent)",
         r"\[zenoh-service\] delivered holder=[a-z-]+ row=\d+ sequence=3",
     )),
     ("zenoh-service refusal", (r"\[zenoh-service\] denial class=not-granted holder=[a-z-]+ refused=1",)),
@@ -656,8 +662,61 @@ ZENOH_SERVICE_CHAINS: tuple[tuple[str, tuple[str, ...]], ...] = (
     )),
 )
 
+# The same service with four holders and six rows. Four holders attach, and alpha's publications reach three of them.
+ZENOH_SERVICE_FOUR_CLOSURE = "sel4-zenoh-service-four"
+ZENOH_SERVICE_FOUR_CHAINS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("zenoh-service-four admission", (rf"SLIME_ROOT generation admitted number={zenoh_service_arm.FOUR_GENERATION} executables=\d+ instances=\d+ grants=\d+ ",)),
+    ("zenoh-service-four grants", (
+        r"\[zenoh-service\] grants rows=6 holders=4",
+        r"\[zenoh-service\] holder attached holder=[a-z-]+ rows=[1-9]\d*",
+        r"\[zenoh-service\] holder attached holder=[a-z-]+ rows=[1-9]\d*",
+        r"\[zenoh-service\] holder attached holder=[a-z-]+ rows=[1-9]\d*",
+        r"\[zenoh-service\] holder attached holder=[a-z-]+ rows=[1-9]\d*",
+    )),
+    ("zenoh-service-four exchange", (
+        r"\[zenoh-service\] published holder=alpha row=0 sequence=0 reached=3 peer=(?:none|sent)",
+        r"\[zenoh-service\] published holder=alpha row=0 sequence=3 reached=3 peer=(?:none|sent)",
+    )),
+    ("zenoh-service-four refusal", (r"\[zenoh-service\] denial class=not-granted holder=beta refused=1",)),
+    ("zenoh-service-four success", (
+        r"\[zenoh-service\] holder detached holder=[a-z-]+",
+        rf"SLIME_GRAPH HEALTHY generation={zenoh_service_arm.FOUR_GENERATION} required=\d+ live=0 completed=\d+ failed=0",
+    )),
+)
+
+# The rmw_zenoh node and its native peer, over the network service's loopback. Each component is a task of its own, and
+# inside one component the loop that publishes also reads, so a publication and a reception have no fixed order, even
+# against each other. The boot plane gate held lines of separate tasks to one order and failed 2 of 10 boots on it. These
+# chains therefore hold only the orders the components guarantee: a component's setup before its close. Each sample line is
+# a chain of one marker, which the gate requires and orders against nothing. `zenoh_rmw_arm.judge` holds the order of the
+# sequence numbers and the close after the exchange.
+def _rmw_sample_markers() -> tuple[tuple[str, tuple[str, ...]], ...]:
+    markers = []
+    for component in zenoh_rmw_arm.COMPONENTS:
+        for kind in ("published", "received"):
+            for number in range(1, zenoh_rmw_arm.SAMPLES + 1):
+                markers.append((f"zenoh-rmw {component} sample", (rf"\[{component}\] {kind} sequence={number}\b",)))
+    return tuple(markers)
+
+
+ZENOH_RMW_CHAINS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("zenoh-rmw admission", (rf"SLIME_ROOT generation admitted number={zenoh_rmw_arm.GENERATION} executables=\d+ instances=\d+ grants=\d+ ",)),
+    ("zenoh-rmw node", (
+        r"\[zenoh-rmw-node\] subscription declared",
+        r"\[zenoh-rmw-node\] session closing",
+        r"\[zenoh-rmw-node\] session closed",
+    )),
+    ("zenoh-rmw peer", (
+        r"\[zenoh-rmw-peer\] session open",
+        r"\[zenoh-rmw-peer\] subscription declared",
+        r"\[zenoh-rmw-peer\] session closed",
+    )),
+    *_rmw_sample_markers(),
+    ("zenoh-rmw success", (rf"SLIME_GRAPH HEALTHY generation={zenoh_rmw_arm.GENERATION} required=\d+ live=0 completed=\d+ failed=0",)),
+)
+
 # Every arm participates in the shared missing/reordered/failure controls.
-CHAINS = AUTHORITY_CHAINS + TCP_CHAINS + LOCAL_CHAINS + LIFETIME_CHAINS + SERVICE_FAULT_CHAINS + DRIVER_RESET_CHAINS + HTTP_CHAINS + IMPAIRMENT_CHAINS + LISTENER_CHAINS + OPTIONS_CHAINS + BUFFERS_CHAINS + NET_CHAINS + ZENOH_CHAINS + ZENOH_SERVICE_CHAINS
+CHAINS = AUTHORITY_CHAINS + TCP_CHAINS + LOCAL_CHAINS + LIFETIME_CHAINS + SERVICE_FAULT_CHAINS + DRIVER_RESET_CHAINS + HTTP_CHAINS + IMPAIRMENT_CHAINS + LISTENER_CHAINS + OPTIONS_CHAINS + BUFFERS_CHAINS + NET_CHAINS + ZENOH_CHAINS + ZENOH_SERVICE_CHAINS + ZENOH_RMW_CHAINS
 FAILURE_MARKERS: tuple[str, ...] = (
     r"SLIME_ROOT FATAL",
     r"SLIME_GRAPH FAIL",
@@ -674,6 +733,8 @@ FAILURE_MARKERS: tuple[str, ...] = (
     r"\[ros2-demo-publisher\] fail: ",
     r"\[ros2-demo-subscriber\] fail: ",
     r"\[zenoh-service\] fail: ",
+    r"\[zenoh-rmw-node\] fail: ",
+    r"\[zenoh-rmw-peer\] fail: ",
     r"\[rpi5-ros2-demo\] failure class=",
     r"\[io-network-lifetime-probe\] fail: ",
     r"\[virtio-net-driver\] fail: ",
@@ -1079,6 +1140,46 @@ def run_root_diagnostics_arm(image: Path, mac: str, retry_limits: dict[int, int]
     print(verdict.line())
 
 
+def run_root_console_arm(transcript_path: Path | None) -> None:
+    """The host exam and the source audit of the console route, then one boot of the local composition
+    whose raw serial bytes are judged."""
+    try:
+        refused = root_console.controls()
+    except ValueError as error:
+        fail(f"root console controls: {error}")
+    print(f"[root-console] controls refused={refused}", flush=True)
+    try:
+        root_console.audit(ROOT)
+        cases = root_console.run_exam(ROOT)
+    except ValueError as error:
+        fail(str(error))
+    print(f"[root-console] host exam cases={cases} kernel_bytes_after_install=0; source audit passed", flush=True)
+    image = build_image("sel4-io-local")
+    terminal = re.compile(LOCAL_CHAINS[-1][1][-1] + "|" + "|".join(FAILURE_MARKERS))
+    with tempfile.TemporaryDirectory(prefix="slime-root-console-") as directory:
+        raw_path = Path(directory) / "run.serial"
+        transcript = run_plane(image=image, timeout=TIMEOUT, terminal_condition=terminal, fail=fail, pins_path=PINS, raw_transcript=raw_path)
+        raw = raw_path.read_bytes()
+    if transcript_path is not None:
+        transcript_path.write_text(transcript, encoding="utf-8")
+    try:
+        match_marker_contract(transcript, LOCAL_CHAINS, FAILURE_MARKERS, fail)
+        try:
+            verdict = root_console.judge(raw)
+        except ValueError as error:
+            fail(str(error))
+    except SystemExit:
+        print(transcript)
+        raise
+    print(verdict.line())
+    devloop_observations.record(
+        casesObserved=cases,
+        recordsObserved=verdict.records,
+        recordsBeforeInstall=verdict.early,
+        negativeControlsRefused=refused,
+    )
+
+
 def run_link_wake_arm(image: Path, mac: str, retry_limits: dict[int, int], transcript_path: Path | None) -> None:
     """The tcp-buffers run, with the rx-window acknowledgment latency and the service's device wakes judged."""
     transcript, peer = run_buffers_arm(image, mac, retry_limits, transcript_path)
@@ -1350,6 +1451,76 @@ def run_zenoh_service_arm(transcript_path: Path | None) -> None:
     devloop_observations.record(casesObserved=samples + denials, negativeControlsRefused=controls)
 
 
+def run_zenoh_service_four_arm(transcript_path: Path | None) -> None:
+    """Boot the Zenoh service with four holders and six rows and judge what it printed.
+
+    The judge is the one of the two-holder arm, held to the grants of this composition's system spec. Two of the holders
+    hold two rows, so a delivery arrives on a row that differs from the row of its publication.
+    """
+    fixture = COMPOSITIONS / f"{zenoh_service_arm.FOUR_CLOSURE}.zti"
+    if not fixture.is_file():
+        fail(f"{fixture.relative_to(ROOT)} does not exist; the {zenoh_service_arm.FOUR_CLOSURE} composition has not landed")
+    try:
+        controls = zenoh_service_arm.controls()
+        grants = zenoh_service_arm.read_grants(closure=zenoh_service_arm.FOUR_CLOSURE)
+    except zenoh_service_arm.ArmError as error:
+        fail(str(error))
+    image = build_image(ZENOH_SERVICE_FOUR_CLOSURE)
+    terminal = re.compile(ZENOH_SERVICE_FOUR_CHAINS[-1][1][-1] + "|" + "|".join(FAILURE_MARKERS))
+    transcript = run_plane(image=image, timeout=TIMEOUT, terminal_condition=terminal, fail=fail, pins_path=PINS)
+    if transcript_path is not None:
+        transcript_path.write_text(transcript, encoding="utf-8")
+    try:
+        match_marker_contract(transcript, ZENOH_SERVICE_FOUR_CHAINS, FAILURE_MARKERS, fail)
+    except SystemExit:
+        print(transcript)
+        raise
+    lines = [line.strip() for line in transcript.splitlines() if line.strip().startswith("[zenoh-service] ")]
+    try:
+        samples, denials = zenoh_service_arm.judge(lines, grants)
+    except zenoh_service_arm.ArmError as error:
+        print(transcript)
+        fail(str(error))
+    print(f"[zenoh-service-four-exchange] samples={samples} denials={denials} controls-refused={controls}")
+    devloop_observations.record(casesObserved=samples + denials, negativeControlsRefused=controls)
+
+
+def run_zenoh_rmw_arm(transcript_path: Path | None) -> None:
+    """Boot the rmw_zenoh node and its native peer over the network service's loopback and judge what they printed.
+
+    The composition must exist before QEMU starts. The two components' lines are judged for the order of each
+    component's own chain, and then for what each line claims: each component published and received the sequence
+    numbers 1 to 4 once each in order, the node closed only after the exchange was done, and neither printed a failure.
+    The judge is held to mutations of an honest transcript first. The exchange crosses the loopback backend, so this
+    observes the two components and not the stack's wire.
+    """
+    fixture = COMPOSITIONS / f"{zenoh_rmw_arm.CLOSURE}.zti"
+    if not fixture.is_file():
+        fail(f"{fixture.relative_to(ROOT)} does not exist; the {zenoh_rmw_arm.CLOSURE} composition has not landed")
+    try:
+        controls = zenoh_rmw_arm.controls()
+    except zenoh_rmw_arm.ArmError as error:
+        fail(str(error))
+    image = build_image(zenoh_rmw_arm.CLOSURE)
+    terminal = re.compile(ZENOH_RMW_CHAINS[-1][1][-1] + "|" + "|".join(FAILURE_MARKERS))
+    transcript = run_plane(image=image, timeout=TIMEOUT, terminal_condition=terminal, fail=fail, pins_path=PINS)
+    if transcript_path is not None:
+        transcript_path.write_text(transcript, encoding="utf-8")
+    try:
+        match_marker_contract(transcript, ZENOH_RMW_CHAINS, FAILURE_MARKERS, fail)
+    except SystemExit:
+        print(transcript)
+        raise
+    lines = [line.strip() for line in transcript.splitlines() if line.strip().startswith(("[zenoh-rmw-node] ", "[zenoh-rmw-peer] "))]
+    try:
+        accepted = zenoh_rmw_arm.judge(lines)
+    except zenoh_rmw_arm.ArmError as error:
+        print(transcript)
+        fail(str(error))
+    print(f"[zenoh-rmw-exchange] lines={accepted} controls-refused={controls}")
+    devloop_observations.record(casesObserved=accepted, negativeControlsRefused=controls)
+
+
 def run_zenoh_external_arm(transcript_path: Path | None) -> None:
     """Boot the demo against a stock eclipse-zenoh 1.0.0 listener on the host, over a NIC.
 
@@ -1594,7 +1765,7 @@ def run_http_public_arm(image: Path, transcript_path: Path | None) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Boot and check the seL4 I/O network proof planes")
     parser.add_argument("--no-build", action="store_true")
-    parser.add_argument("--arm", choices=("authority", "tcp", "local", "lifetime", "service-fault", "driver-reset", "tcp-impairment", "tcp-listener", "tcp-options", "tcp-buffers", "root-diagnostics", "link-wake", "net", "zenoh", "zenoh-service", "zenoh-external", "http", "http-public", "all"), default="all")
+    parser.add_argument("--arm", choices=("authority", "tcp", "local", "lifetime", "service-fault", "driver-reset", "tcp-impairment", "tcp-listener", "tcp-options", "tcp-buffers", "root-diagnostics", "root-console", "link-wake", "net", "zenoh", "zenoh-service", "zenoh-service-four", "zenoh-rmw", "zenoh-external", "http", "http-public", "all"), default="all")
     parser.add_argument("--controls-only", action="store_true", help="zenoh-external arm only: run the judges against their mutated evidence, without QEMU or a listener")
     parser.add_argument("--allow-public", action="store_true", help="explicitly authorize the opt-in public DNS/HTTP smoke")
     parser.add_argument("--http-case", choices=tuple(case.name for case in http_peer.cases()))
@@ -1620,8 +1791,8 @@ def main() -> None:
         fail(f"run from repository root: {ROOT}")
     if arguments.arm == "http-public" and not arguments.allow_public:
         fail("public HTTP requires explicit --allow-public; unavailable public access is not a pass")
-    if arguments.controls_only and arguments.arm not in ("zenoh-external", "zenoh-service"):
-        fail("--controls-only requires --arm zenoh-external or --arm zenoh-service")
+    if arguments.controls_only and arguments.arm not in ("zenoh-external", "zenoh-service", "zenoh-service-four", "zenoh-rmw"):
+        fail("--controls-only requires --arm zenoh-external, --arm zenoh-service, --arm zenoh-service-four or --arm zenoh-rmw")
     if arguments.http_case is not None and arguments.arm != "http":
         fail("--http-case requires --arm http")
     if arguments.arm == "http":
@@ -1676,6 +1847,14 @@ def main() -> None:
             "seL4 root diagnostics check: the root printed each per-operation clock and payload DMA "
             "diagnostic once per key, its repeat counters matched the frames on the wire, and the "
             "tcp-buffers plane passed with its throughput recorded"
+        )
+    if arguments.arm == "root-console":
+        run_root_console_arm(arguments.transcript)
+        print(
+            "seL4 root console check: with a UART installed the root's writer sent the kernel sink no byte, "
+            "the root installs QEMU virt's PL011 once and before main's first record, and in the boot only "
+            "records of the allocator's bring-up preceded the install marker, with a carriage return before "
+            "every later line feed"
         )
     if arguments.arm == "link-wake":
         try:
@@ -1786,6 +1965,26 @@ def main() -> None:
     if arguments.arm == "zenoh-service":
         run_zenoh_service_arm(arguments.transcript)
         print("seL4 zenoh service check: the holders exchanged samples through the shared service and the service refused the key a holder lacks")
+    if arguments.arm == "zenoh-service-four" and arguments.controls_only:
+        try:
+            refused = zenoh_service_arm.controls()
+        except zenoh_service_arm.ArmError as error:
+            fail(str(error))
+        print(f"zenoh service judge: refused {refused} mutated transcripts")
+        return
+    if arguments.arm == "zenoh-service-four":
+        run_zenoh_service_four_arm(arguments.transcript)
+        print("seL4 zenoh service check: four holders exchanged samples through the shared service and the service refused the key a holder lacks")
+    if arguments.arm == "zenoh-rmw" and arguments.controls_only:
+        try:
+            refused = zenoh_rmw_arm.controls()
+        except zenoh_rmw_arm.ArmError as error:
+            fail(str(error))
+        print(f"zenoh rmw judge: refused {refused} mutated transcripts")
+        return
+    if arguments.arm == "zenoh-rmw":
+        run_zenoh_rmw_arm(arguments.transcript)
+        print("seL4 zenoh rmw check: the rmw_zenoh node and its native peer each published and received four samples and the session closed")
     if arguments.arm == "zenoh-external" and arguments.controls_only:
         contract = zenoh_exchange.demo()
         try:

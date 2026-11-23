@@ -171,14 +171,6 @@ impl Infrastructure {
         Ok(())
     }
 
-    /// Pin a source without retyping, for host tests that adopt extents.
-    #[cfg(test)]
-    pub(super) fn pin_for_test(&mut self, source: UntypedRegion) {
-        self.owned_bytes = source.capacity();
-        self.source = Some(source);
-        self.pinned = true;
-    }
-
     pub fn allocate(&mut self, blueprint: sel4::ObjectBlueprint) -> Result<usize, AllocError> {
         self.allocate_with(blueprint, |parent, blueprint, slot| {
             crate::root_cspace::retype(parent, blueprint, slot, 1)
@@ -506,6 +498,16 @@ impl Infrastructure {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+impl Infrastructure {
+    /// Pin a source without retyping, for host tests that adopt extents.
+    pub(super) fn pin_for_test(&mut self, source: UntypedRegion) {
+        self.owned_bytes = source.capacity();
+        self.source = Some(source);
+        self.pinned = true;
     }
 }
 

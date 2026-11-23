@@ -1,0 +1,51 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.bug "01a202cb-f3e5-777d-a488-7c3853891f3d" "zenoh-arm-row-rule" "zenoh-service-core"
+  "The booted exchange judge resolves a delivery's row against the grants of the composition"
+  "`zenoh_service_arm.py` requires a delivery to carry the row of the publication it answers. The service prints each holder's own row index. A publication names the publisher's index, and a delivery names the receiver's index. The two are equal only when every holder holds one row. Take a subscriber with a second row on another key. It is delivered on row 1 for a publication on row 0. The judge refuses that honest run. The transcript carries row counts and not keys, so the judge cannot tell which row is right.")
+  with {
+    supersedes = { "01a1b49c-ae50-71fd-a429-4b4adfe35cab"; };
+    owns = {
+      "scripts/lib/zenoh_service_arm.py";
+    };
+    nonGoals = {
+      h.nonGoal "The service, the server half and the holders. The service prints the rows as `Core::row_of` gives them. A product change that prints the key on each line is an alternative this item does not take." h.agentDefault;
+      h.nonGoal "A new composition. The four-holder composition needs this rule and is planned by its own item." h.agentDefault;
+      h.nonGoal "Any change to what the two-holder run prints. Its transcript and its 19 cases stay as merged." h.agentDefault;
+    };
+    requirements = {
+      h.req "the-judge-reads-the-grants"
+        "The judge takes the grants of the composition as rows of a holder, a key, and the publish and subscribe rights. It reads them from the system spec of the composition, in the order the grants table sorts them. It requires each attached holder to be one the grants name. It requires the attached rows to sum to the row count of the grants line."
+        { "zenoh_service_booted_check"; };
+      h.req "a-delivery-names-the-receivers-row"
+        "A delivery carries the index of a row of the receiving holder, and that row holds the key of the publication it answers. The judge no longer requires the row to equal the publisher's row."
+        { "zenoh_service_booted_check"; };
+      h.req "a-publication-names-a-publish-row"
+        "A publication carries the index of a publish row of the publishing holder. Its reach equals the number of holders that hold a subscribe row on that key and are attached."
+        { "zenoh_service_booted_check"; };
+      h.req "controls-are-refused"
+        "The judge refuses the 63 inputs that the merged judge refuses, and 7 more. Two deliver a sample on a row that holds another key and on a row past the receiver's rows. One publishes on a row that only subscribes. One states a reach below the attached holders that subscribe, with the deliveries to match. Three disagree with the grants. One has a row count the grants line does not sum to. One attaches a holder the grants do not name. One is a transcript of four holders against the grants of two, refused at the first holder the grants do not name."
+        { "zenoh_service_booted_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_service_booted_check" {
+        h.count "casesObserved" 19;
+        h.count "negativeControlsRefused" 70;
+      };
+    };
+    decisions = {
+      h.decided "read-the-keys-from-the-spec"
+        "The judge reads each holder's rows from the system spec of the composition, and not from the transcript. The grants line keeps its two counts."
+        "the service prints indices and counts, so the transcript cannot resolve a row to a key. Printing the key changes the service and its host test, and that is a product change this item does not own"
+        h.agentDefault
+        { "the-judge-reads-the-grants"; "a-delivery-names-the-receivers-row"; };
+      h.decided "supersede-the-booted-exam-pin"
+        "This item supersedes the area requirement that pins the booted exam at exactly 63 controls, and it pins 70."
+        "V10 freezes area requirements, and a judge with 7 more controls would fail a promise of exactly 63. The cases stay at 19, so the other area requirements on this target are unchanged"
+        h.agentDefault
+        { "controls-are-refused"; };
+    };
+  };
+
+item

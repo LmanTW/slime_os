@@ -14,7 +14,7 @@ Current owners:
 - root operation dispatch and the 64-byte message bound:
   `slime-root/src/ipc.rs` and `components/runtime/src/syscall/`;
 - authority and slot installation: `slime-root/src/generation.rs`,
-  `slime-root/src/graph.rs`, and `slime-root/src/main.rs`;
+  `slime-root/src/graph.rs`, and `slime-root/src/graph_runtime.rs`;
 - kinds, rights, and gates: [`../capability-matrix.md`](../capability-matrix.md);
 - operation numbers and packing: [`../syscall-abi.md`](../syscall-abi.md).
 

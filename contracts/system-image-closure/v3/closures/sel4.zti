@@ -184,7 +184,7 @@
     {
       name = "root-child";
       artifact = {
-        path = "slime-root/child";
+        path = "components/root-child";
         kind = "tree";
       };
     };

@@ -23,5 +23,5 @@ userspace personality route (X1) needs none of these.
 
 ## Owning references
 
-- [`../../roadmap/05-foreign-workloads.md`](../../roadmap/05-foreign-workloads.md)
+- [`foreign-workloads.md`](foreign-workloads.md)
 - [`../architecture/targets-and-portability.md`](../architecture/targets-and-portability.md)

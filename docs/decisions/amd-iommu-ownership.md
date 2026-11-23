@@ -112,5 +112,5 @@ release requirement.
 - `slime-root/src/io_resource.rs`
 - [`../plans/framework-hardware.md`](../plans/framework-hardware.md)
 - [`../architecture/io-substrate.md`](../architecture/io-substrate.md)
-- [H4](../../roadmap/04-platform-hardware.md#h4-amd-iommu-containment-and-framework-usb-hid-promotion)
-  and [X2](../../roadmap/05-foreign-workloads.md#x2-isolated-amd-v-guest-vm)
+- [H4](../plans/framework-hardware.md#h4-amd-iommu-containment-and-framework-usb-hid-promotion)
+  and [X2](../plans/foreign-workloads.md#x2-isolated-amd-v-guest-vm)

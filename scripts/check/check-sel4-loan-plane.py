@@ -558,6 +558,121 @@ def check_transcript(transcript: str) -> None:
         fail(f"settled loan export/import evidence was {exports!r}/{imports!r}")
 
 
+# The export arm, `--export-share`. `EXPORT_SHARE` is how many exports one
+# sender may hold that no receiver has imported.
+EXPORT_SHARE = 4
+EXPORT_SHARE_REFUSED = "[init] export share refused"
+EXPORT_LINE = re.compile(
+    r"SLIME_GRAPH capability exported task=(\d+) id=(\d+) kind=\S+ "
+    r"rights=0x[0-9a-f]+ retain=[01]"
+)
+IMPORT_LINE = re.compile(
+    r"SLIME_GRAPH capability imported task=(\d+) id=(\d+) kind=\S+ "
+    r"rights=0x[0-9a-f]+ retain=[01]"
+)
+EXIT_LINE = re.compile(r"SLIME_GRAPH component exit task=(\d+) status=-?\d+")
+RELEASE_LINE = re.compile(r"SLIME_GRAPH exports released task=(\d+) count=(\d+)")
+DRAIN_LINE = re.compile(r"SLIME_GRAPH served live=0 .*")
+EXPORT_CENSUS_LINE = re.compile(
+    r"SLIME_GRAPH capabilities exports=(\d+) imports=(\d+) cancels=(\d+) "
+    r"finalized=\d+ outstanding=(\d+) tickets=(\d+)"
+)
+
+
+def check_export_share(transcript: str) -> None:
+    """Judge the export arm from the lines the root printed.
+
+    Three facts must hold. The root refused the sender when it held exactly its
+    share of unimported exports. Every release names a task that had exited, and
+    precedes the drain of the graph. The census counts as imports only the
+    imports the root printed, and the releases account for every other export.
+
+    The arm does not require which task exits first. The sender and its receiver
+    exit without an order between them, and the totals hold in either order.
+    """
+
+    def refuse(message: str) -> NoReturn:
+        fail(f"export share: {message}")
+
+    lines = [line.strip() for line in transcript.splitlines()]
+
+    def found(pattern: re.Pattern[str]) -> list[tuple[int, re.Match[str]]]:
+        return [
+            (index, match)
+            for index, line in enumerate(lines)
+            if (match := pattern.fullmatch(line)) is not None
+        ]
+
+    exported = [(index, int(match[1]), int(match[2])) for index, match in found(EXPORT_LINE)]
+    imported = [(index, int(match[2])) for index, match in found(IMPORT_LINE)]
+    export_at = {identity: index for index, _task, identity in exported}
+    if len(export_at) != len(exported):
+        refuse("the root printed one export identity twice")
+    if len({identity for _index, identity in imported}) != len(imported):
+        refuse("the root printed two imports of one export")
+    for index, identity in imported:
+        if identity not in export_at:
+            refuse(f"an import names export {identity}, which the root did not print")
+        if export_at[identity] > index:
+            refuse(f"the import of export {identity} precedes that export")
+
+    refusals = [index for index, line in enumerate(lines) if line == EXPORT_SHARE_REFUSED]
+    if len(refusals) != 1:
+        refuse(f"expected one {EXPORT_SHARE_REFUSED!r} line, found {len(refusals)}")
+    refused_at = refusals[0]
+    before = [entry for entry in exported if entry[0] < refused_at]
+    if not before:
+        refuse("no export precedes the refusal")
+    sender = before[-1][1]
+    settled = {identity for index, identity in imported if index < refused_at}
+    held = [
+        identity
+        for _index, task, identity in before
+        if task == sender and identity not in settled
+    ]
+    if len(held) != EXPORT_SHARE:
+        refuse(
+            f"task {sender} held {len(held)} unimported exports when the root "
+            f"refused it, and its share is {EXPORT_SHARE}"
+        )
+
+    drains = [index for index, _match in found(DRAIN_LINE)]
+    if len(drains) != 1:
+        refuse(f"expected one line that reports the drained graph, found {len(drains)}")
+    exited: dict[int, int] = {}
+    for index, match in found(EXIT_LINE):
+        exited.setdefault(int(match[1]), index)
+    released = [(index, int(match[1]), int(match[2])) for index, match in found(RELEASE_LINE)]
+    if not released:
+        refuse("no retirement released an export")
+    for index, task, count in released:
+        if task not in exited or exited[task] > index:
+            refuse(f"the root released exports of task {task} before that task exited")
+        if index > drains[0]:
+            refuse(f"the root released exports of task {task} after the graph drained")
+        if count == 0:
+            refuse(f"the root reported a release of no export for task {task}")
+
+    census = found(EXPORT_CENSUS_LINE)
+    if len(census) != 1:
+        refuse(f"expected one export census line, found {len(census)}")
+    exports, imports, cancels, outstanding, tickets = (int(field) for field in census[0][1].groups())
+    if exports != len(exported):
+        refuse(f"the census counts {exports} exports, and the root printed {len(exported)}")
+    if imports != len(imported):
+        refuse(f"the census counts {imports} imports, and the root printed {len(imported)}")
+    if cancels != 0:
+        refuse(f"the census counts {cancels} cancels, and the scenario cancels no export")
+    if outstanding != 0 or tickets != 0:
+        refuse(f"the census leaves outstanding={outstanding} tickets={tickets}")
+    total = sum(count for _index, _task, count in released)
+    if total != exports - imports:
+        refuse(
+            f"retirements released {total} exports, and {exports - imports} "
+            "exports left the table without an import"
+        )
+
+
 # The one ceiling this file needs by value rather than by comparison: the four
 # quota probes are written against `init`'s limits, so a fixture edit that
 # changed them would need matching probe edits. Checked against the fixture
@@ -709,6 +824,11 @@ def main() -> None:
         action="store_true",
         help="boot the already-built image instead of rebuilding it first",
     )
+    parser.add_argument(
+        "--export-share",
+        action="store_true",
+        help="also judge the export arm: one sender's share, and what a retirement releases",
+    )
     arguments = parser.parse_args()
 
     if Path.cwd().resolve() != ROOT:
@@ -719,7 +839,19 @@ def main() -> None:
         build_image()
     profile = pins["qemu_arm_virt"]
     assert isinstance(profile, dict)
-    check_transcript(boot(profile))
+    transcript = boot(profile)
+    check_transcript(transcript)
+    if arguments.export_share:
+        try:
+            check_export_share(transcript)
+        except SystemExit:
+            report_transcript(transcript)
+            raise
+        print(
+            f"seL4 export share check: the root refused a sender that held {EXPORT_SHARE} "
+            "unimported exports, released them when a task they named exited, and "
+            "counted as imports only the imports it printed"
+        )
     print(
         "seL4 loan plane check: a sealed subrange was loaned to a receiver named by "
         "capability, mapped read-only, returned once, and reclaimed; all four declared "

@@ -1,0 +1,60 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.bug "01a20820-646c-7e29-b769-5015679f9da6" "wait-set-probe-signal-race" "planes-runtime"
+  "The wait-set probe requires one wake of two sources before both sources have signalled"
+  "The waiter of components/testkit/wait-set-probe requires one poll of its wait set to return the stream source and the supervision source together. It polls in a loop and keeps the widest single answer. Nothing orders its first poll after both signals. The signaller is a separate root-launched instance, and the root raises the supervision badge when the supervised peer exits. If a poll runs between the two signals, two polls return one source each. The waiter then prints [wait-set] FAIL two independently signalled sources did not coalesce into one wake. On qemu-riscv-virt 2 of 55 boots printed that marker, in one development container on 2026-11-18. 40 boots on qemu-arm-virt and 20 on qemu-pc99 did not. This cause is read from the code of the probe, not from the transcripts of those two boots.")
+  with {
+    owns = {
+      "components/testkit/wait-set-probe/**";
+    };
+    nonGoals = {
+      h.nonGoal "A target that repeats the boot. The decision one-boot-per-target-is-the-exam gives the reason." h.agentDefault;
+      h.nonGoal "The wait set of components/runtime and the wait-set mechanism of slime-root. The defect is the order that the probe assumes." h.agentDefault;
+      h.nonGoal "The build route of the RISC-V arm of the gate. The item riscv-plane-arm-build-route, UUID 01a1ee7f-e814-78bc-b7b1-5eb1e488be89, owns it." h.agentDefault;
+    };
+    requirements = {
+      h.req "riscv-wait-set-step-passes"
+        "riscv64_qemu_check passes its wait-set step: on qemu-riscv-virt the waiter reports one wake of two ready sources, and the gate accepts the transcript."
+        { "riscv64_qemu_check"; };
+      h.req "arm-wait-set-plane-passes"
+        "wait_set_check passes: on qemu-arm-virt the waiter reports one wake of two ready sources, and the gate accepts the transcript."
+        { "wait_set_check"; };
+      h.req "no-signal-order-fails-the-waiter"
+        "No order of the two signals and the polls of the waiter makes the waiter print its failure marker for a wake that did not coalesce."
+        { "poll-order-read"; };
+    };
+    acceptance = {
+      h.observed "riscv64_qemu_check";
+      h.observed "wait_set_check";
+      h.human "poll-order-read"
+        "Read the change that a commit on main made to components/testkit/wait-set-probe for this item. Does the waiter make the poll that must return both sources only after both signals are raised? Does the control flow of the probe establish that order, with no count of yields or spins? Answer yes only if both hold. Note the commit.";
+    };
+    invariants = {
+      h.invariant "both-signals-precede-the-required-poll"
+        "The waiter makes the poll that must return both sources only after both signals are raised. Its control flow establishes that order. A count of yields does not."
+        h.agentDefault;
+      h.invariant "the-gate-keeps-its-coalescing-assertion"
+        "scripts/check/check-sel4-wait-set-plane.py keeps requiring one wake that carries every declared source except the timer. The change to the probe lowers no assertion of the gate."
+        h.agentDefault;
+    };
+    decisions = {
+      h.decided "the-race-has-its-own-item"
+        "This item owns the race. The item riscv-plane-arm-build-route does not."
+        "the build route is a defect of two gates, and the race is a defect of one testkit component. Each has its own paths and its own exam"
+        (h.fromHuman "Separate bug item (Recommended)" "Claude Code session session_01UdthevjZ9dotV4nTTnv4Kc, 2026-11-18, choosing a separate bug item for the wait-set race over folding it into the item riscv-plane-arm-build-route")
+        { "riscv-wait-set-step-passes"; "arm-wait-set-plane-passes"; };
+      h.decided "one-boot-per-target-is-the-exam"
+        "The item binds two existing targets, and each boots the plane once. No target repeats the boot."
+        "with the defect, 53 of 55 boots on qemu-riscv-virt passed. One passing record therefore does not show that the race is gone. A repeat exam needs 81 boots to fail with 95 % probability at that rate, and nobody chose that cost. The acceptance poll-order-read covers what one boot does not show"
+        h.agentDefault
+        { "riscv-wait-set-step-passes"; };
+      h.decided "a-person-reads-the-changed-probe"
+        "The human acceptance poll-order-read asks a person to read the changed probe against the invariant both-signals-precede-the-required-poll. The done witness waits for a signed yes."
+        "wait_set_check and riscv64_qemu_check pass with the race in the probe. With those two acceptances alone, the Evidence workflow signs the done witness on the push that sets this item active, with no change to the probe. The other choice was a predicate on a marker that only the fixed probe prints"
+        (h.fromHuman "加 h.human acceptance" "Claude Code session 5f81f1ad-ee63-4df8-b08a-1cf001c0e9c5, 2026-11-23, choosing a human acceptance over a marker predicate")
+        { "no-signal-order-fails-the-waiter"; };
+    };
+  };
+
+item

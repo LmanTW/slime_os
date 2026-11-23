@@ -47,3 +47,18 @@ encoded = builder.build_generation(
     manifest, {"image": image, "padding-a": b"a", "padding-b": b"b"}, None, 1, profile
 )
 Path(__file__).with_name("admission-bounds-v5.bin").write_bytes(encoded)
+# A generation with a reader table. The builder writes a row for the instance
+# named `entropy-service` when the generation carries the entropy authority, so
+# the fixture declares that instance and asks for that one table's readers.
+manifest["instances"].append({**manifest["instances"][0], "name": "entropy-service"})
+manifest["health"]["requiredInstances"].append("entropy-service")
+readers = builder.build_resource_readers(manifest, {"entropy-authority"})
+assert readers is not None
+manifest["objects"] = [
+    {"id": "image", "kind": "bootstrap", "size": 4096},
+    {"id": builder.RESOURCE_READERS_OBJECT, "kind": "resource", "size": 4096},
+]
+encoded = builder.build_generation(
+    manifest, {"image": image, builder.RESOURCE_READERS_OBJECT: readers}, None, 1, profile
+)
+Path(__file__).with_name("admission-readers-v5.bin").write_bytes(encoded)

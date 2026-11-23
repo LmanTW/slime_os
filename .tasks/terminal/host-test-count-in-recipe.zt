@@ -1,0 +1,71 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.bug "01a1f283-00b8-7499-9d83-63c21fc66bb6" "host-test-count-in-recipe" "quality"
+  "No pull request can add a host test to slime-root, and a second copy of the test count is stale"
+  "just test_sel4_root pins the number of root host tests in its recipe, as expected=369. Promises in specs/quality.zt bind that recipe, so only a pull request that adds an item may change it (V4). Such a pull request is a planning one and carries no product code (V1), and a test is product code. A second copy of the count is stale: scripts/lib/zenoh_grants_reader_exam.py pins 365. just zenoh_service_grants_reader_check failed in all 20 of its records on the evidence branch, and five promises in specs/zenoh-service-grants.zt bind it.")
+  with {
+    intent = #active;
+    owns = {
+      "just/quality.just";
+      "scripts/check/check-root-size.py";
+      "scripts/check/check-root-host-tests.py";
+      "scripts/lib/root_host_tests.py";
+      "scripts/lib/rust_source.py";
+      "scripts/check/check-zenoh-profile0.py";
+      "scripts/lib/zenoh_grants_reader_exam.py";
+    };
+    nonGoals = {
+      h.nonGoal "A new host test. This item changes how the gate knows the count, and the count stays 369." h.agentDefault;
+      h.nonGoal "A count of the tests in files behind another cfg. The run compiles for AArch64 and without the boot selector, so twelve tests in the x86-64 and boot selector modules are in neither the count nor the run." h.agentDefault;
+      h.nonGoal "A check that no test was deleted. A deleted test lowers the count and the run together. An item that needs a test bounds hostTests from below." h.agentDefault;
+      h.nonGoal "The other checks of the Zenoh grants reader exam: its facts about the label, the schema fields, the reader and the wrapper do not change." h.agentDefault;
+    };
+    requirements = {
+      h.req "the-count-comes-from-the-source"
+        "test_sel4_root passes: it takes the expected count from scripts/check/check-root-host-tests.py, which counts the test attributes in the library files that the run compiles, and it runs that many tests. The count is reported as hostTests."
+        { "test_sel4_root"; };
+      h.req "the-counter-has-controls"
+        "Before it prints the count, the counter runs on a synthetic crate and on seven changes to it, and it refuses a wrong count: a test more in a declared module, a test behind an unmet cfg, a test attribute in a comment and in a string literal, a test module that is no longer declared, a test module behind a second cfg, and a file that no module declares. The number of cases is reported as hostTestCountControls."
+        { "test_sel4_root"; };
+      h.req "the-grants-reader-exam-reads-the-count"
+        "zenoh_service_grants_reader_check passes: the exam holds the filtered run to the count that the same counter gives, and it requires that the recipe takes its count from that counter."
+        { "zenoh_service_grants_reader_check"; };
+    };
+    acceptance = {
+      h.observedWhere "test_sel4_root" {
+        h.atLeast "hostTests" 369;
+        h.atLeast "hostTestCountControls" 8;
+      };
+      h.observed "zenoh_service_grants_reader_check";
+    };
+    decisions = {
+      h.decided "count-the-source-not-a-number"
+        "The recipe compares the tests that ran with the test attributes in the source. It pins no number."
+        "a pinned number in a promised recipe changes only with a new item, and a test changes only in an implementation pull request, so the two can never change together. The purpose of the pin was a test that exists and does not run. A count of the source states that purpose directly: on main at ea60618 the count is 369, the number the recipe pinned"
+        h.agentDefault
+        { "the-count-comes-from-the-source"; };
+      h.decided "the-counter-has-its-own-script"
+        "The counter is scripts/lib/root_host_tests.py, and scripts/check/check-root-host-tests.py prints its count. Both read Rust through scripts/lib/rust_source.py, which the size checker reads too."
+        "the counter first landed as a mode of scripts/check/check-root-size.py, which holds the ceilings of root_size_check. That put the ceilings into the grader set of test_sel4_root and of every recipe that depends on it, so each ceiling edit changed the closure of those targets and the Evidence workflow recorded them again. One reader of Rust in a library module keeps one copy of the lexer and the walk, and leaves the ceilings to root_size_check alone"
+        h.agentDefault
+        { "the-count-comes-from-the-source"; "the-counter-has-controls"; };
+      h.decided "fix-and-item-in-one-planning-pull-request"
+        "The planning pull request of this item changes the recipe, the counter and the exam."
+        "each is in the grader set of a target that a promise binds, so it changes only in a pull request that adds an item (V4). The same order held for the two earlier grader bugs, test-run-inventory-stale-controls and root-probe-below-spent-tails"
+        (h.fromHuman "照你的安排，bug 和修正放同一個 PR" "Claude Code session session_01Udthew69PFkRyDtWmFtXKa, 2026-11-18, on the first grader bug of this kind")
+        { "the-count-comes-from-the-source"; "the-grants-reader-exam-reads-the-count"; };
+      h.decided "the-exam-runs-natively-on-aarch64"
+        "On an AArch64 host the exam runs the two reader tests as host binaries, as the recipe does. On any other host it uses the cross linker and qemu-aarch64."
+        "the exam named qemu-aarch64 as the runner on every host, and the development shell installs no qemu-aarch64 on an AArch64 host. Every record of the target failed in the first second, at the stale count, so no run reached that step. The Evidence workflow runs on AArch64"
+        h.agentDefault
+        { "the-grants-reader-exam-reads-the-count"; };
+      h.decided "a-target-without-a-passing-record"
+        "The item binds zenoh_service_grants_reader_check as a mandatory acceptance, and that target has no passing record."
+        "the target is the subject of the bug. The Evidence workflow makes the first run of the AArch64 branch of the exam; this item's planning pull request observes the other branch in one x86-64 development container"
+        h.agentDefault
+        { "the-grants-reader-exam-reads-the-count"; };
+    };
+  };
+
+item

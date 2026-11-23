@@ -1,0 +1,76 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a20200-959c-702b-b450-13ce7e0dbece" "zenoh-rmw-router-link" "zenoh-transport"
+  "A Profile 0 link takes the client role and delivers the samples a router forwards"
+  "The client role lives on the session, and no link takes it. A Put that `rmw_zenoh_cpp` publishes carries a timestamp, and a router forwards it unchanged: the PUT header carries the timestamp flag, and a time and a 16-byte ID follow it. The plain Profile 0 decoder refuses that header as `unsupported-message`. A link that opened a session with a router would end on its first forwarded sample. A host probe of a Slime client behind `rmw_zenohd` received a ROS talker's samples, and the decoder cannot read them.")
+  with {
+    intent = #active;
+    owns = {
+      "components/lib/src/zenoh_profile0.rs";
+      "components/lib/src/zenoh_profile0/**";
+      "components/lib/src/zenoh_link.rs";
+      "components/lib/src/zenoh_link/**";
+    };
+    nonGoals = {
+      h.nonGoal "A component, a composition, a system spec, a QEMU gate or a NIC. This item judges the link on the host over a scripted byte stream." h.agentDefault;
+      h.nonGoal "A live router, a ROS install or a registry. The exam replays two runs that `rmw_zenohd` wrote." h.agentDefault;
+      h.nonGoal "The graph link and the graph session. A router's liveliness tokens are not captured, and the graph link needs them." h.agentDefault;
+      h.nonGoal "Writing a Put to a router. The captures show only what a router forwards to a subscriber." h.agentDefault;
+      h.nonGoal "Delivering the Put's own timestamp. The link checks it and delivers the attachment's source timestamp, as it did for a peer's Put." h.agentDefault;
+      h.nonGoal "A Put with the encoding flag, a forwarded sample larger than one frame, and a router that is not on its default configuration." h.agentDefault;
+      h.nonGoal "Any change to what a link with no client role writes or accepts, and any change to the graph decoder or the fragment decoder. The existing exams and the stock-peer exam pin it." h.agentDefault;
+    };
+    requirements = {
+      h.req "client-link-subscribes-through-a-router"
+        "A link with the client role writes the client INIT_SYN and takes the router's INIT_ACK. It then writes an OPEN_SYN that echoes the cookie and declares one subscription on the chatter key."
+        { "zenoh_rmw_router_link_check"; };
+      h.req "client-link-delivers-the-forwarded-samples"
+        "Each captured run is written to the link whole, one byte at a time and all at once. Each way leaves 4 samples in the queue, in order, with sequence numbers 3 to 6 and the router's strings. The link counts no push as dropped."
+        { "zenoh_rmw_router_link_check"; };
+      h.req "client-link-closes-on-request"
+        "A local close writes a CLOSE of reason 0. The transcript prints the queue as empty and the subscription as none, and the judge refuses any other value."
+        { "zenoh_rmw_router_link_check"; };
+      h.req "timestamp-is-taken-only-with-the-role"
+        "The plain decoder and the fragment decoder refuse a PUT header with the timestamp flag as `unsupported-message`. The graph decoder takes it, as it did. The client decoder takes it only with a 16-byte ID. It refuses a short ID as `malformed-message` and refuses the encoding flag as `unsupported-message`."
+        { "zenoh_rmw_router_link_check"; "zenoh_session_check"; "zenoh_stock_check"; };
+      h.req "listener-link-refuses-the-role"
+        "A link built as a listener and asked for the client role is `invalid-config`."
+        { "zenoh_rmw_router_link_check"; };
+      h.req "controls-are-refused"
+        "The judge refuses 113 corrupted records before it judges the real run: 103 mutated transcripts and 10 corrupted captures."
+        { "zenoh_rmw_router_link_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_rmw_router_link_check" {
+        h.count "casesObserved" 54;
+        h.count "negativeControlsRefused" 113;
+      };
+      h.observed "zenoh_session_check";
+      h.observed "zenoh_stock_check";
+    };
+    decisions = {
+      h.decided "the-timestamp-is-an-opt-in-of-the-plain-decoder"
+        "The plain decoder takes the timestamp on a PUT only when the session has the client role. The fragment decoder keeps refusing it, and the graph decoder keeps taking it."
+        "the stock-peer exam pins what a plain peer session refuses, and the graph decoder already takes the timestamp of a direct `rmw_zenoh_cpp` Put"
+        h.agentDefault
+        { "timestamp-is-taken-only-with-the-role"; };
+      h.decided "the-put-timestamp-is-checked-not-delivered"
+        "The decoder reads the Put's time and 16-byte ID and delivers neither. The sample keeps the attachment's source timestamp."
+        "a consumer reads the source timestamp of a peer's Put, and the captures give the Put's time and ID no consumer"
+        h.agentDefault
+        { "client-link-delivers-the-forwarded-samples"; };
+      h.decided "the-role-reaches-the-link-by-a-call"
+        "A link takes the client role through a builder call that passes it to its session. `Params` and `Config` stay as they are."
+        "a new field on `Params` needs an edit in about a dozen files outside this item's `owns`"
+        h.agentDefault
+        { "client-link-subscribes-through-a-router"; "listener-link-refuses-the-role"; };
+      h.decided "the-router-captures-are-two-runs-on-one-host"
+        "The exam replays two runs of `rmw_zenohd` 0.6.10-r1 with a `demo_nodes_cpp` talker. They differ in the ZIDs, the cookies and the times."
+        "the router wrote the INIT_ACK, the OPEN_ACK and the forwarded FRAMEs, and the client wrote the rest"
+        h.agentDefault
+        { "client-link-delivers-the-forwarded-samples"; };
+    };
+  };
+
+item

@@ -73,6 +73,137 @@ zenoh_links_check:
 zenoh_undeclare_check:
     python3 scripts/check/check-zenoh-profile0.py --slice undeclare
 
+# An rmw_zenoh peer's session: the key-expression aliases, queryables and liveliness tokens a ROS 2
+# Kilted node declares before it publishes, and the INIT extensions it sends. The 60 batches three
+# nodes sent are replayed into a listener session (scripts/lib/zenoh_rmw_peer.py), the host reference
+# writes each frame again byte for byte (scripts/lib/zenoh_rmw_wire.py), and eleven variants are refused by
+# name and class (scripts/lib/zenoh_rmw_exam.py, contracts/zenoh-rmw-session/v1). The stock corpus, the
+# stock-peer exam and the undeclare exam run beside it. Nothing here needs a registry or a ROS install.
+# Fails until the session takes the graph.
+[group('hardware')]
+zenoh_rmw_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice rmw
+
+# The graph an rmw_zenoh peer's liveliness tokens declare: each `@ros2_lv` token parsed into a node,
+# publisher, subscription, service server or client, its QoS substring and mangled names read, the live
+# entities held in a bounded graph and dropped when withdrawn. The expected transcript is built from
+# scripts/lib/zenoh_rmw_graph.py, written from rmw_zenoh's source, and the 26 tokens three captured
+# sessions declare are replayed into it (scripts/lib/zenoh_rmw_graph_exam.py,
+# contracts/zenoh-rmw-graph/v1). The session exam runs beside it. Nothing here needs a registry or a ROS
+# install. Fails until the session holds a graph.
+[group('hardware')]
+zenoh_rmw_graph_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice rmw-graph
+
+# A Profile 0 graph session that holds one subscription of its own. The two captured data sessions of an
+# rmw_zenoh_cpp peer are replayed into it: a talker's 11 samples are delivered, 28 other pushes are dropped,
+# the peer's INTEREST is answered with a DeclareFinal, and the 8 Puts a listener's subscription asks for are
+# written to the byte. The expected transcript is built by scripts/lib/zenoh_rmw_data_exam.py from the captured bytes in
+# scripts/lib/zenoh_rmw_data_peer.py. The session and graph exams run beside it. Nothing here needs a
+# registry or a ROS install. Fails until the data session exists.
+[group('hardware')]
+zenoh_rmw_data_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice rmw-data
+
+# Judges the Profile 0 client role, which a connector takes to open a session with a router. A client writes the INIT_SYN
+# with whatami 2, takes an INIT_ACK of whatami 0 and finishes the handshake with an OPEN_SYN that echoes the router's cookie.
+# The Rust tests drive that connector with two handshakes that rmw_zenohd wrote, captured by scripts/lib/zenoh_rmw_router.py,
+# and a connector with no client role, which still writes the peer form and refuses both. The expectation is
+# scripts/lib/zenoh_rmw_client_exam.py. Nothing here needs a registry or a ROS install.
+[group('hardware')]
+zenoh_rmw_client_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice rmw-client
+
+# Judges a Profile 0 link with the client role that subscribes through a router. rmw_zenoh_cpp stamps every Put it publishes,
+# and the link takes that timestamp while the plain decoder still refuses it without the role. The Rust tests drive the link with two runs
+# of rmw_zenohd, captured by scripts/lib/zenoh_rmw_router_data.py, three ways: each batch whole, one byte at a time and all
+# at once. The link writes the client INIT_SYN, the OPEN_SYN and the subscription, and delivers the four samples the router
+# forwarded. The expectation is scripts/lib/zenoh_rmw_router_link_exam.py. Nothing here needs a registry or a ROS install.
+[group('hardware')]
+zenoh_rmw_router_link_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice rmw-router-link
+
+# Judges the Put path of a Profile 0 link with the client role. A router declares no subscription to a client, and a link
+# with no role refuses a Put on a key its peer did not declare. A link with the role writes a Put on a valid key with no
+# such declaration. The Rust tests drive the link through the handshakes of two runs of rmw_zenohd, captured by
+# scripts/lib/zenoh_rmw_router_data.py, three ways, and publish four Puts. The bytes equal what scripts/lib/zenoh_wire.py
+# writes. The expectation is scripts/lib/zenoh_rmw_client_put_exam.py. No router runs here. Nothing needs a registry or a
+# ROS install.
+[group('hardware')]
+zenoh_rmw_client_put_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice rmw-client-put
+
+# Judges the liveliness tokens a Profile 0 link with the client role writes. ros2 builds `ros2 node list` and `ros2 topic list`
+# from tokens under @ros2_lv, so a node that writes none is invisible to them. A link with the role declares the node token and
+# the publisher token of a node, withdraws one and closes. The Rust tests drive the link through the handshakes of two runs of
+# rmw_zenohd, captured by scripts/lib/zenoh_rmw_router_data.py, three ways. The key is built by scripts/lib/zenoh_rmw_graph.py
+# and the bytes by scripts/lib/zenoh_rmw_wire.py. The expectation is scripts/lib/zenoh_rmw_token_exam.py. No router runs here.
+# Nothing needs a registry or a ROS install.
+[group('hardware')]
+zenoh_rmw_token_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice rmw-token
+
+# Judges a live exchange between a client-role Slime link and two ROS nodes through rmw_zenohd. The checker starts the
+# router and a ROS node for each direction and runs the host program in verification/zenoh-live against them. A ROS talker
+# publishes on the chatter key and the link delivers its samples, then a ROS listener subscribes and the link writes 6 Puts.
+# The checker reads the listener's log, stdout and stderr together. The expectation is scripts/lib/zenoh_rmw_live_exam.py. The operator names the
+# router and the nodes in SLIME_ROS_ENV, SLIME_RMW_ZENOHD, SLIME_ROS_TALKER and SLIME_ROS_LISTENER, because the pinned ROS
+# packages are not in flake.nix. CI does not run it. It is an operator target in specs/targets.toml, and an operator signs
+# its record.
+[group('hardware')]
+zenoh_rmw_live_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice rmw-live
+
+# A client-role Profile 0 link declares the node token and the publisher token of `slime_node` through a live rmw_zenohd,
+# and `ros2 node list` and `ros2 topic list` show them while the session is open and not after it closes. The checker
+# starts the router, runs the host program in verification/zenoh-live with `discover`, and runs `ros2` itself. The
+# expectation is scripts/lib/zenoh_rmw_discover_exam.py. The operator names the router and the ROS install in
+# SLIME_ROS_ENV and SLIME_RMW_ZENOHD, because the pinned ROS packages are not in flake.nix. CI does not run it. It is to be an
+# operator target in specs/targets.toml, and an operator signs its record.
+[group('hardware')]
+zenoh_rmw_discover_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice rmw-discover
+
+# A Profile 0 graph link that declares its owner's subscription, writes its owner's Puts and holds the samples
+# it receives in a bounded queue. The two captured data sessions of an rmw_zenoh_cpp peer are written to it
+# whole, one byte at a time and all at once. A talker's 11 samples reach the queue in order and 28 other pushes
+# are counted. The bytes the link writes equal what scripts/lib/zenoh_wire.py writes: the subscriber frame, the
+# answer to the peer's INTEREST and 8 Puts. A queue of 4 slots keeps the newest samples. The expected transcript
+# is built by scripts/lib/zenoh_rmw_data_link_exam.py. The link, data, graph and session exams run beside it.
+# Nothing here needs a registry or a ROS install.
+[group('hardware')]
+zenoh_rmw_data_link_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice rmw-data-link
+
+# Judges that the rmw_zenoh node component exists and is registered. The judge requires the crate and its
+# manifest, the release profile, the lockfile entry and the component spec, and the calls that run a graph link
+# over the network service, declare the one subscription, write Puts and drain the samples. It requires the
+# library calls those stand on. The expectation is scripts/lib/zenoh_rmw_component_exam.py. Nothing here needs a
+# registry.
+[group('hardware')]
+zenoh_rmw_component_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice rmw-component
+
+# Judges that the rmw_zenoh native peer component exists and is registered. The peer is a plain Profile 0 connector
+# that dials the node component, learns its subscription on the chatter key and publishes Puts on it. The judge
+# requires the crate and its manifest, the release profile, the lockfile entry and the component spec, the calls
+# that build a plain link as a connector, dial the node, publish and read samples, and the library calls those
+# stand on. The expectation is scripts/lib/zenoh_rmw_peer_component_exam.py. Nothing here needs a registry.
+[group('hardware')]
+zenoh_rmw_peer_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice rmw-peer
+
+# A Profile 0 graph link: one graph session over a byte stream, with the tokens it receives held in a
+# bounded graph. The three captured sessions of an rmw_zenoh_cpp peer are written to it whole, one byte at
+# a time and all at once, and the bytes the listener writes are judged to the byte: an INIT_ACK of 512
+# bytes, an OPEN_ACK, a keep-alive after a quarter lease, a CLOSE on expiry. A refused token is counted and
+# the link stays open; a stream fault ends it. The expected transcript is built by
+# scripts/lib/zenoh_rmw_link_exam.py from the captured bytes. The session and graph exams run beside it.
+# Nothing here needs a registry or a ROS install.
+[group('hardware')]
+zenoh_rmw_link_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice rmw-link
+
 # A Zenoh Profile 0 session carrying queries: the sessions a stock eclipse-zenoh 1.0.0 queryable peer and
 # a stock peer that asks sent, replayed into sessions of ours, with the host reference reproducing each
 # queryable declaration, request, response and final response byte for byte
@@ -90,6 +221,36 @@ zenoh_queries_check:
 [group('hardware')]
 zenoh_subscribers_check:
     python3 scripts/check/check-zenoh-profile0.py --slice subscribers
+
+# Judges a Zenoh Profile 0 link that holds several reassembly runs and takes the traffic of a stock peer's
+# priorities. The host reference writes the INIT with the QoS extension, the FRAME and FRAGMENT headers of priorities
+# 0, 2, 5 and 7, both reliabilities and two sequence numbers, and the exam requires each to equal what eclipse-zenoh 1.0.0 wrote. A
+# transcript of 23 scenarios and 20 refusals is built from the reference and the Rust test must print it line for
+# line. The limits contract v2 takes 7 records and refuses 15. The links and stock-peer exams run beside it. The
+# expectation is scripts/lib/zenoh_lanes_exam.py. Nothing here needs a registry. Fails until the lanes land.
+[group('hardware')]
+zenoh_lanes_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice lanes
+
+# Judges contracts/zenoh-link-limits/v3, which declares a link's local subscriptions beside its reassembly runs.
+# The decoder of the contract takes the records it must take and refuses the ones it must refuse, and each bound is
+# held on both sides. Each check is removed in turn and the weakened contract must take the record the check refuses.
+# The stack and heap at one local subscription must equal the lanes exam's version 2 arithmetic. The exam renders the
+# schema's constants as Rust and requires components/proto/src/zenoh_link_v3_limits.rs to equal that text byte for
+# byte, and its dependency runs the generator with --check. The expectation is scripts/lib/zenoh_link_v3_limits_exam.py.
+# Nothing here needs a registry. The recipe fails until that file lands.
+[group('hardware')]
+zenoh_link_limits_v3_check: (zenoh_link_v3_limits_gen "--check")
+    python3 scripts/check/check-zenoh-profile0.py --slice link-limits-v3
+
+# Judges the QoS a Zenoh PUSH carries: priority, congestion control and express. The encoder writes the
+# network QoS extension as eclipse-zenoh 1.0.0 does (priority in bits 0 to 2, Block in bit 3, express in
+# bit 4, no extension at the PUSH default) and the decoder keeps the value. The host reference
+# scripts/lib/zenoh_wire.py reproduces every frame byte for byte; the expectation is
+# scripts/lib/zenoh_qos_exam.py. Nothing here needs a registry. The recipe fails until the Rust tests land.
+[group('hardware')]
+zenoh_qos_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice qos
 
 # Judges what the Zenoh service may do for each holder. The decoder of
 # contracts/zenoh-service-grants/v1 takes the declarations it must take and refuses the ones it must
@@ -138,8 +299,8 @@ zenoh_service_grants_builder_check:
 # Judges the path that carries the Zenoh grants table from the generation to the Zenoh service. The judge requires the
 # read label in the contract and its generated outputs, the manifest and system spec fields, the `slime-root` reader
 # that serves the table to the instance named `zenoh-service`, and the runtime wrapper. It runs the reader's two tests
-# alone under the AArch64 recipe `test_sel4_root` uses. The expectation is scripts/lib/zenoh_grants_reader_exam.py. The
-# recipe fails until the implementation lands.
+# alone under the AArch64 recipe `test_sel4_root` uses, and holds the run to the count of host tests in the source. The
+# expectation is scripts/lib/zenoh_grants_reader_exam.py.
 [group('hardware')]
 zenoh_service_grants_reader_check:
     python3 scripts/check/check-zenoh-profile0.py --slice grants-reader
@@ -151,6 +312,17 @@ zenoh_service_grants_reader_check:
 [group('hardware')]
 zenoh_service_server_check:
     python3 scripts/check/check-zenoh-profile0.py --slice server
+
+# Judges three cases of the Zenoh service server half that the booted run does not show, on the host. The Rust
+# test drives the server half over a link pair. It runs a second boot, a set of malformed requests and a stalled
+# link. The judge writes every request and completion again with Python's `struct` from the schema's layout. It
+# requires the second boot to repeat the first. It requires every malformed request to change no ring, session
+# or stream byte. It requires a publication that the link cannot flush to be answered link-closed with no ring
+# changed. The expectation is scripts/lib/zenoh_grading_exam.py. Nothing here boots QEMU or needs a registry. The recipe fails
+# until the test lands.
+[group('hardware')]
+zenoh_service_grading_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice grading
 
 # Judges the generation builder's Zenoh limits record and the system spec admission that runs it. The judge builds the
 # record from a manifest and from a spec, requires the encoder's bytes and the independent struct writer's bytes, holds the
@@ -188,6 +360,25 @@ zenoh_service_component_check:
 zenoh_service_booted_check:
     python3 scripts/check/check-zenoh-profile0.py --slice service-booted
 
+# Judges that a peer which subscribes receives what a holder publishes through the Zenoh service. The judge requires the
+# peer's source, its component spec and the system spec to hold the declarations, boots the composition under QEMU
+# through the arm of the network plane checker, and reads the lines of the service and of the peer. The peer must declare
+# one subscriber on the key of `alpha` and receive each of `alpha`'s four publications once. The service must report
+# `peer=sent` for each. The expectation is scripts/lib/zenoh_service_peer_exam.py. The recipe is in no aggregate. It fails
+# until the peer subscribes.
+[group('hardware')]
+zenoh_service_peer_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice service-peer
+
+# Judges the composition that runs the Zenoh service with four holders and six rows, and boots it. The judge requires the
+# component constants, the system spec, the manifest, the inventory row and the arm of the network plane checker. The arm
+# requires `alpha` to publish four samples that each reach `beta`, `gamma` and `delta`, with `gamma` and `delta` delivered on
+# their second row, and the peer to receive each once. The service must refuse `beta` once. The expectation is
+# scripts/lib/zenoh_service_four_exam.py. The recipe is in no aggregate. It fails until the composition lands.
+[group('hardware')]
+zenoh_service_four_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice service-four
+
 # Judges the Zenoh service grants table, the form of the grants that the generation carries and the root serves. The
 # judge writes each table again with Python's struct from the schema's layout, requires the encoder, the generated wire
 # records and the Rust decoder to agree with it, and refuses each corruption of a table. The expectation is
@@ -220,6 +411,43 @@ zenoh_service_client_abort_check:
 [group('hardware')]
 zenoh_service_link_check:
     python3 scripts/check/check-zenoh-profile0.py --slice service-link
+
+# Judges the stack the Zenoh service needs at a stated size of 4 holders, 6 rows and 64-byte samples, and at the size the
+# component is built for. A Rust test prints the `size_of` of each part and the depth of the call path, which it measures
+# by painting free stack. The judge requires each part within the overhead of contracts/zenoh-service-grants/v1 and the
+# declared STACK_BYTES to cover the need and not exceed the runtime's stack. The expectation is
+# scripts/lib/zenoh_stack_exam.py. Nothing here needs a registry. The recipe fails until the test lands.
+[group('hardware')]
+zenoh_service_stack_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice service-stack
+
+# Judges that the Zenoh service builds its session parameters from a configuration of `contracts/zenoh-link-limits/v3`. The judge
+# requires the link type with 2 aliases, the module of the reader, and the service's call of it, and requires the literal
+# `local: 3` to be gone. A Rust test prints the configuration, the stack it requires and the parameters it derives, and the
+# judge compares them with the contract's arithmetic and the contract's decoder. The expectation is
+# scripts/lib/zenoh_link_v3_reader_exam.py. The recipe is in no aggregate. It fails until the reader lands.
+[group('hardware')]
+zenoh_link_v3_reader_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice link-v3-reader
+
+# Judges what the Zenoh service does with a holder that faults or never detaches. A reference model of the holder roster
+# writes every line of eight scripted scenarios, and the Rust test must print them. The service reclaims a holder whose
+# task the root reports dead, expires a holder that has not detached when the wait ends, refuses a reclaimed holder every
+# later request, and serves the other holder throughout. Eighteen wrong services and every corrupted line are refused. The
+# server half's exam runs beside it. The expectation is scripts/lib/zenoh_holder_fault_exam.py. Nothing here needs a
+# registry. The recipe fails until the roster lands. Loans, buffers and a boot under QEMU are not graded.
+[group('hardware')]
+zenoh_service_holder_fault_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice holder-fault
+
+# Judges that the Zenoh service keeps reading the control endpoint of a holder that settled, so the holder gets the
+# denial that the server half already answers and does not block. The judge reads the component's holders.rs and
+# requires two statements to be absent from its code: the one that clears the endpoint after a detach, and the one in
+# reclaim. It refuses ten files. The expectation is scripts/lib/zenoh_lost_holder_exam.py. Nothing here boots QEMU. The recipe fails until
+# the implementation removes the two lines. A boot in which a settled holder sends is not graded.
+[group('hardware')]
+zenoh_service_lost_holder_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice lost-holder
 
 # Judges contracts/frame-store/v1, its Rust reader and its MCAP converter. Converts the LiDAR bag named by
 # SLIME_LIDAR_BAG (refused unless its SHA-256 is the pinned value) twice and compares every payload with the
@@ -317,6 +545,15 @@ rpi5_ros2_demo_v1_retired_check: rpi5_artifact_check
 sel4_rpi5_image_check: sel4_pin_check
     python3 scripts/build/build-sel4.py --platform bcm2712-rpi5 --skip-pin-check
 
+# No EL0 program of a Raspberry Pi 5 system-timer image names a generic-timer register. Builds the
+# product image and the clock-authority image, each with and without --system-timer, and reads the
+# root ELF, the root child ELF and every component image; the builds without the flag are its
+# controls. Boots nothing and needs no board: whether the system timer works there is an operator's
+# observation.
+[group('hardware')]
+rpi5_system_timer_image_check: sel4_pin_check
+    python3 scripts/check/check-el0-generic-timer.py
+
 [group('hardware')]
 sel4_duo_image_check: sel4_pin_check
     python3 scripts/build/build-sel4.py --platform cv1800b-duo --skip-pin-check
@@ -401,3 +638,12 @@ duo_serial_monitor serial timeout="120":
 [group('hardware')]
 duo_gate_control_check:
     python3 scripts/check/check-duo-gate-control.py
+
+# Judges the composition that runs the rmw_zenoh node and its native peer, and boots it. The judge requires the system
+# spec, the manifest derived from it, the composition inventory row, the test-run record and the arm of the network plane
+# checker, and then runs that arm under QEMU. The arm requires each component to publish and receive the sequence numbers
+# 1 to 4 and the node to close the session once the exchange is done. The expectation is scripts/lib/zenoh_rmw_arm.py and
+# the marker chains in scripts/check/check-sel4-io-network-plane.py. The recipe is in no aggregate.
+[group('hardware')]
+zenoh_rmw_booted_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice rmw-booted

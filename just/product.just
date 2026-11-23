@@ -47,6 +47,16 @@ x86_64_qemu_check: sel4_pin_check
     python3 scripts/check/check-sel4-boot-layout.py --platform qemu-pc99
     python3 scripts/check/check-architecture-portability.py
 
+# The x86-64 C component link runs no host compiler driver. The gate builds
+# the pc99 image for the installed seL4 headers, so it needs an x86-64 host.
+# It then builds the product Slisp component on a PATH that holds `ld.lld`
+# and traps, and refuses two controls. The inputs name what that build reads;
+# without them the closure digest would cover no file under scripts/build/.
+[group('product')]
+[metadata("inputs", "scripts/build/build-c-component.py", "components/slisp/**", "components/runtime/c/**", "components/runtime/include/**")]
+x86_64_component_link_check: sel4_pin_check
+    python3 scripts/check/check-c-component-link.py --architecture x86_64
+
 # P6.5 builds one Framework-target-qualified raw GPT/FAT32 image, validates the
 # identity and removable-writer safety boundary, then boots those exact bytes
 # under the pinned q35/OVMF reference to the resident product graph.
@@ -83,6 +93,13 @@ framework_cpu_boot_prepare device protect: framework_media_check
 framework_cpu_boot_verify *ARGS: framework_media_check
     python3 scripts/check/check-framework-cpu-boot.py verify "$@"
 
+
+# The RISC-V root boot claim alone, in the same shape as
+# `x86_64_sel4_root_boot_check`. `riscv64_qemu_check` replays four more plane
+# gates and the portability check after the same boot.
+[group('product')]
+riscv64_sel4_root_boot_check: sel4_pin_check
+    python3 scripts/check/check-sel4-root-boot.py --platform qemu-riscv-virt
 
 [group('product')]
 riscv64_qemu_check: sel4_pin_check

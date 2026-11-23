@@ -111,8 +111,10 @@ longer counts. `just spec_closure --explain` lists what each bound target's
 closure covers. Where the change lands depends on its `scripts/spec/check`
 class:
 
-- A grader file of a bound target (a `scripts/check/` or `scripts/lib/`
-  file in its grader set, or a recipe in its closure) is a planning change.
+- A grader file of a bound target (a script in its grader set, or a recipe
+  in its closure) is a planning change. A generator that a bound recipe runs,
+  such as `scripts/generate/generate-system-image-closures.py --check`, is in
+  the grader set like a `scripts/check/` or `scripts/lib/` file.
   It needs a V4 approval, and an implementation PR may not touch it (V3). A
   grader that grades a promise changes only from a new item.
 - A product pin or fixture such as `sel4/pins.toml` or

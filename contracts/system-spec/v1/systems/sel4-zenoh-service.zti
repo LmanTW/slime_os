@@ -117,5 +117,5 @@
   recording = [];
   recordingObject = false;
   deploymentConstraint = "AArch64 seL4 QEMU Zenoh Profile 0 service over loopback TCP without a NIC: two local holders exchange samples through one session. No router, scouting or physical device claim.";
-  acceptanceCriteria = "A publisher holder and a subscriber holder exchange four samples through the Zenoh service, and the service refuses a key a holder lacks.";
+  acceptanceCriteria = "A publisher holder and a subscriber holder exchange four samples through the Zenoh service. The peer receives each publication of the publisher holder. The service refuses a key a holder lacks.";
 }

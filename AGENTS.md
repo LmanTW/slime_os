@@ -18,14 +18,14 @@ otherwise. A CPU boot qualifies no device.
 
 ## Code map: start here, do not broad-search
 
-Route work by ownership before searching for a symbol. Read the named module root first; use LSP symbols/references from there when available, and only then grep the exact symbol. Do not scan `deps/`, `target/`, `roadmap/`, or `.tasks/` for implementation symbols unless the task specifically concerns them.
+Route work by ownership before searching for a symbol. Read the named module root first; use LSP symbols/references from there when available, and only then grep the exact symbol. Do not scan `deps/`, `target/`, or `.tasks/` for implementation symbols unless the task specifically concerns them.
 
-For current subsystem rationale, start at [`docs/architecture/`](docs/architecture/README.md), then the owning code or contract below. Unimplemented design and qualification boundaries live in [`docs/plans/`](docs/plans/README.md). [`roadmap/README.md`](roadmap/README.md) classifies retained detail and historical source; do not reconstruct extracted architecture from milestone chronology.
+For current subsystem rationale, start at [`docs/architecture/`](docs/architecture/README.md), then the owning code or contract below. Unimplemented design and qualification boundaries live in [`docs/plans/`](docs/plans/README.md). Historical source lives in the [archive](docs/history.md); do not reconstruct extracted architecture from milestone chronology.
 
 ### Execution path
 
 1. `scripts/build/build-sel4.py` pins and builds seL4, the root task, its child fixture, and the loader image.
-2. `slime-root/src/main.rs` admits the embedded generation, creates the initial capability graph, launches components, supervises faults, and owns bounded kernel-object allocation.
+2. `slime-root/src/main.rs` initializes the bounded kernel-object allocator, installs the root's console, and calls `slime_root::boot::run`. `slime-root/src/boot.rs` proves the root's foundations and admits the embedded generation. `slime-root/src/graph_runtime.rs` creates the initial capability graph and launches components. `slime-root/src/graph_runtime/services.rs` serves their requests and supervises faults.
 3. Components enter through `components/<lifecycle>/<component>/src/main.rs` — one crate per component (CP3), grouped under `system/`, `services/`, `applications/`, or `testkit/` — with shared helpers in `components/lib` and build-time support in `components/build-support`; their syscall surface is `components/runtime/src/syscall.rs`, with the native transport in `components/runtime/src/syscall/sel4_transport.rs` and authoritative operations in `slime-root/src/ipc.rs` plus the owning mechanism module.
 
 ### Task-to-file index
@@ -38,7 +38,7 @@ rows are expanded into checklists in
 
 ### Generated-code rule
 
-Files beginning with `@generated`, files under `boot-contracts/src/generated/`, every manifest named in `DERIVED_GENERATION_FIXTURES` (`scripts/lib/system_spec.py`), the system specs named in `COMPUTED_SYSTEM_SOURCES` (`scripts/lib/system_spec.py`),
+Files beginning with `@generated`, files under `boot-contracts/src/generated/`, every manifest that a system spec in `contracts/system-spec/v1/systems/` derives (`DERIVED_GENERATION_FIXTURES` in `scripts/lib/system_spec.py` reads that directory), the system specs named in `COMPUTED_SYSTEM_SOURCES` (`scripts/lib/system_spec.py`),
 and every closure source under `contracts/system-image-closure/v3/closures/` plus every negative case under `contracts/system-image-closure/v2/negative/` are outputs, not sources. Change the matching `contracts/.../schema.zt`, `gen_rust.zt`, or system-spec authoring source (`sources/*.zt` for mapped outputs, otherwise
 `systems/*.zti`), then run the matching `scripts/generate/generate-bindings.py <name>` (a row of `scripts/lib/zutai_bindings.py`), remaining `scripts/generate/generate-*-bindings.py` / `just *_gen` / `generate-generation-from-spec.py` / `generate-system-image-closures.py`. `components/build-support` generates nothing from a manifest: B70 replaced build-time command tables and the per-plane fabric profile with root-served runtime queries, so a component reads its composition, ceilings, and graph rows from the authenticated generation it is running inside.
 
@@ -46,7 +46,7 @@ A closure source names its inputs by path and records no digest; every build res
 
 ### Navigation traps
 
-- `slime-root/src/lib.rs` exposes the mechanism modules host tests compile; the product binary in `slime-root/src/main.rs` links those same modules.
+- `slime-root/src/lib.rs` exposes the mechanism modules host tests compile, the boot sequence and the graph runtime among them; the product binary in `slime-root/src/main.rs` links those same modules. The binary alone compiles `main.rs`. A root built with `SLIME_ROOT_FIXTURE=1` also compiles `fixture_runtime.rs`, behind `cfg(slime_root_fixture)`; a product root does not.
 - A component's capability slot layout is established by grants in the matching `contracts/system-spec/v1/systems/<plane>.zti`, the manifest derived from it under `contracts/generation-manifest/v1/compositions/`, and the generated boot-layout fixture, not by the component binary alone. Inspect all three before changing slot numbers or authority; edit only the system spec.
 - `scripts/check/` contains end-to-end QEMU assertions and expected serial markers; it is verification code, not the implementation of the behavior it checks.
 
@@ -58,7 +58,7 @@ Use the Justfile targets from the repository root. The full list, one row per ta
 - `just test` — run the root/product behavioral aggregate.
 - `just generation_check` — build and validate the deterministic seL4 generation.
 - `just contracts_check` — validate generation manifest contracts and generated bindings.
-- `just spec_check` — the devloop v1.5 judge (`scripts/spec/check`): the store alone, or with `--base origin/main` your branch under V1 to V10, as CI judges it.
+- `just spec_check` — the devloop v1.5 judge (`scripts/spec/check`): the store alone, or with `--base origin/main` your branch under V1 to V11, as CI judges it.
 - `just spec_tasks_check` — task/v2 items and area files: format, links, schema copies; offline.
 - `just spec_tasks_status` / `just spec_status` — each item's state and each area requirement's state, read from the `evidence` branch.
 - `just spec_record <target>` / `just spec_closure` — run one target under the record wrapper, and print the closure digest an evidence record is keyed by.
@@ -71,23 +71,23 @@ Explicit hardware and physical-boot targets (`rpi5_ros2_zenoh_check`, `framework
 
 A work item is one task/v2 Zutai file, `.tasks/items/<slug>.zt`; identity is its UUID, and the slug is a display alias. Start one with `python3 scripts/spec/tasks new <task|bug|milestone> <slug> --area <area>`. It names an area under `specs/`, `owns` globs, requirements bound to `just` targets, and acceptances. Area files under `specs/` hold frozen promises; an item's `supersedes` replaces one. Closed items live in `.tasks/terminal/`. `specs/legacy.zt` indexes the 448 V1 items, whose full text is in Git at the commit it names.
 
-`scripts/spec/check` is the only judge, and it blocks. A feature takes several PRs: a planning PR lands the item and its exam, then an implementation PR changes only paths the item's `owns` covers. The judge refuses product code in a planning PR (V1) and an implementation PR that touches its own grader set (V3). A grader, area, schema, or judge change needs one approval on the head from `HUMAN_OWNERS` by someone other than the author (V4). Backlog bugs come first: a milestone cannot go `#active` while a backlog bug is `#planned` or `#active` (V7). After a push to `main`, the Evidence workflow records every claimed target on the `evidence` branch and signs a done witness for each finished `#active` item. Its closeout bot then opens one PR that moves the item to `.tasks/terminal/`. Nobody runs a completion command.
+`scripts/spec/check` is the only judge, and it blocks. A feature takes several PRs: a planning PR lands the item and its exam, then an implementation PR changes only paths the item's `owns` covers. The judge refuses product code in a planning PR (V1) and an implementation PR that touches its own grader set (V3). Every PR but a closeout needs one independent review of its head: an approval from a person in `HUMAN_OWNERS` or from an account in `REVIEW_AGENTS`, other than the author (V11). A PR comment that starts with `@claude review` asks the review agent for its verdict. The same review satisfies V4 for a grader, area, schema, or judge change. Backlog bugs come first: a milestone cannot go `#active` while a backlog bug is `#planned` or `#active` (V7). After a push to `main`, the Evidence workflow records every claimed target on the `evidence` branch and signs a done witness for each finished `#active` item. Its closeout bot then opens one PR that moves the item to `.tasks/terminal/`. Nobody runs a completion command.
 
-The rules V1 to V10 and their reasons are [`docs/decisions/work-item-devloop.md`](docs/decisions/work-item-devloop.md). The walkthrough is [`docs/getting-started/06-work-item-lifecycle.md`](docs/getting-started/06-work-item-lifecycle.md). Read both before opening a PR that touches `.tasks/`, `specs/`, `scripts/spec/`, or a checker. [`CONTRIBUTING.md`](CONTRIBUTING.md) owns the human-facing PR workflow and the PR class table.
+The rules V1 to V11 and their reasons are [`docs/decisions/work-item-devloop.md`](docs/decisions/work-item-devloop.md) and [`docs/decisions/independent-review.md`](docs/decisions/independent-review.md). The walkthrough is [`docs/getting-started/06-work-item-lifecycle.md`](docs/getting-started/06-work-item-lifecycle.md). Read both before opening a PR that touches `.tasks/`, `specs/`, `scripts/spec/`, or a checker. [`CONTRIBUTING.md`](CONTRIBUTING.md) owns the human-facing PR workflow and the PR class table.
 
 ## Code review
 
-These rules bind every reviewer of a PR — a person, a review bot such as Codex, or an agent asked to review — and the author answering the review. A review's job is to find where the diff, the checker it binds, and the landed work item disagree, and to say so with a file and line.
+These rules bind every reviewer of a PR — a person, a review bot, or an agent asked to review — and the author answering the review. A review's job is to find where the diff, the checker it binds, and the landed work item disagree, and to say so with a file and line.
 
 - **The item bounds the review.** Read the work item, the PR description, and the existing threads before the diff. A process PR has no item; there the rules in this file the PR claims to follow, and the claims its description makes, are what a finding is checked against. A finding names what it breaks — an item requirement or acceptance, a stated invariant, or a rule in this file — the file and line, and the input that produces the wrong result. A case no requirement statement claims is a follow-up proposal in one comment, not a finding; a declared known limit is a decision to weigh, not a gap.
-- **Severity states a consequence.** Blocking only when a gate can pass while its claim is false, a refused input is accepted, an authority, lifetime, or determinism rule is broken, a boundary-crossing format has no Zutai contract, or the recipe cannot pass as landed. A local defect is non-blocking. Style, alternatives, and hardening the item does not require are suggestions, labelled, never blocking, never re-raised. What the PR cannot carry goes to the planning process in one comment.
+- **Severity states a consequence.** Blocking only when a gate can pass while its claim is false, a refused input is accepted, an authority, lifetime, or determinism rule is broken, a boundary-crossing format has no Zutai contract, the recipe cannot pass as landed, or the PR adds a workflow or job that could report the PR's own verdict. A local defect is non-blocking. Style, alternatives, and hardening the item does not require are suggestions, labelled, never blocking, never re-raised. What the PR cannot carry goes to the planning process in one comment.
 - **One review per head.** A later head gets the delta and the threads it answers, not a fresh pass over the whole diff. More than ten findings means a structural problem: name it, give the strongest, stop. Never duplicate a finding another tool posted.
 - **Consistency.** A finding that restates an open thread is a reply there; one that contradicts an earlier round names it and the evidence that changed. A thread answered with a question or a declared decision waits for the human.
 - **Answering.** Reproduce before fixing; what does not reproduce stays open with what was tried. Declining with a reason is legitimate. Answer a whole round in one push. Revise the item once, in one planning PR, never for a suggestion. Nothing blocking means ready. Threads hold the history; the description describes the head.
 - **Triage before fixing.** The author's reply to a round opens with one line per finding: the input that breaks it, whether it changes product behavior or only tooling, documentation or process, and the size of the fix. Fixes follow in the same push.
 - **When the author stops and asks.** The author fixes nothing in a round and asks the human in one PR comment, linking [`HUMAN.md`](HUMAN.md), when either holds:
   - a third consecutive round raises a new finding on the same subject. The comment names the subject, the design choice that keeps producing findings, and the decision that would close the whole class (for example: require storage to equal the declared configuration instead of bounding it from below);
-  - a non-blocking finding (Codex P2) lands on process or verification text or code: `scripts/`, `.tasks/`, `specs/`, `.agents/`, this file, or `docs/` outside `docs/architecture/`. These are collected into one follow-up comment for the human to accept or drop, not fixed in the PR.
+  - a non-blocking finding lands on process or verification text or code: `scripts/`, `.tasks/`, `specs/`, `.agents/`, this file, or `docs/` outside `docs/architecture/`. These are collected into one follow-up comment for the human to accept or drop, not fixed in the PR.
 
   The human's answer is a declared decision under **Consistency**; a finding that follows from it is not re-raised.
 

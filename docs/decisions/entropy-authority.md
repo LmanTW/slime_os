@@ -12,7 +12,7 @@ source ports, and today those bytes are typed into the serial input by the host
 checker (`scripts/check/check-sel4-io-network-plane.py`, `http_launch_text`).
 Hostname resolution therefore cannot be offered on a product composition.
 
-D3's [deterministic-component authority](../../roadmap/08-native-development.md#deterministic-component-authority)
+D3's [deterministic-component authority](../plans/native-development.md#deterministic-component-authority)
 left the mechanism open: a kernel-pool entropy object, or a per-spawn seeded
 stream minted by the spawner. It also required that a seeded fixture use the
 same rights as a real source, so a test generation changes wiring rather than
@@ -66,7 +66,9 @@ grant `<holder>-entropy` from the holder to `entropy-service`, with exactly
 to `entropy-service` from an instance without a row, or under another name, is
 refused at admission, so a component with no row cannot resolve an entropy
 binding. The root serves the table through `CAPABILITY ENTROPY AUTHORITY READ`
-(label 74) only to the instance named `entropy-service`.
+(label 74) only to the instance named `entropy-service`. Since PR 1117 the
+builder states that name in the generation's reader table, and the root holds
+none ([declared table readers](../architecture/runtime-authority.md#declared-table-readers)).
 
 Residency is a placement fact ([instance lifetime](instance-lifetime.md)), not
 part of this decision. The `sel4-entropy` qualification composition declares

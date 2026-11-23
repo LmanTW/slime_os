@@ -1,0 +1,58 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.bug "01a1ec78-31ef-7332-b620-61d644f64a66" "boot-plane-marker-order" "planes-mechanism"
+  "Nothing holds the boot plane gate to the orders it must accept, or to building its image"
+  "Until pull request 1028, scripts/check/check-sel4-boot-plane.py held eleven lines to one order: the ready line of the call worker and of the operation worker, and the idle line of each of their nine participants. Each line comes from its own task, and the product promises no order among them. On one host, sel4_boot_check failed 2 of 10 boots of main at 31613aa on one of these lines, and fourteen further boots of that image printed the lines in four orders. The gate also accepted --no-build, which started QEMU with no image path. Pull request 1028 changed the gate. No control holds it to that change: nothing refuses a gate that returns to one order, and nothing refuses a gate that takes the option again.")
+  with {
+    intent = #active;
+    owns = {
+      "scripts/check/check-sel4-boot-plane.py";
+    };
+    nonGoals = {
+      h.nonGoal "A fixed order of these lines in the product. Each worker and each participant is a task of its own, and no requirement asks for an order." h.agentDefault;
+      h.nonGoal "The other chains of the gate. No observed failure names one of them." h.agentDefault;
+      h.nonGoal "A measurement on a CI runner. Every count in this item comes from one development container." h.agentDefault;
+      h.nonGoal "The --no-build option of other checkers. check-sel4-component-graph.py boots a fixed legacy image path with it." h.agentDefault;
+    };
+    requirements = {
+      h.req "accepts-each-observed-order"
+        "The gate accepts a transcript that holds the eleven lines in each of the three observed orders that differ from the declared one: a call ready line after its participants, an operation ready line after every other line, and two call participants before the operation plane."
+        { "sel4_gate_control_check"; };
+      h.req "requires-each-line"
+        "The gate refuses a transcript that lacks one of the eleven lines, whatever the order of the other ten."
+        { "sel4_gate_control_check"; };
+      h.req "marker-count-holds"
+        "The gate declares 30 required markers, as before: 19 in causal chains and 11 with no order."
+        { "sel4_gate_control_check"; };
+      h.req "no-option-boots-without-an-image"
+        "check-sel4-boot-plane.py refuses --no-build as an unknown option and exits with status 2 before it starts QEMU."
+        { "sel4_gate_control_check"; };
+      h.req "boot-plane-passes"
+        "sel4_boot_check passes on a boot of the sel4-boot closure."
+        { "sel4_boot_check"; };
+    };
+    acceptance = {
+      h.observed "sel4_gate_control_check";
+      h.observed "sel4_boot_check";
+    };
+    decisions = {
+      h.decided "no-order-among-the-eleven-lines"
+        "The gate requires each of the eleven lines and no order among them. It declares them as EXPECTED_UNORDERED."
+        "a worker and its participants are separate tasks of one priority, and a timer tick that ends a time slice moves a line. The gate's own comment said it recorded the order as observed. The observations now show four orders"
+        h.agentDefault
+        { "accepts-each-observed-order"; "requires-each-line"; "marker-count-holds"; };
+      h.decided "remove-the-option"
+        "The gate loses --no-build. It always calls the closure build."
+        "the closure build reuses an image whose inputs did not change, so the option saved no time, and without the build the gate has no image path"
+        h.agentDefault
+        { "no-option-boots-without-an-image"; };
+      h.decided "controls-follow-the-fix"
+        "Pull request 1028 changed the gate before this item landed. The planning pull request of this item lands the controls and binds the two targets."
+        "the gate was a process path and its controls are a planning path, and a pull request carries one class (V1). Controls landed first would have failed on main in the gate-control job of CI"
+        h.agentDefault
+        { "accepts-each-observed-order"; "no-option-boots-without-an-image"; };
+    };
+  };
+
+item

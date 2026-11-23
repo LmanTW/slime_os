@@ -99,9 +99,7 @@ Two lookup pages without update discipline of their own:
 ## Plans
 
 - [`plans/`](plans/README.md) — unimplemented designs, delivery requirements,
-  and qualification requirements, without work-item state. The
-  [roadmap classification](../roadmap/README.md) identifies retained detail
-  not yet extracted and historical source awaiting verified archival.
+  and qualification requirements, without work-item state.
 
 ## Exploration
 
@@ -113,7 +111,7 @@ Two lookup pages without update discipline of their own:
 | Looking for | Go to |
 | --- | --- |
 | Work-item state: what is open, active, blocked, deferred | `just spec_tasks_status` over `.tasks/items/` and the `evidence` branch; promises with `just spec_status` |
-| Current subsystem ownership and invariants | [`architecture/`](architecture/README.md); unfinished requirements in [`plans/`](plans/README.md); retained detail classified in [`roadmap/`](../roadmap/README.md) |
+| Current subsystem ownership and invariants | [`architecture/`](architecture/README.md); unfinished requirements in [`plans/`](plans/README.md) |
 | Known defects and regressions (open ones precede milestone work) | Open `#bug` items in `.tasks/items/` and failing promises in `just spec_status`; `specs/legacy.zt` indexes the earlier store |
 | How userspace drivers receive device/MMIO/IRQ/DMA authority, and what IO gates prove | [Userspace I/O substrate](architecture/io-substrate.md); the authority surface is in [`capability-matrix.md`](capability-matrix.md) and operations in [`syscall-abi.md`](syscall-abi.md) |
 | How a historical conclusion was reached | [Private history archive](history.md), pinned by full commit and original path; ordinary changes need no investigation |

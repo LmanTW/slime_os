@@ -88,6 +88,7 @@ fn owned(outcome: &Outcome<'_, 4>) -> Vec<Ev> {
             Event::SubscriberUndeclared { id } => Ev::Undeclared(id),
             Event::Closed { .. } => Ev::Closed,
             Event::SampleStored { .. } => panic!("a session that cannot fragment stores no sample"),
+            Event::Dropped { .. } => panic!("a session with one run drops nothing"),
         })
         .collect()
 }

@@ -1,0 +1,6 @@
+# Accounts whose approval of the current head is the review agent's verdict
+# (V4, V11). One login per line. The validator reads the base commit's copy,
+# so an account this file gains in a pull request cannot approve that pull
+# request. An account never approves a pull request it opened.
+# docs/decisions/independent-review.md
+github-actions[bot]

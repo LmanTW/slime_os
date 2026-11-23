@@ -530,7 +530,7 @@ def check_transcript(transcript: str, platform: str) -> None:
 # would sit below every RV64 ordinary address and assert nothing, so RV64
 # declares none and the root reports `beyond_legacy=0`. pc99 likewise never had
 # one: its ordinary memory comes from the x86 E820/Multiboot map, so it also
-# declares none, matching `TARGET_PROFILE`'s arm in `slime-root/src/main.rs`.
+# declares none, matching the arm of `TARGET_PROFILE` in `slime-root`.
 LEGACY_PLATFORM_RAM_END = {
     "qemu-arm-virt": 0x8000_0000,
     "qemu-riscv-virt": None,
@@ -546,6 +546,11 @@ def check_ordinary_memory(transcript: str, platform: str) -> None:
     summary must agree with the enumerated ranges, and the exact page-sized,
     page-aligned probe must be fully contained in the highest range capable of
     holding such a page — which is what a launcher argument cannot manufacture.
+
+    A range is capable only in the bytes the root has not already spent. Before
+    it probes, the root may fund its own metadata from the tail of a range and
+    report that as `SLIME_BACKING infrastructure_tail`. Such a tail runs to the
+    end of exactly one enumerated range, and no frame can come from it.
     """
     ranges = [
         (int(paddr, 16), int(size))
@@ -575,6 +580,26 @@ def check_ordinary_memory(transcript: str, platform: str) -> None:
             f"ordinary inventory end is {summary.group(3)}, "
             f"expected {expected_end:#x} from the enumerated ranges"
         )
+    # A tail the root reports before the probe shortens the free part of its
+    # range. Each tail must end where one enumerated range ends and start after
+    # that range starts; a tail reported after the probe excuses nothing.
+    free_end = {paddr: paddr + size for paddr, size in ranges}
+    range_by_end = {paddr + size: paddr for paddr, size in ranges}
+    for tail_paddr, tail_bytes in re.findall(
+        r"SLIME_BACKING infrastructure_tail parent=\d+ paddr=(\d+) bytes=(\d+)",
+        transcript[: probe.start()],
+    ):
+        tail_start = int(tail_paddr)
+        tail_end = tail_start + int(tail_bytes)
+        owner = range_by_end.get(tail_end)
+        if owner is None or not owner < tail_start < tail_end:
+            fail(
+                f"the infrastructure tail {tail_start:#x}..{tail_end:#x} is not the "
+                f"tail of one enumerated ordinary range"
+            )
+        if free_end[owner] != tail_end:
+            fail(f"the ordinary range at {owner:#x} reports two infrastructure tails")
+        free_end[owner] = tail_start
     # The root allocates one seL4 base-page granule from the highest range that
     # can place that complete, aligned object. The inventory's own tail may be
     # a run of sub-page descriptors the kernel publishes for leftover bytes;
@@ -590,21 +615,20 @@ def check_ordinary_memory(transcript: str, platform: str) -> None:
     if probe_paddr % granule_bytes != 0:
         fail(f"the ordinary probe address {probe.group(1)} is not granule-aligned")
 
-    def can_hold_granule(entry: tuple[int, int]) -> bool:
-        paddr, size = entry
+    def can_hold_granule(paddr: int) -> bool:
         aligned = (paddr + granule_bytes - 1) & -granule_bytes
-        return aligned + granule_bytes <= paddr + size
+        return aligned + granule_bytes <= free_end[paddr]
 
-    capable = [entry for entry in ranges if can_hold_granule(entry)]
+    capable = [paddr for paddr, _ in ranges if can_hold_granule(paddr)]
     if not capable:
         fail(f"no admitted ordinary range can hold a {granule_bytes}-byte frame")
-    highest = max(capable, key=lambda entry: entry[0])
-    highest_end = highest[0] + highest[1]
-    if probe_paddr < highest[0] or probe_paddr + probe_bytes > highest_end:
+    highest = max(capable)
+    highest_end = free_end[highest]
+    if probe_paddr < highest or probe_paddr + probe_bytes > highest_end:
         fail(
             f"the probe frame {probe.group(1)}..{probe_paddr + probe_bytes:#x} is not "
             f"fully contained in the highest granule-capable range "
-            f"{highest[0]:#x}..{highest_end:#x}"
+            f"{highest:#x}..{highest_end:#x}"
         )
     legacy_end = LEGACY_PLATFORM_RAM_END[platform]
     expected_beyond = "0" if legacy_end is None else "1"

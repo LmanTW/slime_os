@@ -40,9 +40,8 @@ Three files answer most "where is..." questions:
   `evidence` branch, and `just spec_status` — each area promise's state. Items
   live in `.tasks/items/`, promises in `specs/<area>.zt`. Open backlog bugs
   come before milestone work. `scripts/spec/check` enforces it (V7).
-- [`roadmap/README.md`](../../roadmap/README.md) — the file classification and
-  residual-ownership index. It records no state and owns no problem statement;
-  each item owns its own.
+- [`docs/plans/`](../plans/README.md) — unimplemented designs and requirements.
+  A plan records no state and owns no problem statement. Each item owns its own.
 
 ## The house epistemology
 

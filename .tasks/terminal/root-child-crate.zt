@@ -1,0 +1,99 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a1ed2c-6a01-7d68-84f5-f3057766f1ab" "root-child-crate" "planes-mechanism"
+  "The fixture's child program is a crate outside slime-root/"
+  "slime-root/child/ holds the program that the root fixture loads as its child task. It is a crate of its own, it builds for another target than the root, and it runs without the root's authority. root_size_check still counts its 390 code lines as root source, in the fixture role of 950. docs/decisions/root-task-scope.md lets the fixture role leave the root in two steps, and this crate is the first.")
+  with {
+    intent = #active;
+    owns = {
+      "slime-root/child/**";
+      "components/root-child/**";
+      "slime-root/src/main.rs";
+      "scripts/build/build-sel4.py";
+      "just/quality.just";
+      "contracts/system-image-closure/v3/closures/**";
+    };
+    nonGoals = {
+      h.nonGoal "A change to what the child program does. The crate moves, and no line of its source changes." h.agentDefault;
+      h.nonGoal "A change to the root's code. In slime-root/src/main.rs only the comments that name the crate's path change." h.agentDefault;
+      h.nonGoal "A new name for the package. It stays slime-root-child, so no artifact name and no pin changes." h.agentDefault;
+      h.nonGoal "The root side of the fixture, slime-root/src/fixture_runtime.rs. It leaves when the library holds the boot sequence of main." h.agentDefault;
+      h.nonGoal "The child image that every root embeds. The product root still links it until the fixture is a root binary of its own." h.agentDefault;
+      h.nonGoal "Lower ceilings in scripts/check/check-root-size.py. The checker grades promises, so it changes only with a new item (V4). The planning pull request of the next root item lowers them." h.agentDefault;
+    };
+    requirements = {
+      h.req "fixture-role-without-the-child"
+        "root_size_check counts at most 600 code lines in the fixture role, and reports the count as fixtureCodeLines."
+        { "root_size_check"; };
+      h.req "series-without-the-child"
+        "root_size_check counts at most 34010 code lines in the nine series roles, and reports the count as seriesCodeLines."
+        { "root_size_check"; };
+      h.req "fixture-boots-on-aarch64"
+        "sel4_root_boot_check passes: the root fixture boots on qemu-arm-virt with the child built from its new place."
+        { "sel4_root_boot_check"; };
+      h.req "fixture-boots-on-x86-64"
+        "x86_64_sel4_root_boot_check passes: the root fixture boots on qemu-pc99 with the child built from its new place."
+        { "x86_64_sel4_root_boot_check"; };
+      h.req "fixture-boots-on-riscv64"
+        "riscv64_sel4_root_boot_check passes: the root fixture boots on qemu-riscv-virt with the child built from its new place."
+        { "riscv64_sel4_root_boot_check"; };
+      h.req "closures-name-the-new-place"
+        "image_builder_closures_check passes: every closure source names the child crate's tree at its new place, no closure source is stale, and the image builder resolves each one."
+        { "image_builder_closures_check"; };
+    };
+    acceptance = {
+      h.observedWhere "root_size_check" {
+        h.atMost "fixtureCodeLines" 600;
+        h.atMost "seriesCodeLines" 34010;
+      };
+      h.observed "sel4_root_boot_check";
+      h.advisory (h.observed "x86_64_sel4_root_boot_check");
+      h.observed "riscv64_sel4_root_boot_check";
+      h.observed "image_builder_closures_check";
+    };
+    decisions = {
+      h.decided "components-root-child"
+        "The crate moves to components/root-child/."
+        "scripts/lib/component_paths.py requires each crate under components/testkit/ to declare exactly one [[bin]], and component_crate_split_check holds each to the shape of a component. The child is no component: it is a workspace of its own and uses no component runtime"
+        h.agentDefault
+        { "fixture-role-without-the-child"; };
+      h.decided "bounds-from-the-count-on-main"
+        "The fixture bound is 600 and the series bound is 34010."
+        "on main at 676b9d8 the fixture role holds 950 lines and the series 34331. The child holds 390. 950 less 390 is 560, rounded up to a multiple of 50 as the ceilings are. 34010 is the series ceiling of 34400 less 390"
+        h.agentDefault
+        { "fixture-role-without-the-child"; "series-without-the-child"; };
+      h.decided "ci-environment-first"
+        "A process pull request lets .github/actions/slime-env fetch the child's crates from either place, before the implementation pull request moves the crate. A second one removes the old place after it."
+        "the action runs cargo fetch on slime-root/child/Cargo.toml, a pull request runs the action of its own head, and a pull request carries one class (V1): .github/ is a process path"
+        h.agentDefault
+        { "fixture-boots-on-aarch64"; };
+      h.decided "generator-finds-either-place"
+        "The planning pull request of this item makes scripts/generate/generate-system-image-closures.py name the child crate's tree at whichever place holds it. The implementation pull request moves the crate and regenerates the closure sources. The planning pull request of the next root item removes the old place from the generator."
+        "the generator is in the grader set of system_image_closure_gates_check, which promises in specs/contracts.zt bind, so it changes only in a pull request that adds an item (V4). The crate is product code, which a planning pull request cannot move (V1)"
+        h.agentDefault
+        { "closures-name-the-new-place"; };
+      h.decided "closures-by-the-builder-gate"
+        "The closure requirement binds image_builder_closures_check, not system_image_closure_gates_check."
+        "system_image_closure_gates_check fails on main in system_test_run_inventory_check, on a count of network arms that the fixture does not touch. The evidence branch holds 11 records of it, and none passed. image_builder_closures_check runs the generator's freshness check and resolves every closure, CI runs it on every pull request that changes code, and its 8 records all passed"
+        (h.fromHuman "1 選 A，2 照你建議，3 開 backlog bug" "Claude Code session session_01Udthew69PFkRyDtWmFtXKa, 2026-11-18, accepting the proposal to bind image_builder_closures_check")
+        { "closures-name-the-new-place"; };
+      h.decided "riscv-by-the-root-boot-recipe"
+        "The RISC-V requirement binds riscv64_sel4_root_boot_check, not riscv64_qemu_check."
+        "riscv64_qemu_check runs four more plane gates and the portability check after the root boot, and its wait-set arm boots an AArch64 closure on qemu-riscv-virt, so the recipe cannot pass today. The fixture is the subject of the root boot alone. The bug item root-probe-below-spent-tails added the recipe"
+        (h.fromHuman "1045 和 1043 都接受，RISC-V 改綁照做，其餘三個 plane 先不處理" "Claude Code session session_01Udthew69PFkRyDtWmFtXKa, 2026-11-18")
+        { "fixture-boots-on-riscv64"; };
+      h.decided "x86-boot-is-advisory"
+        "The acceptance on x86_64_sel4_root_boot_check is advisory. The Evidence workflow records it, and it does not block the done witness."
+        "the Evidence workflow runs on an AArch64 host. The image build for qemu-pc99 links a C component through the host gcc, which refuses -m64, and the dev shell of that host has no OVMF and no GRUB for x86-64. The first record of the target, at ba33e0a, failed in that link step before QEMU started. The recipe passes on an x86-64 host, on the head of pull request 1053. A build of x86-64 images on an AArch64 host is work of its own"
+        (h.acceptedDefault "Claude Code session session_01Udthew69PFkRyDtWmFtXKa, 2026-11-19: the owner accepted the proposed option of three, which were advisory, a human acceptance, or an x86-64 build on the AArch64 runner")
+        { "fixture-boots-on-x86-64"; };
+      h.decided "a-task-not-a-milestone"
+        "This item is a task."
+        "it moves one crate and changes no behavior. The owner confirmed four items in place of one testability milestone in the session of 2026-11-18. The kind of this one is the agent's choice"
+        h.agentDefault
+        { "fixture-role-without-the-child"; };
+    };
+  };
+
+item

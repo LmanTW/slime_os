@@ -113,36 +113,32 @@ CHAINS: tuple[tuple[str, tuple[str, ...]], ...] = (
             r"\[fabric\] idle: parked on control endpoints",
         ),
     ),
-    (
-        # The call and operation planes hold no negotiated role at all (B55):
-        # each participant's control endpoint *is* its whole authority, a
-        # generation-declared native Endpoint the root installed at spawn, so
-        # there is nothing left to request. Ready evidence from each worker is
-        # required causal context for its participants' idle markers. Order
-        # within a plane is the worker's own ready-queue scan, deterministic
-        # under this build's single-core cooperative scheduling but unrelated
-        # to declaration or spawn order, so it is recorded as observed rather
-        # than assumed.
-        "the call plane's participants hold no negotiated role",
-        (
-            r"\[fabric\] call endpoints ready",
-            r"\[fabric-call-time\] boot idle without a role",
-            r"\[fabric-call-server\] boot idle without a role",
-            r"\[fabric-call-client-b\] boot idle without a role",
-            r"\[fabric-call-client\] boot idle without a role",
-        ),
-    ),
-    (
-        "the operation plane's participants hold no negotiated role",
-        (
-            r"\[fabric\] operation endpoints ready",
-            r"\[fabric-op-client-b-restart\] boot idle without a role",
-            r"\[fabric-op-time\] boot idle without a role",
-            r"\[fabric-op-server\] boot idle without a role",
-            r"\[fabric-op-client-b\] boot idle without a role",
-            r"\[fabric-op-client\] boot idle without a role",
-        ),
-    ),
+)
+
+# The call and operation planes hold no negotiated role at all (B55): each
+# participant's control endpoint *is* its whole authority, a generation-declared
+# native Endpoint the root installed at spawn, so there is nothing left to
+# request. The gate requires each worker's ready line and each participant's
+# idle line.
+#
+# It requires no order among them. The worker and its participants are separate
+# tasks of one priority, and each prints its line when the scheduler runs it. A
+# timer tick that ends a time slice moves a line, and where the tick lands
+# depends on how fast the host runs QEMU. Fourteen boots of one image printed
+# four orders: a ready line after its participants, a ready line after every
+# other line here, and two call participants before the operation plane.
+EXPECTED_UNORDERED: tuple[str, ...] = (
+    r"\[fabric\] call endpoints ready",
+    r"\[fabric-call-time\] boot idle without a role",
+    r"\[fabric-call-server\] boot idle without a role",
+    r"\[fabric-call-client-b\] boot idle without a role",
+    r"\[fabric-call-client\] boot idle without a role",
+    r"\[fabric\] operation endpoints ready",
+    r"\[fabric-op-client-b-restart\] boot idle without a role",
+    r"\[fabric-op-time\] boot idle without a role",
+    r"\[fabric-op-server\] boot idle without a role",
+    r"\[fabric-op-client-b\] boot idle without a role",
+    r"\[fabric-op-client\] boot idle without a role",
 )
 
 # The supervisor record is required evidence, not certification of
@@ -536,12 +532,17 @@ def check_transcript(transcript: str) -> None:
                     fail(f"{label}: marker out of order: {pattern}")
                 fail(f"{label}: missing marker: {pattern}")
             position = match.end()
+    for pattern in EXPECTED_UNORDERED:
+        if re.search(pattern, transcript) is None:
+            report_transcript(transcript)
+            fail(f"order-independent marker: missing marker: {pattern}")
     check_root_instances(transcript)
     used = check_layout(transcript)
     check_composition(transcript)
     print(
         f"transcript: {sum(len(chain) for _, chain in CHAINS)} markers observed across "
-        f"{len(CHAINS)} causal chains; init's layout used {used} slots; one root instance "
+        f"{len(CHAINS)} causal chains and {len(EXPECTED_UNORDERED)} in no order; "
+        f"init's layout used {used} slots; one root instance "
         f"and 19 composition tasks reached {EXPECTED_ROLES} checked roles plus "
         f"{len(EXPECTED_IDLE_WITHOUT_ROLE)} declared idles, and none exited",
         flush=True,
@@ -552,20 +553,16 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Boot the seL4 full-graph image and assert C8.10"
     )
-    parser.add_argument(
-        "--no-build",
-        action="store_true",
-        help="boot the already-built image instead of rebuilding it first",
-    )
-    arguments = parser.parse_args()
+    # No option skips the build. The closure build reuses an image whose inputs
+    # did not change, and without it this gate has no image path to boot.
+    parser.parse_args()
 
     if Path.cwd().resolve() != ROOT:
         fail(f"run from repository root: {ROOT}")
     if not FIXTURE.is_file():
         fail(f"missing generation fixture {FIXTURE.relative_to(ROOT)}")
     pins = load_pins()
-    if not arguments.no_build:
-        build_image()
+    build_image()
     profile = pins["qemu_arm_virt"]
     assert isinstance(profile, dict)
     check_transcript(boot(profile))

@@ -1,0 +1,96 @@
+-- Slime OS resource readers, version 1.
+--
+-- A generation resource object naming, for each generation table the root
+-- serves to a declared reader, the instances that may read it. The root
+-- carries no component name for these tables: it serves a table to an instance
+-- exactly when a row here pairs that table's resource id with the instance.
+-- The builder emits the object only when it emits at least one such table to a
+-- declared instance, so a generation without it has no reader of any of them.
+-- Embedded as a KIND_RESOURCE object and authenticated by the generation's
+-- existing object digest table; it adds no field to the instance record.
+--
+-- The object is a 32-byte header and `row_count` 36-byte rows, little-endian.
+-- The header's magic is `magicTag` and one zero byte, `required_flags` is zero,
+-- and `total_len` is the exact object length. Rows ascend strictly by
+-- `(resource, reader_identity)`, so no row repeats. `reader_identity` is
+-- SHA-256 over `identityDomain`, the length of the instance name as a 16-bit
+-- little-endian integer, and the name; it is never all zero.
+--
+-- Rows are keyed by instance, not component or executable: a reader is one
+-- running instance. A table several instances of one executable read carries
+-- one row per instance. The identity uses this contract's own domain tag, so
+-- an identity computed for another resource can never name a row here.
+
+magicTag :: Text = "SLIMERR";
+formatVersion :: Int = 1;
+headerBytes :: Int = 32;
+entryBytes :: Int = 36;
+-- A generation declares at most 48 instances. The three named readers use six
+-- rows, and one table that every other instance reads uses 45 more, which is
+-- 51. The bound is the next power of two.
+maxRows :: Int = 64;
+identityDomain :: Text = "slime-resource-reader-v1";
+
+-- The tables a row can name. An id is never reused for another table.
+resourceEntropyAuthority :: Int = 1;
+resourceZenohGrants :: Int = 2;
+resourceZenohLimits :: Int = 3;
+resourceNetworkDestinations :: Int = 4;
+resourceNetworkInterfaces :: Int = 5;
+resourceNetworkApplications :: Int = 6;
+resourceBlockRingAuthority :: Int = 7;
+
+WireField :: type { name : Text; width : Int; signed : Bool; byteArray : Bool; };
+
+ReaderHeader :: type {
+  magic : Int;
+  format_version : Int;
+  header_size : Int;
+  required_flags : Int;
+  row_count : Int;
+  total_len : Int;
+};
+
+ReaderEntry :: type {
+  resource : Int;
+  reader_identity : Int;
+};
+
+headerSchema ::= schema ReaderHeader;
+entrySchema ::= schema ReaderEntry;
+
+headerLayout :: List WireField = {
+  { name = "magic"; width = 8; signed = false; byteArray = true; };
+  { name = "format_version"; width = 4; signed = false; byteArray = false; };
+  { name = "header_size"; width = 4; signed = false; byteArray = false; };
+  { name = "required_flags"; width = 8; signed = false; byteArray = false; };
+  { name = "row_count"; width = 4; signed = false; byteArray = false; };
+  { name = "total_len"; width = 4; signed = false; byteArray = false; };
+};
+
+entryLayout :: List WireField = {
+  { name = "resource"; width = 4; signed = false; byteArray = false; };
+  { name = "reader_identity"; width = 32; signed = false; byteArray = true; };
+};
+
+format ::= {
+  magicTag =;
+  formatVersion =;
+  headerBytes =;
+  entryBytes =;
+  maxRows =;
+  identityDomain =;
+  resourceEntropyAuthority =;
+  resourceZenohGrants =;
+  resourceZenohLimits =;
+  resourceNetworkDestinations =;
+  resourceNetworkInterfaces =;
+  resourceNetworkApplications =;
+  resourceBlockRingAuthority =;
+  headerFields = headerSchema.fields ?? {;};
+  entryFields = entrySchema.fields ?? {;};
+  headerLayout =;
+  entryLayout =;
+};
+
+{ format =; }

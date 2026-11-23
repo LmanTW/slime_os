@@ -13,7 +13,7 @@ in-flight IPC, notification, expiry/renewal, reboot, rollback, and provenance.
 The checked capability algebra must show that derive, transfer, lease transition,
 and revoke never widen authority and that removing edges creates no reachability.
 
-The A1 acceptance requirements remain in [the authority roadmap](../../roadmap/06-authority-trust.md#a1--revocation-and-leases).
+The A1 acceptance requirements are in [A1 acceptance](#a1-acceptance).
 Agent authority should end with its task or a declared lease (for example, write
 access for thirty minutes), without killing the agent. Every derivation must
 record parentage rooted in a manifest grant; narrow-only rights alone do not
@@ -40,6 +40,17 @@ per-operation conservation must survive revocation, and edge removal must never
 create reachability; the baseline's weaker closure corollary is not a substitute.
 The proxy-revokes/client-fails/siblings-survive case remains A1's concrete check.
 
+### A1 acceptance
+
+Required checks:
+
+- A proxy revokes a derived subtree; the original holder's further use fails structurally while sibling grants survive.
+- A lease expires and is reclaimed by the health service with rollback-consistent semantics.
+- The checked rights-algebra model retains closure under edge removal and admits no authority widening through revoke, expiry, renewal, or rollback.
+- The capability-matrix amendment for revocation semantics lands in the same change as the mechanism.
+
+Exit condition: A derived grant can be withdrawn without killing its holder: the holder receives a structured revoked result, sibling and parent grants survive, lease expiry is health-service-reclaimed with specified reboot and rollback semantics, and the checked capability algebra proves that removal cannot create reachability. Together with A2 and Core C9, this satisfies the composite boundary for non-ambient, auditable, rollbackable authority.
+
 ## Secrets as capabilities
 
 Add a `Secret` object with USE distinct from READ, service-mediated use,
@@ -48,7 +59,7 @@ revocation timing. A foreign-workload personality that must materialize plaintex
 becomes the explicit trust boundary; no recordable channel receives ambient
 credential bytes.
 
-The A2 acceptance requirements remain in [the authority roadmap](../../roadmap/06-authority-trust.md#a2--secrets-as-capabilities).
+The A2 acceptance requirements are in [A2 acceptance](#a2-acceptance).
 Resolve these design questions before implementation:
 
 - Test whether USE-only service mediation covers real credentials; evaluate an
@@ -58,7 +69,7 @@ Resolve these design questions before implementation:
   already read by a workload.
 - Specify redaction identity and replay: stable handle, commitment hash, or
   fixture substitution. Production replay re-injects from the sealed store,
-  never the trace. As in [D3's clock/entropy design](../../roadmap/08-native-development.md#deterministic-component-authority),
+  never the trace. As in [D3's clock/entropy design](native-development.md#deterministic-component-authority),
   real entropy is not reproduced from IPC alone; a declared seeded fixture is
   an explicit reproducible input.
 - Decide whether secrets must wait for A4 TPM binding or what pre-TPM sealing
@@ -67,7 +78,7 @@ Resolve these design questions before implementation:
   against that constraint rather than silently treating it as approved.
 - Specify next-USE refusal versus interruption of in-flight uses and the
   revocation-effectiveness argument for each delivery path.
-- The roadmap selects `discardOnRollback` by default so rollback cannot
+- A2 selects `discardOnRollback` by default so rollback cannot
   resurrect rotated credentials; any generation-declared alternative must
   preserve withdrawal. State bindings supply storage and rollback discipline;
   A4 may bind sealed material to known-good boot state.
@@ -77,6 +88,18 @@ errors, recorder/replay behavior, and revocation interactions before kernel work
 The [archived direction 33](https://git.justaslime.dev/iceice666/slime_os-history/src/commit/45ed1745907b2d0a13fdf70c8b34eb635bed5f23/docs/directions/33-secrets-as-capabilities.md)
 preserves the original proposal, not current implementation claims.
 
+### A2 acceptance
+
+Required checks:
+
+- A USE-only Secret authenticates to a declared service without the holder reading the secret bytes.
+- A recorded trace contains no secret material while remaining replayable by sealed-store re-injection.
+- Revoking the Secret capability denies the next use, and neither an earlier trace nor a peer holds the value.
+- Rolling back a generation does not resurrect a rotated credential under the default `discardOnRollback` policy.
+- The capability-matrix amendment for the `Secret` object lands in the same change as the mechanism.
+
+Exit condition: A scoped credential is usable but neither readable nor recordable: a USE-only holder authenticates to a declared service, replay remains structurally deterministic without secret bytes, revocation denies subsequent use, and rollback cannot resurrect discarded material. Together with A1 and Core C9, this satisfies the composite boundary, including capability-matrix changes accompanying each mechanism.
+
 ## Accelerator compute authority
 
 Add rights-gated queue submission with a generation-declared quantity the
@@ -85,7 +108,7 @@ IOMMU-constrained DMA over held shared buffers and visible grant topology. It
 must not inherit a fictional CPU budget from scheduling class; current kernels
 are non-MCS.
 
-The A3 acceptance requirements remain in [the authority roadmap](../../roadmap/06-authority-trust.md#a3--accelerator-compute-authority).
+The A3 acceptance requirements are in [A3 acceptance](#a3-acceptance).
 The matrix amendment must settle the object shape, rights strings, budget model,
 and H4 IOMMU-containment requirements before driver work discovers authority
 questions. Hardware validation still waits for accelerator bring-up and active
@@ -113,6 +136,17 @@ accelerator evidence.
 The [archived direction 28](https://git.justaslime.dev/iceice666/slime_os-history/src/commit/45ed1745907b2d0a13fdf70c8b34eb635bed5f23/docs/directions/28-accelerator-objects.md)
 preserves the original design and probe guidance.
 
+### A3 acceptance
+
+Required checks:
+
+- A component without the accelerator capability cannot submit work.
+- A component past its declared budget is rejected or throttled with a structured error.
+- Accelerator DMA cannot reach memory outside the submitting component's held buffers.
+- The manifest lists every component holding accelerator authority (entry-9 queryable).
+
+Exit condition: Compute submission is a rights-gated, budgeted, IOMMU-contained capability: unprivileged components cannot submit, over-budget components are rejected or throttled, accelerator DMA cannot escape held buffers, and every accelerator grant is visible in the manifest.
+
 ## Physical trust and attestation
 
 Bind the attempt counter (or epoch) and known-good generation hash to TPM-held
@@ -123,7 +157,7 @@ verification. Preserve durable attempt consumption before read/decode/launch and
 known-good updates only on health confirmation, plus M5.9's sealed-counter
 recovery semantics when BootState slots are unusable.
 
-The A4 acceptance requirements remain in [the authority roadmap](../../roadmap/06-authority-trust.md#a4--physical-trust-and-attestation).
+The A4 acceptance requirements are in [A4 acceptance](#a4-acceptance).
 Resolve the layout and verification-flow design before implementation:
 
 - Choose a TPM monotonic counter versus an NVRAM-sealed value, explicitly
@@ -143,6 +177,19 @@ Resolve the layout and verification-flow design before implementation:
   evidence cannot satisfy the physical exit: an older reflashed image must fail
   immutable-selector verification on the Framework target.
 
+### A4 acceptance
+
+Required checks:
+
+- Reflashing an older generation image fails immutable-selector verification against TPM-held counters.
+- A cleared or unavailable TPM fails open only through the explicit M5.9 recovery path and never bricks a healthy disk.
+- Every desync-matrix cell resolves to its declared policy without leaving zero bootable roots.
+- The checked flow continues to satisfy `SelectableBootRootExists` and `PendingAttemptConsumedBeforeTransfer`.
+- A remote verifier can distinguish two different running generation identities from their attestations.
+- The first three physical claims are demonstrated on the Framework target; any virtual-TPM/QEMU result is recorded separately as model or emulator evidence.
+
+Exit condition: On the Framework target, reflashing an older generation fails immutable-selector verification against TPM-held counters, a cleared TPM cannot brick a healthy disk, and the running generation identity is remotely attestable—all without violating `SelectableBootRootExists`. QEMU or virtual-TPM evidence alone does not satisfy this exit.
+
 ## Distributed capabilities
 
 Define a cryptographic wire form that maps remote presentation to local grants,
@@ -150,11 +197,11 @@ retains revocation topology, binds session identity, rejects replay, and surface
 partition/unreachable/revoked states as structured channel errors. Distributed
 authority is separate from ROS typed-data interoperability.
 
-The A5 acceptance requirements remain in [the authority roadmap](../../roadmap/06-authority-trust.md#a5--distributed-capabilities).
+The A5 acceptance requirements are in [A5 acceptance](#a5-acceptance).
 Unlike [generation sync](../directions/14-cross-machine-sync.md), which moves
 objects and activation, this exposes a remote service as an ordinary typed IPC
 endpoint. Keep implementation gated on cross-machine sync, A1 revocation, and
-the roadmap's IO4/target-qualified network path; deterministic second-disk
+the IO4/target-qualified network path; deterministic second-disk
 transfer is not general cross-machine transport. Local typed channels and
 [membrane interposition](../directions/07-schema-interposition.md) are foundations,
 not evidence of implemented wire authority.
@@ -180,6 +227,19 @@ not evidence of implemented wire authority.
 
 The paper probe must cover wire form, A1 revocation mapping, and the partition
 error vocabulary against two or three concrete cross-machine agent scenarios.
+
+### A5 acceptance
+
+Required checks:
+
+- A grant proxied to a remote service is usable there and remains unforgeable and non-ambient.
+- Revoking the local subtree invalidates the remote presentation.
+- A captured presentation replayed from a different session or transport fails.
+- Partition, unreachable, and revoked conditions are distinguishable structured errors requiring no distributed-systems special case in components.
+- The checked capability algebra retains narrow-only closure across serialization and reconnect; revocation cannot create reachability.
+- The A5 checks use capability-bearing Slime endpoints and do not substitute ROS 2 DDSI-RTPS typed-data interoperability evidence.
+
+Exit condition: A capability proxied to a service on another machine is usable, unforgeable, and non-ambient across the wire, is revocable from the granting side, and resists replay from a foreign session—with partition and revocation surfaced as ordinary structured channel errors. ROS R1/R2 interoperability remains a separate exit and is neither required nor implied by A5.
 
 ## Cross-cutting requirements
 

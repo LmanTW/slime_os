@@ -1,0 +1,65 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a208f9-4f69-7010-9168-da35c062b3e9" "zenoh-qos-wire" "zenoh-transport"
+  "Zenoh Profile 0 PUSH carries priority, congestion control and express"
+  "The Profile 0 decoder reads the network QoS extension on an OAM and on a DECLARE, checks it is at most 0x1F and discards it. It refuses the extension on a PUSH as unsupported-extension, and its encoder never writes one. A publisher therefore cannot state a priority, choose between dropping and blocking under congestion, or mark a sample express, and a stock peer's PUSH that carries one is refused. eclipse-zenoh 1.0.0 writes the value in one byte of a Z64 extension, priority in bits 0 to 2, Block in bit 3 and express in bit 4, and leaves the extension out when the value is the PUSH default (priority 5, drop, not express). The change: a PUSH carries and keeps that value, the encoder writes it as upstream does, and the decoder reads it back. Scheduling by priority, dropping under congestion, unbatched express sends and best-effort frames are separate items that build on this one.")
+  with {
+    intent = #planned;
+    supersedes = { "01a1b49c-abf1-7139-b388-c6f26fe240c7"; };
+    owns = {
+      "components/lib/src/zenoh_profile0*";
+      "components/lib/src/zenoh_qos*";
+      "components/lib/src/zenoh_link*";
+      "components/lib/src/zenoh_node*";
+      "components/lib/src/zenoh_stock*";
+      "components/lib/src/lib.rs";
+      "components/proto/src/zenoh_profile.rs";
+      "contracts/zenoh-profile/**";
+      "docs/architecture/zenoh-transport.md";
+    };
+    nonGoals = {
+      h.nonGoal "Acting on the value: no queue per priority, no drop under congestion, no unbatched express send." h.agentDefault;
+      h.nonGoal "Best-effort FRAME, a second sequence-number space or best-effort fragments." h.agentDefault;
+      h.nonGoal "A capture from a live eclipse-zenoh peer. The exam compares with the host reference written from upstream's source; zenoh_xcheck_check covering QoS is a later item." h.agentDefault;
+      h.nonGoal "The transport QoS extension on a FRAME or FRAGMENT, which selects a lane. The item zenoh-fragment-lanes owns it." h.agentDefault;
+      h.nonGoal "QoS on a DECLARE, OAM, REQUEST or RESPONSE; those keep their current handling." h.agentDefault;
+    };
+    requirements = {
+      h.req "push-qos-round-trips"
+        "The encoder writes the FRAME the host reference zenoh_wire.push_put_qos writes, byte for byte, for 12 values: each of the 8 priorities at drop and not express, and Block, express and both together. The PUSH default writes no extension and no Z flag. The decoder reads each frame back to the same priority, Block and express."
+        { "zenoh_qos_check"; };
+      h.req "push-qos-refusals"
+        "The decoder refuses a PUSH QoS value over 0x1F as malformed-message, the QoS extension marked mandatory as unsupported-extension, and an extension id other than the network QoS as unsupported-extension. Each refusal is reported with the bytes it was fed, and those equal the bytes the host reference builds."
+        { "zenoh_qos_check"; };
+      h.req "judge-refuses-corruption"
+        "The judge refuses 106 corrupted transcripts of an honest run: a dropped, duplicated, reordered or unrecognised line, a frame with one digit changed or in capitals, a decoded priority, Block or express changed, and a refusal with another class or other bytes."
+        { "zenoh_qos_check"; };
+      h.req "stock-exam-takes-push-qos"
+        "The stock-peer exam keeps every refusal of the area requirement this item supersedes, except one: the network QoS extension `21 08` after the key of a captured PUSH is taken, and its sample is delivered. The exam reports the scenario qos-on-push-is-taken and no longer reports refuse-qos-on-push as a refusal. It holds 13 scenarios, 36 accepted cases and 33 refusals, 69 in all. The corpus row push_extension_flag stays refused as unsupported-extension, because its extension flag has no extension behind it."
+        { "zenoh_stock_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_stock_check" {
+        h.count "casesObserved" 69;
+      };
+      h.observedWhere "zenoh_qos_check" {
+        h.count "casesObserved" 19;
+        h.count "negativeControlsRefused" 106;
+      };
+    };
+    decisions = {
+      h.decided "supersede-the-push-qos-refusal"
+        "This item supersedes the area requirement 01a1b49c-abf1-7139-b388-c6f26fe240c7 and restates it as stock-exam-takes-push-qos, with one refusal moved to an accepted case."
+        "V10 freezes area requirements. That one lists the QoS extension on a PUSH as unsupported-extension, and a PUSH that carries a priority, congestion control or express cannot be both taken and refused. The other 68 cases and the control floor of 138 in the sibling requirement are unchanged"
+        h.agentDefault
+        { "stock-exam-takes-push-qos"; };
+      h.decided "value-layout"
+        "The value is read and written as eclipse-zenoh 1.0.0 QoSType does: P_MASK 0x07, D_FLAG 0x08 for Block, E_FLAG 0x10 for express, and no extension when the value equals QoSType::PUSH."
+        "The reference encoder at tag 1.0.0 (commons/zenoh-protocol/src/network/mod.rs and zenoh-codec network/push.rs) writes the extension between the key expression and the Put body only when it differs from the default, so a byte-for-byte match needs both rules."
+        h.agentDefault
+        { "push-qos-round-trips"; };
+    };
+  };
+
+item

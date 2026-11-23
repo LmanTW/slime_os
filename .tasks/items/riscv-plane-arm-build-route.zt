@@ -1,0 +1,66 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.bug "01a1ee7f-e814-78bc-b7b1-5eb1e488be89" "riscv-plane-arm-build-route" "quality"
+  "Two plane gates boot an AArch64 closure image on qemu-riscv-virt"
+  "scripts/check/check-sel4-wait-set-plane.py and scripts/check/check-sel4-sample-plane.py admit --platform qemu-riscv-virt and build the closure of their plane for it. Both closures name qemu-arm-virt. qemu-system-riscv64 then boots an AArch64 image, the serial line stays silent after OpenSBI, and each gate fails at its timeout: 240 s for the wait-set plane, 180 s for the sample plane. just riscv64_qemu_check runs both arms, so it cannot pass. The defect is as old as this repository's history. At its first commit, 783cf87a, the sample gate already built the closure for every platform, and the wait-set gate admitted qemu-arm-virt only. Commit 0361bff4 made the wait-set gate admit every platform of scripts/lib/sel4_boot.py and sent only qemu-pc99 to the plane flag. No CI job runs the recipe, and the evidence branch holds no record of it.")
+  with {
+    intent = #active;
+    owns = {
+      "scripts/check/check-sel4-wait-set-plane.py";
+      "scripts/check/check-sel4-sample-plane.py";
+    };
+    nonGoals = {
+      h.nonGoal "A RISC-V closure for either plane. A closure takes its platform from its system spec, so each plane needs a second system spec, a second derived composition and marker chains for a second generation number." (h.fromHuman "Plane flag (Recommended)" "Claude Code session session_01UdthevjZ9dotV4nTTnv4Kc, 2026-11-18, choosing the plane flag over RISC-V closures and over a narrower recipe");
+      h.nonGoal "The root boot step of just riscv64_qemu_check. The item root-probe-below-spent-tails, UUID 01a1ee2a-ce05-7a76-9d34-9b10dbb9b136, owns it." h.agentDefault;
+      h.nonGoal "The generation and rollback gates. Each already builds its RISC-V arm by plane flag, and each passed unchanged on qemu-riscv-virt in one development container on 2026-11-18." h.agentDefault;
+      h.nonGoal "scripts/check/check-sel4-component-graph.py and scripts/check/check-sel4-boot-layout.py. Both admit every platform of scripts/lib/sel4_boot.py in the same way, and no recipe runs either on qemu-riscv-virt." h.agentDefault;
+      h.nonGoal "A platform check in scripts/lib/closure_image.py. On main at 084a7b3 that module grades clock_direct_read_check and 20 more bound targets, and a change to it voids the record of each." h.agentDefault;
+      h.nonGoal "Frozen test-run records for the two RISC-V arms. scripts/generate/generate-system-test-runs.py is an implementation path, and it lists each RISC-V arm that builds by plane flag in EXTRA_RUNS. A later item adds the two rows." h.agentDefault;
+      h.nonGoal "The scheduling race in components/testkit/wait-set-probe. The waiter requires the stream badge and the supervision badge in one poll, and it polls before the signaller is certain to have signalled. On qemu-riscv-virt 2 of 55 boots printed the failure marker of that requirement, in one development container on 2026-11-18. 40 boots on qemu-arm-virt and 20 on qemu-pc99 did not. A separate backlog bug owns the race." (h.fromHuman "Separate bug item (Recommended)" "Claude Code session session_01UdthevjZ9dotV4nTTnv4Kc, 2026-11-18, choosing a separate bug item for the wait-set race over folding it into this item");
+      h.nonGoal "A target that observes the inventory find the two RISC-V images. scripts/check/check-system-image-aggregate.py writes no observation record, so no predicate can name an image. If a gate keeps its quoted qemu-pc99 and builds qemu-riscv-virt by plane flag without a quoted qemu-riscv-virt, the inventory finds neither RISC-V image. system_image_closure_aggregate_check then passes. The invariant a-gate-holds-the-name-of-each-flag-platform states the rule. The review of the gate change reads the two gates against it." h.agentDefault;
+      h.nonGoal "A CI job for the recipe. Every observation in this item comes from one development container. The Evidence workflow makes the first run on a runner." h.agentDefault;
+    };
+    requirements = {
+      h.req "wait-set-arm-boots-a-riscv-image"
+        "riscv64_qemu_check passes its wait-set step: the gate builds the wait-set plane for qemu-riscv-virt by plane flag, verifies the image against its identity manifest, and accepts the transcript of that boot."
+        { "riscv64_qemu_check"; };
+      h.req "sample-arm-boots-a-riscv-image"
+        "riscv64_qemu_check passes its sample step: the gate builds the sample plane for qemu-riscv-virt by plane flag, verifies the image against its identity manifest, and accepts the transcript of that boot."
+        { "riscv64_qemu_check"; };
+      h.req "inventory-accounts-for-every-image-it-finds"
+        "system_image_closure_aggregate_check passes: every image the inventory finds has a closure or a declared reason, and every declared reason names an image the inventory finds."
+        { "system_image_closure_aggregate_check"; };
+    };
+    acceptance = {
+      h.observed "riscv64_qemu_check";
+      h.observed "system_image_closure_aggregate_check";
+    };
+    invariants = {
+      h.invariant "a-gate-admits-only-platforms-it-can-build"
+        "Each of the two gates admits a --platform value only when it has a build route for it: the closure for the one platform the closure names, the plane flag for qemu-pc99 and qemu-riscv-virt."
+        h.agentDefault;
+      h.invariant "a-gate-holds-the-name-of-each-flag-platform"
+        "Each of the two gates holds the quoted name of every platform it builds by plane flag. The inventory finds the image of a platform only by that name."
+        h.agentDefault;
+    };
+    decisions = {
+      h.decided "the-riscv-arm-builds-by-plane-flag"
+        "The RISC-V arm of each gate builds by plane flag through scripts/build/build-sel4.py, as its pc99 arm does and as the generation and rollback gates do."
+        "both planes pass on qemu-riscv-virt from a flag-built image, observed in one development container on 2026-11-18. A RISC-V closure is the larger change that the first non-goal names. Narrowing the recipe to the generation and rollback planes removes two planes that pass"
+        (h.fromHuman "Plane flag (Recommended)" "Claude Code session session_01UdthevjZ9dotV4nTTnv4Kc, 2026-11-18, choosing the plane flag over RISC-V closures and over a narrower recipe")
+        { "wait-set-arm-boots-a-riscv-image"; "sample-arm-boots-a-riscv-image"; };
+      h.decided "the-gate-spells-its-flag-platforms"
+        "Each gate lists the platforms it builds by plane flag in one tuple, and --platform takes its choices from that tuple and the closure's platform."
+        "scripts/check/check-system-image-aggregate.py finds a gate's platform images by the platform names the gate spells. A gate that reaches qemu-riscv-virt through every platform of scripts/lib/sel4_boot.py boots an image the inventory cannot see"
+        h.agentDefault
+        { "inventory-accounts-for-every-image-it-finds"; };
+      h.decided "the-item-lands-before-the-gate-change"
+        "This item lands alone in its planning pull request. A second planning pull request changes the two gates and the inventory, and adds the bug item of the wait-set race."
+        "on main at 2ebd72f no item binds riscv64_qemu_check, so the judge classes a change to the two gates as a process path, and a pull request carries one class (V1). Once this item binds the recipe, the two gates are planning paths. The inventory grades promises in specs/contracts.zt, so it changes only in a pull request that adds an item (V4). The inventory refuses the gate change without its rows, and the rows without the gate change, so both land in one pull request"
+        (h.fromHuman "Item first (Recommended)" "Claude Code session session_01UdthevjZ9dotV4nTTnv4Kc, 2026-11-18, choosing the item-only planning pull request over a judge change and over a process pull request for the two gates")
+        { "wait-set-arm-boots-a-riscv-image"; "sample-arm-boots-a-riscv-image"; "inventory-accounts-for-every-image-it-finds"; };
+    };
+  };
+
+item

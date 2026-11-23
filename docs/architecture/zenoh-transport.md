@@ -14,6 +14,11 @@ Owners:
   to eclipse-zenoh wire version `0x09` and are not declared here;
 - decoder and `StreamFramerOf`: `components/lib/src/zenoh_profile0.rs`; encoder:
   `zenoh_profile0/encode.rs`; session machine: `zenoh_profile0/session.rs`;
+- graph session: `zenoh_profile0/graph.rs`; the graph its liveliness tokens build:
+  `components/lib/src/zenoh_rmw_graph.rs`; the link that carries them:
+  `components/lib/src/zenoh_rmw_link.rs`; their exam fixtures:
+  `contracts/zenoh-rmw-session/v1/`, `contracts/zenoh-rmw-graph/v1/` and, for the samples,
+  `contracts/zenoh-rmw-data/v1/`;
 - link configurations: `contracts/zenoh-link-limits/v1/` judges a named configuration, and
   `zenoh_profile0/limits.rs` states the same arithmetic in Rust; FRAGMENT:
   `zenoh_profile0/fragment.rs`; reassembly into storage the component lends:
@@ -138,6 +143,94 @@ A refused call leaves the session unchanged. The only transitions into
 `Closed` are a received `CLOSE`, a local `close()` and lease expiry; a caller
 that wants the link gone after a refusal says so.
 
+## rmw_zenoh graph
+
+A ROS 2 node that uses `rmw_zenoh_cpp` declares its graph before it publishes. The graph session
+(`zenoh_profile0/graph.rs`) takes those declarations. Its type is `GraphSessionOf<A, D, B>`, and
+`Params::GRAPH` configures it. `Params::graph` is `false` in every other constructor. `SessionOf::with_params`
+refuses a configuration that sets it. The plain decoder, `Network`, `Event` and
+`SessionError` gain no variant, so the stock-peer, undeclare and subscribers exams keep every pinned
+refusal.
+
+A graph session takes these, and the plain session refuses each of them:
+
+| The peer sends | The graph session |
+| --- | --- |
+| Key aliases | Holds up to `A` aliases of up to `B` bytes. A repeated id or a scope on an alias is `invalid-keyexpr`. `UndeclareKeyExpr` is `unsupported-message`. |
+| `DeclareSubscriber`, `DeclareQueryable` and `DeclareToken`, and the undeclaration of a queryable or a token | Records each declaration in a table of `D` slots. An undeclaration of one it does not hold is `unknown-declaration`. `UndeclareSubscriber` is `unsupported-message`. |
+| The INIT extensions: a unit extension with id 1, then optionally id 7 with a value of at most 1 | Accepts that chain only. Any other extension, or a mandatory one, is `unsupported-extension`. |
+| A `Put` with a timestamp, and the source-info and attachment extensions | Parses it. A Put on the session's own subscription is a `Sample`. Every other push whose key is valid is dropped and counted. |
+| An `INTEREST` of mode 1 (current) with options `0x79` over `@ros2_lv/<domain>/**` | Takes it and writes one `FRAME` for it: a `DECLARE` with the interest flag, the interest id and a `DeclareFinal`. |
+
+A subscriber or a queryable may name a wildcard key, as the peer's `@/<zid>/peer/config/**` does. A token
+key or the key of a push may not, and is `wildcard-keyexpr`.
+
+The session announces a 512-byte batch in its `INIT_ACK`. It bounds keys at 253 bytes, the longest alias
+an rmw_zenoh peer declared. It answers no query and declares no token. A `FRAME` applies whole or not at
+all, as in the plain session.
+
+### Samples and the INTEREST
+
+A graph session holds at most one subscription of its own, declared with `send_declare_subscriber`. A Put
+that names that key reaches the owner through `on_batch_samples` as a `Sample` with its subscription id,
+sequence number, timestamp and payload. The Put must carry the 33-byte attachment. Without a readable
+attachment the whole `FRAME` is refused. The session stays open, and the graph link ends on a refusal.
+A second subscription is `subscriber-limit`.
+
+`send_put` writes a Put with the sender mapping and the attachment. The peer must have declared a subscriber
+on that key. Without one the Put is `undeclared-key`, and a payload over the bound is `over-bound`. The
+graph session holds the peer's subscribers in its own table, and the inner session's table holds none.
+`session.rs` therefore gains a method that writes the Put after the graph session made that check.
+
+A peer sends one `INTEREST` for `@ros2_lv/<domain>/**` before it sends data. A peer that gets no answer
+holds its first publication for about 10 s. The session answers it with a `DeclareFinal` that
+carries the interest id and declares no token, queryable or key alias in reply. The answer is written
+before the `FRAME` that asked for it is committed, so a `FRAME` whose answer cannot be written is undone.
+The answer restarts the keep-alive cadence from the time of that `FRAME`. The session takes one
+`INTEREST`. Any other mode, any other options byte, a key that is not `@ros2_lv/<domain>/**` and a second
+`INTEREST` are `unsupported-message`. A peer that reconnects opens a new session. In one run, a reconnecting
+peer sent no second `INTEREST`.
+
+`zenoh_rmw_graph.rs` reads each `@ros2_lv` token into an `Entity` and holds the live ones in
+`Graph<N>`. A token is `@ros2_lv/<domain>/<zid>/<nid>/<id>/<kind>/<enclave>/<namespace>/<node>`, and a
+node, publisher, subscription, service server or service client token adds
+`/<topic>/<type>/<hash>/<qos>`. A `%` in a name field reads as `/`. An empty field of the QoS
+substring is rmw_zenoh's default. The graph refuses the `N + 1`th entity as `graph-full` and never evicts.
+
+The rules are those of `rmw_zenoh_cpp` 0.6.10, with one difference. Upstream reads three things loosely,
+and the graph refuses each. A token may not have more or fewer parts than its kind. A number must be
+canonical decimal. A Zenoh ID must be 1 to 32 lowercase hexadecimal digits. A graph serves one domain and
+refuses another as `wrong-domain`. A key outside `@ros2_lv` is ignored and counted.
+
+### Graph link
+
+`zenoh_rmw_link.rs` carries a graph session over a `ByteLink`. Its type is
+`GraphLinkOf<L, FRAMED, A, D, B, N>`. The parameters are the batch with its stream length, the aliases and
+declarations of its session, the longest key, and the entities of its graph.
+
+The plain link matches `Event` exhaustively, so the graph link is a separate type. It reuses the plain
+link's `ByteLink`, `PumpReport`, stream framer, encoder and retry limit.
+
+A pump flushes the single send slot and reads whatever chunks the stream gives. It decodes each complete
+batch and feeds every token the batch carries into the graph. Then it checks the lease.
+
+The link writes the handshake, a `KEEP_ALIVE` a quarter of its own lease after it last sent, and a `CLOSE`.
+It declares nothing and answers no query. It does not deliver a sample, because it drives `on_batch_visit`,
+which has no sample callback. A frame the session writes in answer to an `INTEREST` is queued as any other
+reply, and no test here holds that.
+
+| Event | What the link does |
+| --- | --- |
+| A token the graph refuses, or has no room for | Counts it in `refused_tokens` and stays open. |
+| A bad length prefix, an unreadable batch, a full buffer with no whole batch or a session refusal | Ends and empties the graph. It queues a `CLOSE` of reason 0 into a free send slot. |
+| A receive error, or the end of the stream at a batch boundary | Ends and empties the graph. It queues a `CLOSE` of reason 0 into a free slot, and a stream that takes no byte never writes it. |
+| A send that stalls more than `MAX_RETRIES` times in a row, or a send error | Ends as `retry-limit` or a link error and empties the graph. The slot still holds the unsent batch, so no `CLOSE` is queued. |
+| The peer's `CLOSE`, a local `close`, or the peer's lease running out | Ends, with that reason or `CLOSE_EXPIRED`, and empties the graph. `close_reason` says which. |
+
+A link that ends has an empty graph: a graph of a session that ended describes nothing. A link whose single
+send slot is occupied when it ends writes no `CLOSE`, and the peer finds out by its own lease. The plain
+link has the same limit, and no test here holds that.
+
 ## Service core
 
 The service core (`components/lib/src/zenoh_service.rs`) serves one session to several local holders by
@@ -165,7 +258,8 @@ serves whole-frame samples only, so a session that reassembles fragments is refu
 The grants reach the service in four steps. A system spec declares them with the keys `zenohGrants` and `zenohGrantsObject`,
 at most `maxZenohGrants` of 64 rows. The generation builder encodes them as the resource object `zenoh-grants`, in the
 layout of `contracts/zenoh-service-grants-table/v1`. The root reads that object on the label `ZENOH_GRANTS_READ`, 75. The
-reader serves 168-byte rows, at most six for one call, from a row cursor, and only to the instance named `zenoh-service`.
+reader serves 168-byte rows, at most six for one call, from a row cursor, and only to a
+[declared reader](runtime-authority.md#declared-table-readers). The builder declares the instance named `zenoh-service`.
 The root decides no grant. It copies authenticated bytes. The runtime wrapper `zenoh_grants_read` makes the call.
 
 The same read serves a second record at one cursor value, 4294967295. A system spec declares the service's six limits as
@@ -189,22 +283,73 @@ up to eight times, and a link that has not flushed by then is reported as closed
 The component (`components/services/zenoh-service`) reads its grants, attaches to the network service and opens the link. It
 lends each holder a ring and a data page as shared-buffer loans, and serves them with the server half. A detach or an abort counts
 only when the server accepted it. A holder whose buffers could not be created is put back to having no session. The service
-ends when every holder the grants name has attached and detached. It then closes the link, gives the link bounded pumps to flush
+ends when every holder the grants name has detached, died or expired. It then closes the link, gives the link bounded pumps to flush
 its CLOSE, and closes its connection through the network service.
+
+`zenoh_service_server_roster.rs` holds where each holder stands: idle, attached, detached, dead or expired. A holder settles once.
+The component resolves a supervision binding for each holder and polls it, as `network-service` does for a client. When the root
+reports a holder's task dead, the service closes that holder's session and calls `Server::lose`. The server then refuses that
+holder every later request and attach. A holder that has not detached 30000 ms after the service read its clock base expires the
+same way. The other holders, the link and the session stay up. The wait includes the time the service spends in `connect`, which
+it bounds at 20000 ms. A holder with no supervision binding is bounded by the wait alone.
+
+The service keeps each holder's endpoints for the rest of the run. The service still reads the control endpoint of a holder that
+settled. The server answers each of its requests as denied, so its call does not block. The loop ends once every holder has
+settled. After that no settled holder gets an answer, so the denial holds only while the service still runs.
 
 The service prints one line for a publication, a taken sample and a publication refused for a row the holder may not publish.
 `exchange_line` in the server half builds them from the request and the answer, and a host test drives it. The booted exchange is
 judged on these lines.
 
 The composition `sel4-zenoh-service` (generation 171) runs the service, a peer, and two holders named `alpha` and `beta`. The
-peer listens on 127.0.0.1:7447 over the network service's loopback backend and declares no subscriber, so a publication reaches
-the holders and not the peer. `alpha` may publish the key and `beta` may subscribe to it. `beta` then asks to publish and is refused.
+peer listens on 127.0.0.1:7447 over the network service's loopback backend. It declares one subscriber on the exchange key once
+its session is open and its send slot is free. It prints one line for each sample it receives. A publication therefore
+reaches the holders and the peer. `alpha` may publish the key and `beta` may subscribe to it. `beta` then asks to publish and is refused.
 The grants-table contract and encoder are release inputs of every closure, so a change to either changes each closure identity.
 
-What is shown: one boot of this composition under QEMU, in which `alpha` published four samples, `beta` was delivered all four,
-the service refused `beta`'s publish, and every instance exited with status 0. What is not shown: a second boot, a malformed
-request, a link that stalls, or any sample crossing to a peer that subscribes. The component is built for at most two holders and
-two rows. It refuses a table above that, and it serves a table below it.
+What is shown under QEMU: one boot of this composition. In it `alpha` published four samples and `beta` was delivered all four.
+The peer received all four once. The service refused `beta`'s publish, and every instance exited with status 0.
+`just zenoh_service_peer_check` judges the peer's lines beside the service's.
+
+The composition `sel4-zenoh-service-four` (generation 174) runs the service, the peer and four holders. `alpha` may publish the
+exchange key. `beta` holds one row and subscribes to it. `gamma` and `delta` each hold two rows: the command key as row 0 and the
+exchange key as row 1. A delivery to `gamma` or `delta` therefore names row 1, and the booted judge resolves that row against the
+grants of the composition. The peer declares one subscriber. Its session takes up to three subscriptions from the service,
+because the service declares one subscription for each distinct subscribe key. The system spec pins the provision
+endpoints of `delta` and `gamma` at slots 28 and 27 of the service. A boot without those pins refused the loan to `delta`. The
+cause is not isolated. In one boot of this composition `alpha` published four samples, each reached three holders, and the peer
+received each once. The service refused `beta`'s publish once, and every instance exited with status 0.
+`just zenoh_service_four_check` judges it.
+
+What is shown on the host only: a host test of the server half runs a second server, core and link after the first run ended.
+It also sends 28 malformed requests and stalls the link. A second run repeats the first. A malformed request changes no ring,
+session or stream byte. A publication that the stream does not take is answered `link-closed`. A stream that takes one byte in
+two offers leaves the link open after 16 refused offers. The holder is told the publication failed, although the frame stays
+queued. No test shows whether a later pump delivers it. A host test of the roster replays
+eight scripted scenarios of a holder that dies, never attaches or never detaches. A host test measures the stack. At the built
+size of 4 holders and 6 rows the need is about 24900 bytes. At 4 holders, 6 rows and 64-byte samples it is about 26100 bytes.
+The declared stack is 32768 bytes. The measured depth of the call path varies by tens of bytes between runs, and the judge
+bounds it and does not pin it. The measurement is a debug build on x86_64 and covers the frames of the core, the link, the
+server and the arrays of `main`.
+
+What is not shown: a second boot, a boot with more than four holders, a malformed request from a holder component, or a stalled link under QEMU. No boot has a
+holder that faults, because the composition declares no supervision binding for a holder. The release of a reclaimed holder's
+loans, ring and data page is not graded. The stack depth on seL4 is not measured, and neither is the stack of the network
+attachment, `holders::serve` or `holders::drive`.
+
+Known limits of the component:
+
+- It is built for at most four holders and six rows. It refuses a table above that, and it serves a table below it.
+- A settled holder gets no answer once every holder has settled, because the service returns when the roster is done.
+  No boot shows a settled holder sending. The judge shows only that the statements which cleared the endpoints are gone.
+- A configuration judged by `contracts/zenoh-link-limits/v1` cannot declare more than one local subscription. Version 3 of
+  that contract adds `localSubscriptions` beside `maxRuns`. The component opens its link with `SERVICE`, a constant of
+  `zenoh_link_limits_v3` that the contract's decoder accepts. The configuration declares 2 keys, 2 subscribers of the peer
+  and 3 local subscriptions. The service announces a batch of 514 bytes in its INIT, where it announced 512. Its link type
+  declares 2 aliases. No component reads a version 3 record file, and `zenoh-peer`, `zenoh-rmw-peer` and `lidar-publisher`
+  keep their own `Params`.
+- A publisher receives its own publications, and a holder cannot exclude them. Lazy declaration and reliable delivery with
+  credits are not implemented. [The decision record](../decisions/zenoh-service.md) gives the reasons.
 
 ## Link behaviour
 
@@ -292,6 +437,153 @@ wrote of what its own subscriber delivered. The guest's batches are held to
 recipe is explicit and in no aggregate. See the
 [decision](../decisions/zenoh-external-listener.md).
 
+## rmw_zenoh node and native peer
+
+Two components exercise the graph link and the data path in one composition, `sel4-zenoh-rmw`. The
+composition holds the network service, the node and the peer. It has no Zenoh service, grants table or limits.
+
+| Component | Link | Role |
+| --- | --- | --- |
+| `zenoh-rmw-node` | Graph link, 512-byte batch | Listens on 127.0.0.1:7447, declares one subscription and publishes four Puts. |
+| `zenoh-rmw-peer` | Plain Profile 0 link | Dials the node, declares one subscription and publishes four Puts. |
+
+Both links are built for a key of at most 253 bytes and a payload of at most 32 bytes. The chatter key is 110 bytes, and a sample is at most 22 bytes.
+The graph session answers an `rmw_zenoh` peer's one `INTEREST` with a `DeclareFinal`, because that peer waits about 10 seconds without it.
+The native peer is a plain link and sends no `INTEREST`, so this boot does not perform that answer.
+
+Each component prints `published sequence=N` and `received sequence=N` for N from 1 to 4. The node
+closes the session after it has published 4 and received 4. One side's close ends the session for both, and the node's link
+empties its sample queue when the peer closes. The peer does not close.
+
+The two components are separate tasks. A component's publications and receptions have no fixed order, and the boot gate
+holds no order between the two components' lines. `scripts/lib/zenoh_rmw_arm.py` judges each component's lines against its own order only.
+
+Known limits:
+
+- The composition has no row in `check-sel4-boot-layout.py`, so its initial capability layout is not frozen.
+- The node drops samples that arrive in the same pump as a peer `CLOSE`. The boot closes after four of each, so it does not reach that case.
+- No live `rmw_zenoh` peer runs in this composition. The exchange is between two Slime components over loopback.
+
+## Client role
+
+A Profile 0 session announces itself as a peer. `rmw_zenohd` answers a peer's `INIT_SYN` as a router, and a session
+with no client role refuses that answer as `unsupported-whatami`. A connector takes the client role with
+`SessionOf::with_client_role`, and a plain link takes it with `LinkOf::with_client_role`. `Params` and `Config` do not
+carry it.
+
+| Side | With no client role | With the client role |
+| --- | --- | --- |
+| `INIT_SYN` it writes | `whatami` 1 | `whatami` 2, and no other byte differs |
+| `INIT_ACK` it takes | `whatami` 1 | `whatami` 0 only |
+| `INIT_ACK` it refuses | `whatami` 0 and 2 | `whatami` 1 and 2 |
+
+A refused `INIT_ACK` leaves the connector awaiting its `INIT_ACK`. A listener, and a connector that has written its
+`INIT_SYN`, get `invalid-config` when they ask for the role.
+
+A Put that `rmw_zenoh_cpp` publishes carries a timestamp, and a router forwards it unchanged. The `PUT` header carries
+the timestamp flag, and a 64-bit time and a 16-byte ID follow it, before the attachment extension.
+
+| Decoder | A `PUT` with the timestamp flag |
+| --- | --- |
+| Plain, with no client role | refused as `unsupported-message` |
+| Plain, with the client role | taken with a 16-byte ID; a short ID is `malformed-message` |
+| Fragment | refused as `unsupported-message` |
+| Graph | taken, as it always was |
+
+Every session refuses the encoding flag. The client decoder reads the time and the ID and delivers neither. A sample keeps
+the source timestamp of its attachment.
+
+`scripts/lib/zenoh_rmw_router.py` holds two handshakes that `rmw_zenohd` 0.6.10-r1 wrote to a client on one host.
+Each is a 72-byte `INIT_ACK` of `whatami` 0 with a 49-byte cookie, then an `OPEN_ACK` of a 60 s lease. The session role
+is judged against those two captures by `scripts/lib/zenoh_rmw_client_exam.py`.
+
+`scripts/lib/zenoh_rmw_router_data.py` holds two further runs of the same router with a `demo_nodes_cpp` talker. Each
+has the handshake and the first four forwarded frames. The frames' own sequence numbers are consecutive, and the first
+equals the `OPEN_ACK`'s. The attachments carry the samples' sequence numbers 3 to 6. In both runs the timestamp's ID is not the router's ZID. Its time is
+within 1 µs of the attachment's source timestamp, so the publisher stamped it.
+
+`scripts/lib/zenoh_rmw_router_link_exam.py` judges a client-role link against those runs. The link writes the client
+`INIT_SYN`, the `OPEN_SYN` that echoes the router's cookie, and the subscription on the chatter key. It delivers the four
+samples whole, one byte at a time and all at once.
+
+A router declares no subscription to a client. A session with no client role refuses a Put on a key its peer did not
+declare, as `undeclared-key`. A session with the client role writes a whole Put on any key that validates. It still
+validates the key, the attachment and the payload, and the other session errors apply.
+
+| Put | A session with no client role | A session with the client role |
+| --- | --- | --- |
+| Whole, on a key the peer declared | written | written |
+| Whole, on a key the peer did not declare | refused as `undeclared-key` | written |
+| In fragments, on a key the peer did not declare, in a session that fragments | refused as `undeclared-key` | refused as `undeclared-key` |
+
+The Put the link writes is the peer form: the sender mapping, the `PUT` header with the attachment extension, and no
+timestamp. `scripts/lib/zenoh_rmw_client_put_exam.py` judges a client-role link through the two handshakes of
+`zenoh_rmw_router_data`, fed whole, one byte at a time and all at once. The link publishes four Puts on the chatter key,
+and the exam compares each with the bytes `scripts/lib/zenoh_wire.py` writes. The router is not in that exam.
+
+The live run, `zenoh_rmw_live_check`, is the first run of this link against a router. The checker starts `rmw_zenohd` and a
+`demo_nodes_cpp` node for each of two directions and runs `verification/zenoh-live` against them. The program is a host
+binary built from the library, outside the root workspace. It prints only `live` lines. The checker reads the listener's
+own log and adds the `ros` lines, and it fails the run on any program line of another kind.
+
+| Direction | ROS node | What the link did | What shows it |
+| --- | --- | --- | --- |
+| Inbound | `talker` | Subscribed on the chatter key and delivered at least 4 samples | The program's `sample` lines. Each carries a sequence number that agrees with its `Hello World: N` string, and the numbers rise by one |
+| Outbound | `listener` | Wrote 6 Puts on the chatter key, 0.5 s apart | The listener's own `I heard: [Hello Slime N]` lines, read by the checker |
+
+`scripts/lib/zenoh_rmw_live_exam.py` judges the transcript and refuses 38 corrupted ones. The controls show that a bad
+transcript is refused. They do not show that a router ran.
+
+A client-role link also writes liveliness tokens. `ros2 node list` and `ros2 topic list` build their graph from tokens under
+`@ros2_lv`. A link that writes none is invisible to them, although a ROS node still hears its Puts.
+`LinkOf::declare_token` declares a token by id and key, and `LinkOf::withdraw_token` withdraws one by id. A session with no
+client role refuses both as `invalid-config`.
+
+| Call | What the link writes | What the session holds |
+| --- | --- | --- |
+| Declare token `id` under `key` | A `DECLARE` with a named token, the sender mapping, the id, the global scope and the key in full | The id, up to 4 at once |
+| Withdraw token `id` | A `DECLARE` with an `UNDECLARE_TOKEN`, the id and the extension `5f 02 00 00` | The other ids stay |
+| Close | A `CLOSE` and nothing for the tokens | None |
+
+A repeated id is refused as `token-limit`, and a withdrawal of an id never declared as `unknown-token`. The key is written in
+full and with no QoS wrapper. A real `rmw_zenoh_cpp` peer declares a key alias first and wraps each declaration, and the plain
+link has no alias writer.
+
+`scripts/lib/zenoh_rmw_token_exam.py` judges a client-role link through the two handshakes of `zenoh_rmw_router_data`, fed
+whole, one byte at a time and all at once. The link declares the node token and the publisher token of `slime_node`, withdraws
+the publisher token and closes. The exam compares every byte with `zenoh_rmw_graph.build_token` and `zenoh_rmw_wire`. The `held`
+line prints the tokens the link holds after the withdrawal, which is the node token alone. The Rust test reads it from the
+link. The judge refuses 87 corrupted records, and the router is not in the exam.
+
+Two host probes used the Python wire library and the repo's token builder. They declared a node token and a publisher token for
+`slime_node` through a live `rmw_zenohd`. A separate `ros2` listed `/slime_node` and `/chatter`, and `ros2 topic info /chatter`
+showed one publisher. A client that closed its session lost both, and a client that withdrew the publisher token while
+connected lost `/chatter` and kept the node. A node token alone listed the node, and a publisher token alone listed the node
+and the topic. The probes are not fixtures, and the Rust link took no part in them.
+
+Known limits:
+
+- The plain session and the plain link take the role. The graph link and the graph session do not.
+- No run has shown `ros2` listing a node from a token the Rust link wrote. The probes above used the Python library. A subscription
+  token, a service token, a second node and a namespace other than `/` are not written, and the link has no alias writer.
+- A router writes nothing back, so the link cannot tell a matched Put from a dropped one.
+- The live target is an operator target in `specs/targets.toml`, and CI does not run it. The router and the nodes come
+  from packages `flake.nix` does not pin, which the operator names in four environment variables. The item closes only
+  when an operator in `specs/allowed_signers` signs a record of a run. No such record exists, and the runs behind this page
+  are the author's, on one host with `rmw_zenoh_cpp` 0.6.10-r1 and `demo_nodes_cpp` 0.36.6-r1.
+- The handshake line prints `whatami=0` as a literal, because the library does not expose the router's `whatami`. A
+  client-role session reaches `Open` only after an `INIT_ACK` of `whatami` 0, so the line follows from the decoder and is
+  not a reading. The outbound direction prints no router line of its own.
+- Two host probes, with the Python wire library, ran a client behind `rmw_zenohd` and a ROS `listener`. The router
+  delivered a Put only to a listener whose subscription had the same key, type hash included, and dropped the others
+  without a reply. The probes are not fixtures.
+- A Put in fragments keeps the declared-key check for every session that fragments, because no exam observes a client
+  writing fragments. A session that does not fragment refuses a Put in fragments as over the bound, before the key check.
+- A client-role session reads a FRAME through the plain decoder, including one that negotiated lanes. The session sends a
+  FRAME down the lane path only when it is not a client.
+- The captures show no liveliness token, no `Put` with the encoding flag, no sample larger than one frame and no router
+  with a non-default configuration.
+
 ## Limitations
 
 - `sel4-zenoh` crosses the loopback backend, so there is no packet capture there. The
@@ -307,9 +599,27 @@ recipe is explicit and in no aggregate. See the
 - A Zenoh ID ending in `0x00`, or all zero, is refused: upstream holds it as a
   little-endian integer, drops trailing zero bytes and refuses zero, so the bytes
   would not round-trip.
-- No `rmw_zenoh` interoperability, liveliness, queryables, router, scouting or
-  transport security, and no Raspberry Pi 5 claim. The ROSIDL importer and RIHS01
-  generator are not here: the demo contract's checker derives those values.
+- The graph session and graph are observed by replaying three captured sessions of one peer, `rmw_zenoh_cpp`
+  0.6.10 on zenoh 1.10.1, on one host. No live rmw_zenoh peer runs in CI. The captured peer's graph was
+  visible over one direct link with no router and no gossip, in one run.
+- The plain link, `zenoh_link.rs`, cannot carry a graph session, because it matches `Event` exhaustively.
+  The graph link does. No component, composition or QEMU gate runs it, so it is judged on the host over a
+  scripted byte stream.
+- The graph holds each entity's QoS and does not match a publisher to a subscription. The session and
+  the link answer no query. A client-role plain link declares tokens, as the client role section says. In one earlier run,
+  with no token declared, `ros2 topic list` and `ros2 node list` showed no Slime node, and `ros2 topic echo` received the
+  Puts of a Slime publisher.
+- The data session is observed by replaying two captured sessions, one talker and one listener, of
+  `std_msgs/String` over a direct link. Live probes on one host showed more, with no CI evidence. A
+  best-effort subscriber received the Puts. A peer that reconnected sent no second `INTEREST`. A Slime
+  peer that dialed `rmw_zenohd` as a peer got no sample through, and one that announced itself as a client
+  got all 12. A session writes a client `INIT` only with the client role, which the link a component uses does not take yet.
+- A peer waits about 10 s for the answer to its `INTEREST`. A `FRAME` whose answer the session cannot write
+  is refused whole. `ZENOH_ROUTER_CHECK_ATTEMPTS=0` stopped the one peer from exchanging data in the probes, and a
+  value of 1 did not.
+- No router, scouting, service or action interoperability, or transport security, and no Raspberry Pi 5
+  claim. The ROSIDL importer and RIHS01 generator are not here: the demo contract's checker derives
+  those values.
 
 ## Verification
 
@@ -330,6 +640,24 @@ recipe is explicit and in no aggregate. See the
   including its `UndeclareSubscriber` that names the subscriber by id alone behind the
   network QoS extension, which the host reference reproduces byte for byte, and ten
   variants of it refused by name and class;
+- `just zenoh_rmw_check` — 60 batches from three sessions of an `rmw_zenoh_cpp` peer, replayed into a graph
+  session. The host reference `scripts/lib/zenoh_rmw_wire.py` writes every captured frame again byte for
+  byte. The session's `INIT_ACK` and its silence after the handshake are judged. 11 variants are
+  refused. It records 75 cases and 182 negative controls;
+- `just zenoh_rmw_graph_check` — the 26 liveliness tokens of those sessions, read into a graph. The
+  transcript is built from `scripts/lib/zenoh_rmw_graph.py`. It covers 12 QoS substrings, 8 synthetic
+  tokens, 25 refused keys and a graph filled to its capacity. It records 106 cases and 196 negative
+  controls;
+- `just zenoh_rmw_link_check` — the same three sessions written to a graph link three ways: whole batches,
+  one byte at a time and all at once. The bytes the link writes are judged to the byte. They are an
+  `INIT_ACK` of 512 bytes, an `OPEN_ACK`, a `KEEP_ALIVE` at each quarter lease from 7500 ms, and a
+  `CLOSE` of reason 5 at 60001 ms. A refused token is counted and the link stays open. A stream fault ends it, and every ending
+  leaves 0 entities. It records 133 cases and 236 negative controls;
+- `just zenoh_rmw_data_check` — two captured data sessions replayed into a graph session that holds one
+  subscription. A talker's 11 samples are delivered and 28 other pushes are dropped. The `INTEREST` is
+  answered with a `DeclareFinal`, and the 8 Puts a listener asks for equal what `scripts/lib/zenoh_wire.py`
+  writes. 7 variants are refused. The captured batches reach the Rust through
+  `contracts/zenoh-rmw-data/v1`. It records 140 cases and 208 negative controls;
 - `just zenoh_xcheck_check` — the codec and session against the real eclipse-zenoh 1.0.0
   crates: the 17 corpus batches as upstream's encoder produces them, a 6000-case sweep
   (5993 compared, 7 refused as a non-canonical Zenoh ID, none differing), our decoder
@@ -340,6 +668,20 @@ recipe is explicit and in no aggregate. See the
   closures. It fetches them from a registry, so the recipe is explicit and not in CI;
   `cargo deny` run on that crate reports `paste` as unmaintained (RUSTSEC-2024-0436) and
   Zlib-licensed transitive crates, which the root `deny.toml` does not allow;
+- `just zenoh_rmw_client_check` — a connector with the client role against two handshakes of `rmw_zenohd`: 13 cases
+  and 52 controls. A connector with no role still refuses them; explicit, not part of `all`;
+- `just zenoh_rmw_token_check` — a client-role link declares the node and publisher tokens of a node, withdraws one and
+  closes: 32 cases and 87 controls. No router runs, and a link with no role refuses a token; explicit, not part of `all`;
+- `just zenoh_rmw_live_check` — a client-role link against a live `rmw_zenohd`, a talker and a listener: at least 12
+  cases and 38 controls. The checker starts the router and the nodes, the operator names them in four environment
+  variables, and CI does not run it; an operator target, explicit, not part of `all`;
+- `just zenoh_rmw_client_put_check` — a client-role link writes four Puts through the handshakes of two `rmw_zenohd` runs:
+  25 cases and 66 controls. No router runs, and a link with no role still refuses an undeclared key; explicit, not part of
+  `all`;
+- `just zenoh_rmw_router_link_check` — a client-role link against two runs of `rmw_zenohd` with a talker: 50 cases, 4
+  refusals and 113 controls. The plain decoder still refuses the timestamp without the role; explicit, not part of `all`;
+- `just zenoh_rmw_booted_check` — the `sel4-zenoh-rmw` boot: 17 cases and 65 controls, and the arm under QEMU;
+  explicit, not part of `all`;
 - `just rpi5_ros2_zenoh_check` — the QEMU exchange; explicit, not part of `all`;
 - `just zenoh_external_check` — the guest connecting out to a stock listener, judged
   from the composition, a packet capture and the listener's record; explicit, not part

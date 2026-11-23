@@ -27,7 +27,9 @@ If those rules read as ceremony, start with
 as a timeline, with the reason and the enforcing check beside each step. This
 file owns the exact rules; that page explains them.
 [`docs/decisions/work-item-devloop.md`](docs/decisions/work-item-devloop.md)
-owns the rules V1 to V10 and their reasons.
+and
+[`docs/decisions/independent-review.md`](docs/decisions/independent-review.md)
+own the rules V1 to V11 and their reasons.
 
 ## Where work lives
 
@@ -71,7 +73,7 @@ acceptances. Do not change kinds or parents to populate a progress bar.
 
 UUIDs are canonical identities. A slug is the file name. Human keys such as
 `C9.4` in older text are display aliases that no checker resolves. Generated
-lists and `roadmap/` are not state stores.
+lists and `docs/plans/` are not state stores.
 
 ## Proposing work
 
@@ -117,7 +119,8 @@ change to any grader file makes a new record necessary.
 **The exam lands before the implementation.** The planning PR adds the
 item and any new target or checker it binds. The implementation PR may not
 touch the grader set of any bound target (V3). A checker that must change is
-a planning change, and a grader change needs a V4 approval.
+a planning change, and so is a generator that a bound recipe runs. A grader
+change needs a V4 approval.
 
 When a requirement is a number — attempts refused, controls exercised, bytes
 delivered — the recipe's checker reports it through
@@ -138,7 +141,10 @@ published.
 A `#human` acceptance stays open until a person listed in
 `specs/allowed_signers` answers it with `scripts/spec/human`. The answer is
 signed and bound to the item's requirements digest, so a reworded statement
-asks again. Automation never infers an answer. Targets CI cannot run, such as
+asks again. Automation never infers an answer. The `Evidence` workflow records
+a target on an AArch64 runner, unless `[host]` in `specs/targets.toml` lists it
+under another host class, as it does the x86-64 recipes that build a pc99
+image. Targets CI cannot run, such as
 board and physical-machine boots, are listed under `operator` in
 `specs/targets.toml`, and an operator signs their records with
 `scripts/spec/record <target> --signer <principal>`.
@@ -201,9 +207,9 @@ locally with `just spec_check --base origin/main`.
 
 | Class | Paths | Rule |
 |---|---|---|
-| **planning** | an added or edited `.tasks/items/*.zt`, `specs/*.zt` area files, an **added** `contracts/**/schema.zt`, a `scripts/check/` or `scripts/lib/` file in the grader set of a bound target, and `Justfile` or `just/` recipes in the closure of a bound target | lands the item and its exam before any implementation |
-| **implementation** | `components/`, `slime-root/`, `boot-contracts/`, other `contracts/` paths including a modified `schema.zt`, `scripts/build/`, `scripts/generate/`, `scripts/tools/`, `sdk/`, `tools/`, `sel4/`, `deps/`, `nix/`, `evidence/`, `verification/`, `assets/`, build and toolchain files, other recipes, and an intent-only item edit | every path under the `owns` of an item that is on base and `#active` on head (V2); touches no bound grader set (V3) |
-| **process** | `.github/`, `docs/`, `.agents/`, `.claude/`, `scripts/spec/`, `roadmap/`, `contracts/task/`, `contracts/observation/`, the task schema copies in `.tasks/`, root `*.md`, `HUMAN_OWNERS`, `AGENT_ACCOUNTS`, `specs/allowed_signers`, `specs/targets.toml`, `specs/schema.zt`, `specs/helpers.zt`, `specs/legacy.zt`, and `scripts/check/` or `scripts/lib/` files outside every grader set | needs no work item |
+| **planning** | an added or edited `.tasks/items/*.zt`, `specs/*.zt` area files, an **added** `contracts/**/schema.zt`, a script in the grader set of a bound target (a `scripts/check/` or `scripts/lib/` file, or a generator that a bound recipe runs), and `Justfile` or `just/` recipes in the closure of a bound target | lands the item and its exam before any implementation |
+| **implementation** | `components/`, `slime-root/`, `boot-contracts/`, other `contracts/` paths including a modified `schema.zt`, `scripts/build/`, `scripts/generate/` and `scripts/tools/` files outside every grader set, `sdk/`, `tools/`, `sel4/`, `deps/`, `nix/`, `evidence/`, `verification/`, `assets/`, build and toolchain files, other recipes, and an intent-only item edit | every path under the `owns` of an item that is on base and `#active` on head (V2); touches no bound grader set (V3) |
+| **process** | `.github/`, `docs/`, `.agents/`, `.claude/`, `scripts/spec/`, `roadmap/`, `contracts/task/`, `contracts/observation/`, the task schema copies in `.tasks/`, root `*.md`, `HUMAN_OWNERS`, `AGENT_ACCOUNTS`, `REVIEW_AGENTS`, `specs/allowed_signers`, `specs/targets.toml`, `specs/schema.zt`, `specs/helpers.zt`, `specs/legacy.zt`, and `scripts/check/` or `scripts/lib/` files outside every grader set | needs no work item |
 | **closeout** | an unchanged move of `.tasks/items/<slug>.zt` to `.tasks/terminal/` | needs a signed done witness, unless the item is `#cancelled` (V6) |
 | **derived** | regenerated closure sources under `contracts/system-image-closure/v3/closures/`, negative cases under `contracts/system-image-closure/v2/negative/`, and `contracts/system-test-run/v1/runs/` and `v2/runs/` | accompanies any class; never decides |
 
@@ -213,21 +219,33 @@ table first. Every `contracts/**/schema.zt` is compiled by
 a schema landed ahead of its implementation is still checked. See
 [docs/decisions/planning-pr-schema-contracts.md](docs/decisions/planning-pr-schema-contracts.md).
 
-### Approvals
+### Reviews and approvals
 
-One approval on the head from a person in `HUMAN_OWNERS`, other than the
-author, is required for each of these (V4):
+Every pull request but a closeout needs one independent review of its current
+head (V11). Two things count, and neither counts from the author:
+
+- an approving review from a person in `HUMAN_OWNERS`;
+- an approving review from an account in `REVIEW_AGENTS`, which is the review
+  agent's verdict.
+
+A comment on the pull request that starts with `@claude review` asks the
+review agent for its verdict on the current head. The `Agent review` workflow
+runs from `main`, posts the findings, and submits an approval when no finding
+is blocking. [`docs/decisions/independent-review.md`](docs/decisions/independent-review.md)
+holds the reasons.
+
+The same review is required by name for each of these (V4):
 
 - a change to the grader set of a bound target, or to a recipe in its closure;
 - a change to an area invariant;
 - a change to an existing contract `schema.zt`;
 - a change to `scripts/spec/`, `contracts/task/`, `contracts/observation/`,
-  `HUMAN_OWNERS`, `AGENT_ACCOUNTS`, or `specs/allowed_signers`;
+  `HUMAN_OWNERS`, `AGENT_ACCOUNTS`, `REVIEW_AGENTS`, or `specs/allowed_signers`;
 - an item entering `#deferred` or `#cancelled` (V5).
 
 A grader file or recipe that grades a promise, meaning an area requirement or
 a terminal item nobody superseded, changes only from a new item. The judge
-reads approvals from the current head, so a new push needs a new approval.
+reads approvals from the current head, so a new push needs a new review.
 An account in `AGENT_ACCOUNTS` never counts as an approval.
 
 ### Work-item requirement
@@ -317,10 +335,12 @@ and pull requests targeting any branch, run it; a newer run cancels the
 superseded one for the same ref. The workflow's aggregate `CI` job fails unless
 every gate job succeeded. The `Spec judge` workflow
 (`.github/workflows/spec-judge.yml`) is separate from `CI`. The `main`
-ruleset requires the `Devloop v1.5 judge` and `CI` checks and Code Owner
-review. A pull request could edit the judge's workflow or add one with the
-same check name, so [`.github/CODEOWNERS`](.github/CODEOWNERS) makes every
-change under `.github/` or `scripts/spec/` need another owner's approval.
+ruleset requires the `Devloop v1.5 judge` and `CI` checks and allows no bypass
+of the judge check. It does not require Code Owner review. A pull request
+could edit the judge's workflow or add one with the same check name. No
+mechanism stops that: the review rules make it a blocking finding, and V11
+requires a review of every head
+([decision](docs/decisions/independent-review.md)).
 
 Host checks, Kani, and the aggregates run on `ubuntu-latest`; the seL4 image,
 root tests, rollback runtime, contract sources, and the four generation shards
@@ -356,5 +376,5 @@ pushes to `main` reach.
 - [Getting started](docs/getting-started/01-orientation.md): how to learn,
   build, run, and change it.
 - [AGENTS.md](AGENTS.md): routing, invariants, schemas, gates, work items, and change-record rules.
-- [Architecture](docs/architecture/README.md) and [plans](docs/plans/README.md): current subsystem rationale versus unimplemented requirements; [roadmap classification](roadmap/README.md) names unextracted detail and historical sources.
+- [Architecture](docs/architecture/README.md) and [plans](docs/plans/README.md): current subsystem rationale versus unimplemented requirements.
 - [History](docs/history.md): immutable archive lookup, privacy, evidence boundaries, and restoration.

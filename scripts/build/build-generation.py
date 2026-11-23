@@ -138,6 +138,8 @@ from generation_resources import (
     build_lifecycle_policy,
     build_private_memory_budget,
     build_recording_policy,
+    build_resource_readers,
+    RESOURCE_READERS_OBJECT,
     build_scheduling_class,
     build_shared_buffer_budget,
     build_wait_set,
@@ -3139,6 +3141,13 @@ def build_sel4_generation(
         payloads["block-ring-authority"] = build_block_ring_authority(declared_block_rings)
     elif declared_block_rings:
         fail("blockRingAuthority declared without a block-ring-authority resource object")
+    # The readers of the tables above. No manifest declares this object: its rows follow from the tables this build
+    # carries and the instances that exist, so the builder adds the object to the closure it encodes.
+    readers = build_resource_readers(manifest, set(payloads))
+    if readers is not None:
+        payloads[RESOURCE_READERS_OBJECT] = readers
+        if RESOURCE_READERS_OBJECT not in object_ids:
+            manifest = {**manifest, "objects": [*manifest["objects"], {"id": RESOURCE_READERS_OBJECT, "kind": "resource", "size": 4096}]}
     declared_clock_authority = manifest.get("clockAuthority") or []
     if "clock-authority" in object_ids:
         payloads["clock-authority"] = build_clock_authority(manifest)

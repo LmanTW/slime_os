@@ -73,6 +73,8 @@ IMAGES_WITHOUT_CLOSURE = {
     "slime-sel4-private-memory-cycles-qemu-riscv-virt.elf": "the RV64 arm of MEM-64M's reuse cycles; its closure names qemu-arm-virt, so the RV64 build keeps its platform flag until CP15 migrates it",
     "slime-sel4-rollback-qemu-riscv-virt.elf": "the RV64 arm of the rollback plane; its closure names qemu-arm-virt, so the RV64 build keeps its platform flag until CP15 migrates it",
     "slime-sel4-qemu-riscv-virt.elf": "the RV64 arm of the product root-boot aggregate; its closure names qemu-arm-virt, so the RV64 build keeps its platform flag until CP15 migrates it",
+    "slime-sel4-sample-qemu-riscv-virt.elf": "the RV64 arm of the sample plane; its closure names qemu-arm-virt, so the RV64 build keeps its platform flag until CP15 migrates it",
+    "slime-sel4-wait-set-qemu-riscv-virt.elf": "the RV64 arm of the wait-set plane; its closure names qemu-arm-virt, so the RV64 build keeps its platform flag until CP15 migrates it",
     # P6's pc99 arms. pc99's Multiboot2 media has no loader image, so both
     # stay on the legacy builder until closure packaging supports that route.
     "slime-sel4-qemu-pc99.elf": "the pc99 arm of the product root-boot aggregate; pc99's Multiboot2 media has no loader image, so it builds legacy until closure packaging supports that boot route",
@@ -390,6 +392,12 @@ def check_no_undeclared_build_knobs(
     # Read only by the legacy build path CP15 deletes. Each is an ambient switch
     # whose closure equivalent either exists already or is named in CP14's
     # not-delivered set; none is reachable from `build-system-image.py`.
+    #
+    # `SLIME_SYSTEM_TIMER` is not ambient and has no closure equivalent.
+    # `build-sel4.py` refuses a value from the environment and sets the switch
+    # from `--system-timer` alone, and it gives the image and its identity the
+    # suffix `-system-timer`. No closure names that image, so the switch stays
+    # in this class until one does.
     LEGACY_PENDING_DELETION = {
         "SLIME_ACCEPTED_RELEASE_SEQUENCE",
         "SLIME_BOOT_BUNDLE_IDENTITY",
@@ -408,6 +416,7 @@ def check_no_undeclared_build_knobs(
         "SLIME_PRODUCT_UART_PADDR",
         "SLIME_QEMU_KEYBOARD",
         "SLIME_ROOT_FIXTURE",
+        "SLIME_SYSTEM_TIMER",
         "SLIME_TRANSFER_ACTIVATE",
         "SLIME_TRANSFER_RECEIVER",
         "SLIME_WRONG_TARGET_EXECUTABLE",
@@ -520,8 +529,8 @@ def check_migration_is_monotone() -> tuple[int, int]:
         # builds legacy on that platform until closure packaging supports it.
         "check-sel4-boot-layout.py": "its pc99 arm has no closure; the Multiboot2 route stays on the legacy builder",
         "check-sel4-component-graph.py": "its pc99 arm has no closure; the Multiboot2 route stays on the legacy builder",
-        "check-sel4-sample-plane.py": "its pc99 arm has no closure; the Multiboot2 route stays on the legacy builder",
-        "check-sel4-wait-set-plane.py": "its pc99 arm has no closure; the Multiboot2 route stays on the legacy builder",
+        "check-sel4-sample-plane.py": "its pc99 and riscv64 arms have no closure; the Multiboot2 route stays on the legacy builder, and the closure names platform qemu-arm-virt",
+        "check-sel4-wait-set-plane.py": "its pc99 and riscv64 arms have no closure; the Multiboot2 route stays on the legacy builder, and the closure names platform qemu-arm-virt",
     }
     migrated, legacy, dual = [], [], []
     for path in sorted(CHECK_ROOT.glob("check-sel4-*.py")):

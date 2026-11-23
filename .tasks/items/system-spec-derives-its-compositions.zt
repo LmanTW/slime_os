@@ -1,0 +1,59 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a1f25f-3745-7346-9b78-ab7444258c55" "system-spec-derives-its-compositions" "quality"
+  "A new composition adds its own files and changes no script that grades a plane gate"
+  "Adding a composition changes two lists in files that grade 30 and 5 bound targets, 27 and 3 of them bound by promises. `DERIVED_GENERATION_FIXTURES` in `scripts/lib/system_spec.py` names each system spec, and `SPEC_NATIVE_SYSTEMS` in `scripts/check/check-system-spec.py` names the 29 of them authored as specs. The devloop refuses both changes. V1 allows one class for a pull request. V3 keeps a grader change out of an implementation pull request. V4 asks for a new item. A planning pull request that adds the name leaves `main` red. Two required CI jobs then look for a spec file that does not exist. No order of two pull requests lands a composition.")
+  with {
+    owns = {
+      "scripts/lib/system_spec.py";
+      "scripts/check/check-system-spec.py";
+    };
+    nonGoals = {
+      h.nonGoal "Adding a composition. This item changes how the checkers find one, and the next composition proves it." h.agentDefault;
+      h.nonGoal "Changing what any checker asserts about a composition, or the 78 specs, the 49 frozen baselines or the 29 spec-native names that exist today." h.agentDefault;
+      h.nonGoal "The documents and `AGENTS.md` that tell a contributor to register a name in `DERIVED_GENERATION_FIXTURES`. A planning pull request carries no `docs/` path, so a process pull request updates them." h.agentDefault;
+      h.nonGoal "`COMPUTED_SYSTEM_SOURCES`, which maps six specs to their computed sources and is a different list." h.agentDefault;
+      h.nonGoal "The paths a later composition adds: its spec, manifest and inventory row, which are implementation paths, and its closure source and test-run record, which are derived. That composition's own item owns them." h.agentDefault;
+      h.nonGoal "An implementation pull request of this item. The two script edits are grader changes, so they ride in this planning pull request. `owns` names the two scripts, as the repairs of the zenoh exams did." h.agentDefault;
+    };
+    requirements = {
+      h.req "the-table-is-the-directory"
+        "`DERIVED_GENERATION_FIXTURES` holds the same 78 names and the same 78 manifest names as before. It maps each system spec in `systems/` to `<name>.zti`, and `reference` to `valid.zti`."
+        { "system_spec_check"; "system_image_closure_gates_check"; };
+      h.req "spec-native-comes-from-the-inventory"
+        "`SPEC_NATIVE_SYSTEMS` holds the same 29 names as before. It is the inventory rows whose state is `specNative`."
+        { "system_spec_check"; "composition_inventory_check"; };
+      h.req "every-checker-gives-the-same-verdict"
+        "On the tree as it is, each of these exits 0 and prints the same text as before: the four shards of `check-system-spec.py`, `check-composition-inventory.py`, `check-system-image-builder.py`, `generate-system-image-closures.py --check` and `check-system-image-aggregate.py`."
+        { "system_spec_check"; "composition_inventory_check"; "image_builder_closures_check"; "system_image_closure_gates_check"; };
+      h.req "a-composition-adds-no-script-edit"
+        "A composition's spec, manifest, closure source, test-run record and inventory row pass every checker above with no change to either script."
+        { "system_spec_check"; "composition_inventory_check"; "image_builder_closures_check"; "system_image_closure_gates_check"; };
+    };
+    acceptance = {
+      h.observed "system_spec_check";
+      h.observed "composition_inventory_check";
+      h.observed "image_builder_closures_check";
+      h.observed "system_image_closure_gates_check";
+    };
+    decisions = {
+      h.decided "the-directory-is-the-table"
+        "The list of system specs is the directory that holds them, and the one exception, `reference`, is written in the function that reads it."
+        "77 of 78 names map to `<name>.zti` and the directory equals the table, so the table carries no fact the directory does not"
+        h.agentDefault
+        { "the-table-is-the-directory"; };
+      h.decided "the-inventory-states-what-is-spec-native"
+        "A composition authored as a spec marks itself in the inventory with `state = \"specNative\"`. No list in a checker names it."
+        "the 29 names equal the inventory's `specNative` rows, and every other composition has a frozen baseline"
+        h.agentDefault
+        { "spec-native-comes-from-the-inventory"; };
+      h.decided "one-guard-less-and-one-kept-unbound"
+        "The comparison of the spec files to the table in `check-system-spec.py` holds by construction. The generator's `--check` still refuses a spec with no manifest, and `--check` then names that manifest as a stale derived fixture. No requirement binds this refusal, because shard 0 of `system_spec_check` reaches the generator through a Justfile conditional that no recipe scan reads. One run observed it."
+        "a stray spec was refused by two guards that compared the directory to the table, and the derived table removes one of them"
+        h.agentDefault
+        { "every-checker-gives-the-same-verdict"; };
+    };
+  };
+
+item

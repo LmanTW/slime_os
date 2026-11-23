@@ -78,12 +78,6 @@ impl AllocationTable {
         }
     }
 
-    #[cfg(test)]
-    pub fn provision_host(&mut self, entries: usize, empty: AllocationRecord) {
-        assert_eq!(empty.owner, u16::MAX, "new allocation records are unowned");
-        self.records.provision_host(entries, empty);
-    }
-
     pub const fn len(&self) -> usize {
         self.records.len()
     }
@@ -131,11 +125,6 @@ impl AllocationTable {
         self.records.iter()
     }
 
-    #[cfg(test)]
-    pub fn iter(&self) -> impl Iterator<Item = &AllocationRecord> {
-        self.records.iter().inspect(|record| self.note(record))
-    }
-
     pub fn set(&mut self, index: usize, record: AllocationRecord) {
         let entry = self.records.get_mut(index).expect("record index");
         let before = entry.owner != u16::MAX;
@@ -165,26 +154,34 @@ impl AllocationTable {
         self.set(index, record);
         result
     }
+}
 
-    #[cfg(test)]
+#[cfg(test)]
+impl AllocationTable {
+    pub fn provision_host(&mut self, entries: usize, empty: AllocationRecord) {
+        assert_eq!(empty.owner, u16::MAX, "new allocation records are unowned");
+        self.records.provision_host(entries, empty);
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &AllocationRecord> {
+        self.records.iter().inspect(|record| self.note(record))
+    }
+
     fn note(&self, record: &AllocationRecord) {
         if record.owner != u16::MAX {
             self.reads.set(self.reads.get() + 1);
         }
     }
 
-    #[cfg(test)]
     pub fn reads(&self) -> usize {
         self.reads.get()
     }
 
-    #[cfg(test)]
     pub fn set_reads(&self, reads: usize) {
         self.reads.set(reads);
     }
 
     /// The owned count by walking every record, without counting the reads.
-    #[cfg(test)]
     pub fn recount_owned(&self) -> usize {
         self.records
             .iter()
@@ -193,13 +190,11 @@ impl AllocationTable {
     }
 
     /// Make the owned count disagree with the records, for the drift test.
-    #[cfg(test)]
     pub fn drift_for_test(&mut self) {
         self.owned += 1;
     }
 
     /// Put the owned count at zero while owned records remain.
-    #[cfg(test)]
     pub fn drift_short_for_test(&mut self) {
         self.owned = 0;
     }
@@ -283,12 +278,6 @@ impl ExtentTable {
         }
     }
 
-    #[cfg(test)]
-    pub fn provision_host(&mut self, entries: usize, empty: Option<ExtentRecord>) {
-        assert!(empty.is_none(), "new extent slots are vacant");
-        self.records.provision_host(entries, empty);
-    }
-
     pub const fn len(&self) -> usize {
         self.records.len()
     }
@@ -346,11 +335,6 @@ impl ExtentTable {
     #[cfg(not(test))]
     pub fn iter(&self) -> impl Iterator<Item = &Option<ExtentRecord>> {
         self.records.iter()
-    }
-
-    #[cfg(test)]
-    pub fn iter(&self) -> impl Iterator<Item = &Option<ExtentRecord>> {
-        self.records.iter().inspect(|entry| self.note(entry))
     }
 
     /// Replace one slot, keeping every figure in step.
@@ -676,32 +660,39 @@ impl ExtentTable {
     fn read(&self, index: usize) -> Option<ExtentRecord> {
         *self.get(index)?
     }
+}
 
-    #[cfg(test)]
+#[cfg(test)]
+impl ExtentTable {
+    pub fn provision_host(&mut self, entries: usize, empty: Option<ExtentRecord>) {
+        assert!(empty.is_none(), "new extent slots are vacant");
+        self.records.provision_host(entries, empty);
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Option<ExtentRecord>> {
+        self.records.iter().inspect(|entry| self.note(entry))
+    }
+
     fn note(&self, entry: &Option<ExtentRecord>) {
         if entry.is_some() {
             self.reads.set(self.reads.get() + 1);
         }
     }
 
-    #[cfg(test)]
     pub fn reads(&self) -> usize {
         self.reads.get()
     }
 
-    #[cfg(test)]
     pub fn set_reads(&self, reads: usize) {
         self.reads.set(reads);
     }
 
     /// Present records by walking every slot, without counting the reads.
-    #[cfg(test)]
     pub fn recount_present(&self) -> usize {
         self.records.iter().flatten().count()
     }
 
     /// Common-free bytes by walking every slot, without counting the reads.
-    #[cfg(test)]
     pub fn recount_free_bytes(&self) -> usize {
         self.records
             .iter()
@@ -712,7 +703,6 @@ impl ExtentTable {
     }
 
     /// The lowest common-free record of `size_bits`, by walking.
-    #[cfg(test)]
     pub fn walk_reusable(&self, size_bits: usize) -> Option<usize> {
         self.records.iter().position(|entry| {
             entry.is_some_and(|extent| extent.is_common_free() && extent.size_bits == size_bits)
@@ -720,13 +710,11 @@ impl ExtentTable {
     }
 
     /// The lowest vacant slot, by walking.
-    #[cfg(test)]
     pub fn walk_vacancy(&self) -> Option<usize> {
         self.records.iter().position(Option::is_none)
     }
 
     /// Whether `arena`'s chain holds exactly its extents with room, in order.
-    #[cfg(test)]
     pub fn room_chain_sound(&self, arena: usize) -> bool {
         let mut expected = alloc::vec::Vec::new();
         for (index, entry) in self.records.iter().enumerate() {
@@ -752,7 +740,6 @@ impl ExtentTable {
         current == NO_LINK && self.room_len[arena] as usize == expected.len()
     }
 
-    #[cfg(test)]
     pub fn drift_for_test(&mut self, drift: ExtentDrift) {
         match drift {
             ExtentDrift::Present => self.present += 1,
@@ -790,17 +777,14 @@ impl ExtentTable {
     }
 
     /// Point one arena's chain head, or one record's link, anywhere at all.
-    #[cfg(test)]
     pub fn set_room_head_for_test(&mut self, arena: usize, head: u32) {
         self.room_head[arena] = head;
     }
 
-    #[cfg(test)]
     pub fn set_room_link_for_test(&mut self, index: usize, link: u32) {
         self.set_link(index, link);
     }
 
-    #[cfg(test)]
     pub fn room_len_for_test(&self, arena: usize) -> u32 {
         self.room_len[arena]
     }

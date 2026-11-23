@@ -1,0 +1,107 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.milestone "01a1ea5a-fc2b-7243-8aac-4869740040c4" "root-console" "planes-mechanism"
+  "On QEMU virt the root writes its transcript to a UART it owns"
+  "slime-root sends every byte of its transcript through seL4_DebugPutChar, one syscall for each byte. A kernel built from the verified configuration has no such syscall, so its root can print nothing. docs/decisions/verified-kernel-profile.md makes a root-owned UART a prerequisite of the verified profile. The root already maps a PL011 on QEMU virt, but only to read keyboard input.")
+  with {
+    intent = #active;
+    owns = {
+      "slime-root/src/diagnostic.rs";
+      "slime-root/src/main.rs";
+      "slime-root/build.rs";
+    };
+    nonGoals = {
+      h.nonGoal "The Raspberry Pi 5. Its root keeps the kernel sink until an operator can observe a boot of the changed image, which the verified-profile milestone requires." h.agentDefault;
+      h.nonGoal "The x86-64 and RISC-V target profiles. No decision asks for a verified claim on them." h.agentDefault;
+      h.nonGoal "A kernel that cannot print. This item changes no kernel configuration and no pin, so no observation here comes from such a kernel. The verified-profile milestone boots one." h.agentDefault;
+      h.nonGoal "A boot that fills the transmit FIFO. QEMU's PL011 accepts every byte at once. The host exam exercises the wait." h.agentDefault;
+      h.nonGoal "The panic report of the root and of sel4-root-task. It still reaches the serial line through the kernel sink." h.agentDefault;
+      h.nonGoal "Setting the UART's baud rate, line format or FIFO mode. The loader configured the line, and the root changes no setting." h.agentDefault;
+      h.nonGoal "The component runtime. components/runtime/src/syscall/sel4_transport.rs keeps its two kernel debug lines and its pinned bytes." h.agentDefault;
+      h.nonGoal "Moving the console service of components out of the root. A later milestone owns that." h.agentDefault;
+    };
+    requirements = {
+      h.req "kernel-sink-receives-nothing-after-install"
+        "After diagnostic::install names a UART, diagnostic::write and diagnostic::print send each byte of an accepted record to that UART's data register, and the kernel sink receives no byte. Before install the kernel sink receives each record unchanged and the root writes no register."
+        { "root_console_check"; };
+      h.req "refused-record-reaches-neither-route"
+        "A record longer than 1024 bytes, or one that is not UTF-8, is refused whole with a UART installed. No byte of it reaches the data register or the kernel sink."
+        { "root_console_check"; };
+      h.req "waits-for-fifo-room"
+        "The writer reads the PL011 flag register before each byte. It writes the data register only while the transmit-FIFO-full flag is clear."
+        { "root_console_check"; };
+      h.req "installs-once-before-first-record"
+        "The root of an aarch64-sel4-qemu-virt image maps the PL011 at physical address 0x09000000 and calls diagnostic::install once, in main, before a record that main itself emits. No other target profile sets the configuration that compiles the call. No source file names diagnostic::install in another form: an import, a re-export and a function value are refused."
+        { "root_console_check"; };
+      h.req "only-bring-up-precedes-install-marker"
+        "In the raw serial bytes of a boot of the sel4-io-local closure, the line SLIME_ROOT console uart=pl011 paddr=0x9000000 appears once, alone on its line, and a record follows it. Every record before it starts with SLIME_BACKING, SLIME_ALLOC, SLIME_ROOT infrastructure, SLIME_ROOT cspace or SLIME_ROOT metadata. The gate reports their count as recordsBeforeInstall."
+        { "root_console_check"; };
+      h.req "carriage-return-before-line-feed"
+        "From the install marker to the end of the capture, a carriage return precedes every line feed."
+        { "root_console_check"; };
+      h.req "local-plane-passes-unchanged"
+        "The boot that the gate judges passes the marker chains and failure markers of the local arm, as scripts/check/check-sel4-io-network-plane.py states them on the commit that lands this item."
+        { "root_console_check"; };
+      h.req "records-stay-whole"
+        "console_record_check passes on the changed root: the contention exam on the actual sources, the route audit, and twenty boots of the local composition."
+        { "root_console_check"; };
+    };
+    acceptance = {
+      h.observedWhere "root_console_check" {
+        h.atLeast "negativeControlsRefused" 37;
+        h.atLeast "casesObserved" 5;
+        h.atLeast "recordsObserved" 1;
+      };
+    };
+    invariants = {
+      h.invariant "one-sink"
+        "slime-root/src/diagnostic.rs holds the only call of the kernel byte sink in the root and the only code that writes the console UART. scripts/lib/console_record_controls.py refuses another route."
+        h.agentDefault;
+      h.invariant "a-device-page-is-mapped-once"
+        "The root retypes the PL011 page once in a boot. The interactive product reads its keyboard through the mapping the console installed."
+        h.agentDefault;
+      h.invariant "role-ceilings-hold"
+        "The change stays within the role ceilings of root_size_check. A draft of it measures console 450 of 450, boot 5879 of 5900 and the series 34331 of 34400."
+        h.agentDefault;
+    };
+    decisions = {
+      h.decided "qemu-virt-only"
+        "Only the aarch64-sel4-qemu-virt target profile installs the UART in this item."
+        "the Raspberry Pi 5 has one serial line and it is the board's only evidence path; a writer that fails there leaves no transcript, and no QEMU run can show that it works on the board"
+        h.agentDefault
+        { "installs-once-before-first-record"; };
+      h.decided "kernel-sink-before-install"
+        "A record that the root emits before install goes to the kernel sink. The root does not buffer it."
+        "the root can map a device page only after its allocator and its metadata exist. One boot of a draft printed 81 records before that point, all from the allocator's bring-up. A kernel that cannot print loses them, and the verified-profile milestone decides what replaces them"
+        h.agentDefault
+        { "kernel-sink-receives-nothing-after-install"; "only-bring-up-precedes-install-marker"; };
+      h.decided "root-writes-the-carriage-return"
+        "The writer sends a carriage return before each line feed."
+        "the kernel's console does the same, so the bytes on the serial line do not depend on the route, and no checker, peer or marker table has to change"
+        h.agentDefault
+        { "carriage-return-before-line-feed"; "local-plane-passes-unchanged"; };
+      h.decided "the-host-exam-judges-the-route"
+        "The gate proves the route on the host. It compiles the actual diagnostic.rs against a register page of plain memory and a kernel sink that counts bytes."
+        "both routes put the same bytes on the same UART, so a serial capture cannot tell which one wrote them; the boot shows only that the install ran first and that the transcript is intact. The register page holds only the last byte written, so the capture and the source audit judge the carriage return"
+        h.agentDefault
+        { "kernel-sink-receives-nothing-after-install"; "only-bring-up-precedes-install-marker"; };
+      h.decided "address-from-the-machine"
+        "The judge of the capture takes 0x09000000 from QEMU's virt machine map, and the source audit holds device::QEMU_PL011_PADDR to the same value."
+        "an address read from the root's own sources or from its marker would let the root report its way to a pass"
+        h.agentDefault
+        { "installs-once-before-first-record"; "only-bring-up-precedes-install-marker"; };
+      h.decided "audit-pins-the-source-shape"
+        "The source audit matches the text of install, of the route branch in write, of the mapping block in main and of the profile rule in build.rs."
+        "the audit is lexical, like the route audit of console_record_check it extends; a looser pattern would accept a second route that it cannot follow"
+        h.agentDefault
+        { "installs-once-before-first-record"; };
+      h.decided "architecture-page-follows"
+        "docs/architecture/runtime-authority.md states the console route in a process pull request, after the implementation merges."
+        "a pull request carries one class (V1), and docs/ is a process path"
+        h.agentDefault
+        { "kernel-sink-receives-nothing-after-install"; };
+    };
+  };
+
+item

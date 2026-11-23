@@ -101,7 +101,7 @@ The root plans every task's CSpace before activation; grant slots are the
 component's own numbering from 0.
 
 **Devloop.** The work-item process: planning, implementation, evidence
-and closeout, judged by `scripts/spec/check` under the rules V1 to V10.
+and closeout, judged by `scripts/spec/check` under the rules V1 to V11.
 → [devloop v1.5 decision](decisions/work-item-devloop.md).
 
 **Done witness.** A record signed by `ci` on the **Evidence branch** at
@@ -182,7 +182,7 @@ ring (queue/epoch/lease), higher numbers add device, DMA, link, and block
 authority. → [I/O substrate](architecture/io-substrate.md).
 
 **Judge.** `scripts/spec/check`, the only program that decides whether a PR
-is legal under V1 to V10. CI runs the base commit's copy, so a PR cannot change
+is legal under V1 to V11. CI runs the base commit's copy, so a PR cannot change
 the judge that judges it. `just spec_check --base origin/main` runs it
 locally. → [devloop v1.5 decision](decisions/work-item-devloop.md).
 

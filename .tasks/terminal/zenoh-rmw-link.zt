@@ -1,0 +1,79 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a1e334-31fa-75ae-89e5-927dd60fac6f" "zenoh-rmw-link" "zenoh-transport"
+  "A Profile 0 graph link carries a graph session over a byte stream and keeps a graph of its tokens"
+  "The graph session and its graph exist, and nothing carries them. The plain link, `zenoh_link.rs`, matches the plain session's `Event` exhaustively, so a graph session cannot run under it, and the graph session is exercised only by batches a test hands it one at a time. No component can hold a session with an rmw_zenoh peer. A runtime has to read length-prefixed batches in whatever chunks a stream gives, write its own in whatever chunks the stream takes, feed each liveliness token it receives into a bounded graph, and end itself when the stream or the session refuses something.")
+  with {
+    intent = #active;
+    owns = {
+      "components/lib/src/zenoh_rmw_link*";
+      "components/lib/src/zenoh_rmw_link/**";
+      "components/lib/src/zenoh_rmw_graph.rs";
+      "components/lib/src/zenoh_profile0/graph.rs";
+      "components/lib/src/lib.rs";
+    };
+    nonGoals = {
+      h.nonGoal "Delivering a sample. The graph session holds no subscription of its own, so a push is dropped and counted, and the link carries no sample notice." h.agentDefault;
+      h.nonGoal "Declaring a token, answering a query or sending any declaration. The link writes the handshake, keep-alives and a CLOSE, and nothing else." h.agentDefault;
+      h.nonGoal "A component, a composition, a system spec or a QEMU gate that runs the link. This item judges the runtime on the host over a scripted byte stream." h.agentDefault;
+      h.nonGoal "Fragmentation. The listener announces 512 bytes and a batch above it is refused." h.agentDefault;
+      h.nonGoal "Changing the plain link, the plain session, or any pinned refusal of the stock-peer, undeclare and subscribers exams." h.agentDefault;
+      h.nonGoal "A `just` recipe that renders the rmw fixtures. `just/` is outside `owns`, and a stale `fixtures.rs` is caught by the tests that compare them with the hand-off record." h.agentDefault;
+      h.nonGoal "Running the peer in CI. The three captured sessions are replayed from bytes." h.agentDefault;
+    };
+    requirements = {
+      h.req "replays-every-session-three-ways"
+        "Each of the three captured sessions, written to a graph link as whole batches, one byte at a time and all at once, leaves the entities the host reference expects while the session is open and none once the peer's CLOSE arrives."
+        { "zenoh_rmw_link_check"; };
+      h.req "writes-only-what-it-must"
+        "For every session and every way of writing it, the link writes an INIT_ACK that announces 512 bytes, carries no extension and offers the cookie the peer echoed, then an OPEN_ACK of a 30 s lease, and no other byte."
+        { "zenoh_rmw_link_check"; };
+      h.req "keeps-and-ends-the-lease"
+        "A link that has sent nothing since the handshake writes nothing at 7499 ms, one KEEP_ALIVE at 7500 ms and nothing at 7501 ms. A link pumped every 7500 ms that hears nothing after the handshake writes one KEEP_ALIVE at each of the 8 pumps up to 60000 ms, the 60 s lease the peer announced, and a CLOSE with reason 5 at 60001 ms."
+        { "zenoh_rmw_link_check"; };
+      h.req "counts-a-bad-token-and-stays-open"
+        "A frame of three tokens, the middle one of an unknown entity, is counted once and leaves 2 entities. A graph of capacity 2 counts the 9 tokens it has no room for and holds 2. In both the link stays open."
+        { "zenoh_rmw_link_check"; };
+      h.req "ends-on-a-stream-fault"
+        "An oversized and a zero length prefix end the link, each with a CLOSE of reason 0 behind the handshake, as `length-exceeds-batch` and `empty-batch`, and each leaves the graph with 0 entities."
+        { "zenoh_rmw_link_check"; };
+      h.req "refuses-what-it-must"
+        "A send that stalls past the retry limit is `retry-limit`, a handle of an earlier generation is `stale-handle`, a call after close is `send-after-close`, and an end of stream before the handshake is `link-closed`."
+        { "zenoh_rmw_link_check"; };
+      h.req "closes-locally"
+        "A local close writes a CLOSE with reason 0 behind the handshake and leaves the graph with 0 entities."
+        { "zenoh_rmw_link_check"; };
+      h.req "controls-are-refused"
+        "The judge refuses 236 corrupted records before it judges the real run."
+        { "zenoh_rmw_link_check"; };
+      h.req "neighbours-pass-unchanged"
+        "The session exam and the graph exam pass unchanged beside the link slice."
+        { "zenoh_rmw_link_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_rmw_link_check" {
+        h.count "casesObserved" 133;
+        h.count "negativeControlsRefused" 236;
+      };
+    };
+    decisions = {
+      h.decided "a-bad-token-does-not-end-the-link"
+        "A token the graph refuses, or has no room for, is counted and dropped, and the link stays open. A stream or session refusal still ends it."
+        "rmw_zenoh logs and ignores a token it cannot read, and one unreadable token must not end a session that may later carry data"
+        h.agentDefault
+        { "counts-a-bad-token-and-stays-open"; "ends-on-a-stream-fault"; };
+      h.decided "a-separate-link-type"
+        "The graph link is its own type and reuses the byte stream, the framer and the encoder of the plain link."
+        "the plain link matches `Event` exhaustively and its file is outside the earlier items, so a new variant would break it"
+        h.agentDefault
+        { "replays-every-session-three-ways"; };
+      h.decided "the-graph-is-emptied-on-close"
+        "When the link ends, by a peer CLOSE, a local close, a stream refusal or lease expiry, its graph holds 0 entities, and the transcript prints that count for each ending. A local close writes a CLOSE with reason 0 behind the handshake."
+        "a graph of a session that ended describes nothing, and a stale entity would outlive its peer"
+        h.agentDefault
+        { "replays-every-session-three-ways"; "ends-on-a-stream-fault"; "keeps-and-ends-the-lease"; "closes-locally"; };
+    };
+  };
+
+item

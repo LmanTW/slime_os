@@ -1,0 +1,61 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.bug "01a1ee2a-ce05-7a76-9d34-9b10dbb9b136" "root-probe-below-spent-tails" "planes-mechanism"
+  "The RISC-V root boot gate refuses a probe that the root placed in the highest free frame"
+  "scripts/check/check-sel4-root-boot.py requires the root's ordinary-memory probe to lie in the highest ordinary range that can hold one 4096-byte frame. It reads that range from the root's inventory and ignores what the root spent before the probe. On qemu-riscv-virt the root funds its metadata from the tails of the two highest such ranges and reports each as SLIME_BACKING infrastructure_tail. Its probe is then in the third range, and the gate refuses it. just riscv64_qemu_check failed with one message on four root images in one development container: main at 31613aa, d52b447 and 1c16751, and a tree with the fixture's child crate moved. No CI job runs the recipe, and the evidence branch holds no record of it.")
+  with {
+    intent = #active;
+    owns = {
+      "scripts/check/check-sel4-root-boot.py";
+    };
+    nonGoals = {
+      h.nonGoal "A change to the root. Where the root funds its metadata and which frame it probes stay as they are." h.agentDefault;
+      h.nonGoal "The commit that first failed. About 390 commits are candidates, and their submodule pins differ." h.agentDefault;
+      h.nonGoal "A run on a CI runner in this planning pull request. Every observation in this item comes from one development container. The Evidence workflow makes the first run on a runner." h.agentDefault;
+      h.nonGoal "The other assertions of the gate." h.agentDefault;
+      h.nonGoal "The four plane gates and the portability check that just riscv64_qemu_check runs after the root boot. Its wait-set arm builds the closure sel4-wait-set, which is an AArch64 image, and boots it on qemu-riscv-virt. With this item's change the recipe passes the root boot and then fails there." h.agentDefault;
+    };
+    requirements = {
+      h.req "accepts-the-highest-free-frame"
+        "The gate accepts a probe in the highest ordinary range that holds a free, aligned 4096-byte frame, where the free part of a range ends at the infrastructure tail that the root reported for it before the probe. It accepts the observed qemu-riscv-virt inventory, and a probe in the frames that a tail leaves free."
+        { "sel4_gate_control_check"; };
+      h.req "unreported-spend-excuses-nothing"
+        "The gate refuses a probe below a range for which the root reported no tail, a probe below a range whose tail leaves a frame free, and a probe inside the bytes that a tail spent."
+        { "sel4_gate_control_check"; };
+      h.req "a-tail-is-the-end-of-one-range"
+        "The gate refuses an infrastructure tail that does not end where one enumerated ordinary range ends, a tail that starts where its range starts, a second tail of one range, and a probe that only a tail reported after the probe would excuse."
+        { "sel4_gate_control_check"; };
+      h.req "riscv-root-boot-passes"
+        "riscv64_sel4_root_boot_check passes: the root fixture boots on qemu-riscv-virt, and the gate accepts the probe of that boot."
+        { "riscv64_sel4_root_boot_check"; };
+    };
+    acceptance = {
+      h.observed "sel4_gate_control_check";
+      h.observed "riscv64_sel4_root_boot_check";
+    };
+    decisions = {
+      h.decided "the-gate-reads-what-the-root-spent"
+        "The gate changes, and the root does not."
+        "the root already probes the highest frame it can still allocate. The gate's purpose is a probe that a launcher argument cannot manufacture, and a probe frame that ends 448 KiB below the end of the inventory still shows that. The other choice changes the order of boot-time allocation on three platforms"
+        (h.fromHuman "1 選 A，2 照你建議，3 開 backlog bug" "Claude Code session session_01Udthew69PFkRyDtWmFtXKa, 2026-11-18, choosing option A: change the gate, not the root")
+        { "accepts-the-highest-free-frame"; };
+      h.decided "a-tail-must-match-the-inventory"
+        "The gate takes a tail only when it ends at the end of one enumerated range, starts after that range starts, is the only tail of that range, and precedes the probe."
+        "the root writes both the inventory and the tails. A tail that the gate cannot tie to one range would let any low probe pass by a line of text"
+        h.agentDefault
+        { "unreported-spend-excuses-nothing"; "a-tail-is-the-end-of-one-range"; };
+      h.decided "a-recipe-for-the-root-boot-alone"
+        "A new recipe, riscv64_sel4_root_boot_check, runs the root boot gate on qemu-riscv-virt and nothing else."
+        "riscv64_qemu_check runs five plane gates and the portability check, and its second gate cannot pass today for a reason outside the root boot gate. qemu-pc99 has the same split: x86_64_sel4_root_boot_check owns the boot claim, and x86_64_qemu_check replays more planes"
+        h.agentDefault
+        { "riscv-root-boot-passes"; };
+      h.decided "fix-and-controls-in-one-planning-pull-request"
+        "The planning pull request of this item changes the gate and lands its controls."
+        "the gate is in the grader set of sel4_root_boot_check, which the item root-child-crate binds, so it is a planning path, and a grader that a promise binds changes only with a new item (V4)"
+        h.agentDefault
+        { "accepts-the-highest-free-frame"; "a-tail-is-the-end-of-one-range"; };
+    };
+  };
+
+item

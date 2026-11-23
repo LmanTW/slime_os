@@ -21,6 +21,18 @@ use crate::zenoh_profile0::{
 #[path = "zenoh_link/tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "zenoh_link/router_tests.rs"]
+mod router_tests;
+
+#[cfg(test)]
+#[path = "zenoh_link/put_tests.rs"]
+mod put_tests;
+
+#[cfg(test)]
+#[path = "zenoh_link/token_tests.rs"]
+mod token_tests;
+
 /// Consecutive stalled sends tolerated before the link gives up; the demo contract's `maxRetries`.
 pub const MAX_RETRIES: u32 = 3;
 /// The framed size of the first release's batch.
@@ -191,9 +203,10 @@ pub struct LinkOf<
     const P: usize,
     const Q: usize,
     const E: usize = MAX_EVENTS,
+    const R: usize = 1,
 > {
     io: L,
-    session: SessionOf<K, S, B, E>,
+    session: SessionOf<K, S, B, E, R>,
     framer: StreamFramerOf<FRAMED>,
     send: [u8; FRAMED],
     send_len: usize,
@@ -239,8 +252,17 @@ impl<
     const P: usize,
     const Q: usize,
     const E: usize,
-> LinkOf<L, FRAMED, K, S, B, P, Q, E>
+    const R: usize,
+> LinkOf<L, FRAMED, K, S, B, P, Q, E, R>
 {
+    /// The same link with the client role on its session: it announces itself as a client, takes the INIT_ACK of a
+    /// router and takes the timestamp of a Put a router forwards. A listener, and a link that has begun its
+    /// handshake, are `InvalidConfig`.
+    pub fn with_client_role(mut self) -> Result<Self, SessionError> {
+        self.session = self.session.with_client_role()?;
+        Ok(self)
+    }
+
     /// A link in its generation, declared by `params`.
     pub fn with_params(
         io: L,
@@ -296,7 +318,7 @@ impl<
         self.tap_received.get()
     }
 
-    pub fn session(&self) -> &SessionOf<K, S, B, E> {
+    pub fn session(&self) -> &SessionOf<K, S, B, E, R> {
         &self.session
     }
 
@@ -449,6 +471,31 @@ impl<
         self.queue(batch)
     }
 
+    /// Queues the declaration of the liveliness token `id` under `key`, written in full. Only a link with the client role
+    /// writes one.
+    pub fn declare_token(&mut self, handle: LinkHandle, id: u32, key: &str) -> Result<(), Error> {
+        self.check(handle)?;
+        if self.send_len != 0 {
+            return Err(Error::SendBusy);
+        }
+        let mut body = [0u8; FRAMED];
+        let outcome = self.session.send_declare_token(id, key, &mut body)?;
+        let batch = outcome.batch(&body);
+        self.queue(batch)
+    }
+
+    /// Queues the withdrawal of the liveliness token `id`.
+    pub fn withdraw_token(&mut self, handle: LinkHandle, id: u32) -> Result<(), Error> {
+        self.check(handle)?;
+        if self.send_len != 0 {
+            return Err(Error::SendBusy);
+        }
+        let mut body = [0u8; FRAMED];
+        let outcome = self.session.send_undeclare_token(id, &mut body)?;
+        let batch = outcome.batch(&body);
+        self.queue(batch)
+    }
+
     pub fn undeclare_subscriber(
         &mut self,
         handle: LinkHandle,
@@ -503,6 +550,8 @@ impl<
                 Event::SubscriberDeclared { id } => Notice::SubscriberDeclared { id },
                 Event::SubscriberUndeclared { id } => Notice::SubscriberUndeclared { id },
                 Event::Closed { reason } => Notice::Closed { reason },
+                // A drop is the session's report. The owner has no notice for it yet.
+                Event::Dropped { .. } => continue,
                 Event::SampleStored {
                     sequence,
                     timestamp,

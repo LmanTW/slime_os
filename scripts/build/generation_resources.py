@@ -3,6 +3,7 @@ from __future__ import annotations
 import struct
 import ipaddress
 import boot_contracts as wire_contracts
+import resource_reader_contract as reader_contract
 
 from boot_contracts import (
     BLOCK_AUTHORITY_ENTRY,
@@ -1245,6 +1246,58 @@ def build_entropy_authority(manifest: dict) -> bytes:
         c.ENTROPY_AUTHORITY_MAGIC, c.ENTROPY_AUTHORITY_VERSION, c.ENTROPY_AUTHORITY_HEADER_BYTES, 0, len(entries), total_len
     )
     return header + b"".join(entry for _, entry in entries)
+
+
+# The instance the three network tables are served to, and the executable whose instances the block ring authority
+# table is served to. The builder states them in the resource-readers object; the root holds neither name.
+NETWORK_SERVICE_INSTANCE = "network-service"
+BLOCK_DRIVER_EXECUTABLE = "virtio-blk-driver"
+RESOURCE_READERS_OBJECT = "resource-readers"
+# One row per generation table the root serves to a declared reader: the payload that carries the table, the
+# resource id that names it, and whether an instance reads it.
+RESOURCE_READERS = (
+    ("entropy-authority", reader_contract.RESOURCE_READER_ENTROPY_AUTHORITY, lambda instance: instance["name"] == ENTROPY_SERVICE_INSTANCE),
+    ("zenoh-grants", reader_contract.RESOURCE_READER_ZENOH_GRANTS, lambda instance: instance["name"] == ZENOH_GRANTS_READER_INSTANCE),
+    ("zenoh-limits", reader_contract.RESOURCE_READER_ZENOH_LIMITS, lambda instance: instance["name"] == ZENOH_GRANTS_READER_INSTANCE),
+    ("network-destinations", reader_contract.RESOURCE_READER_NETWORK_DESTINATIONS, lambda instance: instance["name"] == NETWORK_SERVICE_INSTANCE),
+    ("network-interface", reader_contract.RESOURCE_READER_NETWORK_INTERFACES, lambda instance: instance["name"] == NETWORK_SERVICE_INSTANCE),
+    ("network-application", reader_contract.RESOURCE_READER_NETWORK_APPLICATIONS, lambda instance: instance["name"] == NETWORK_SERVICE_INSTANCE),
+    ("block-ring-authority", reader_contract.RESOURCE_READER_BLOCK_RING_AUTHORITY, lambda instance: instance.get("executable") == BLOCK_DRIVER_EXECUTABLE),
+)
+
+
+def resource_reader_identity(name: str) -> bytes:
+    """Stable per-instance identity, matching boot_contracts::resource_reader."""
+    encoded = name.encode("utf-8")
+    return sha256(reader_contract.RESOURCE_READER_IDENTITY_DOMAIN + len(encoded).to_bytes(2, "little") + encoded)
+
+
+def build_resource_readers(manifest: dict, emitted: set[str]) -> bytes | None:
+    """Encode the resource-readers object (resource-reader/v1): one row per table in `emitted` and instance that reads it.
+
+    `emitted` holds the ids of the payloads this build carries. A table the build does not carry has no row, and neither
+    has a reader the manifest does not declare. The result is `None` when no row remains: the object exists exactly when
+    it names a reader.
+    """
+    rows = sorted(
+        (resource, resource_reader_identity(instance["name"]))
+        for payload, resource, reads in RESOURCE_READERS
+        if payload in emitted
+        for instance in manifest["instances"]
+        if reads(instance)
+    )
+    if not rows:
+        return None
+    if len(rows) > reader_contract.MAX_RESOURCE_READER_ROWS:
+        fail("resource readers exceed the row bound")
+    if any(left == right for left, right in zip(rows, rows[1:], strict=False)):
+        fail("resource readers: two instances share one name")
+    total_len = reader_contract.RESOURCE_READER_HEADER_BYTES + len(rows) * reader_contract.RESOURCE_READER_ENTRY_BYTES
+    header = reader_contract.RESOURCE_READER_HEADER.pack(
+        reader_contract.RESOURCE_READER_MAGIC, reader_contract.RESOURCE_READER_VERSION,
+        reader_contract.RESOURCE_READER_HEADER_BYTES, 0, len(rows), total_len,
+    )
+    return header + b"".join(reader_contract.RESOURCE_READER_ENTRY.pack(*row) for row in rows)
 
 
 def scheduling_class_instance_identity(name: str) -> bytes:

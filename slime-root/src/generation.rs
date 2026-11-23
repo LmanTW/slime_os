@@ -24,6 +24,7 @@ use boot_contracts::network_interface::{self, NetworkInterfaces};
 use boot_contracts::private_memory_budget::{self, PrivateMemoryBudget};
 use boot_contracts::private_memory_policy::{self, Policy as PrivateMemoryPolicy};
 use boot_contracts::recording_policy::{self, RecordingPolicy};
+use boot_contracts::resource_reader::{self, ResourceReaders};
 use boot_contracts::scheduling_class::{self, SchedulingClass};
 use boot_contracts::target_profile::TargetProfile;
 use boot_contracts::wait_set::{self, WaitSet};
@@ -160,6 +161,9 @@ pub enum GenerationError {
     /// malformed, appears twice, or rides on a product generation, whose graph
     /// has no arrival ceiling to raise.
     UnsatisfiableGraphArrivalCeiling,
+    /// The generation carries a resource-reader table that is malformed,
+    /// appears twice, or names an instance this generation does not declare.
+    UnsatisfiableResourceReaders,
 }
 
 impl From<DecodeError> for GenerationError {
@@ -1302,16 +1306,20 @@ fn declared_arrival_ceiling<'a>(
     Ok(declared)
 }
 
-/// The ceiling verdict over this generation's resource objects. An object the
-/// table cannot yield is left to the admission loop that refuses it.
+/// The bytes of this generation's resource objects. An object the table cannot
+/// yield is left to the admission loop that refuses it.
+fn resource_objects<'a>(generation: &Generation<'a>) -> impl Iterator<Item = &'a [u8]> {
+    (0..generation.object_count())
+        .filter_map(|index| generation.object(index).ok())
+        .filter(|object| object.kind == KIND_RESOURCE)
+        .map(|object| object.bytes)
+}
+
+/// The ceiling verdict over this generation's resource objects.
 fn graph_arrival_ceiling_verdict(
     generation: &Generation<'_>,
 ) -> Result<Option<usize>, GenerationError> {
-    let resources = (0..generation.object_count())
-        .filter_map(|index| generation.object(index).ok())
-        .filter(|object| object.kind == KIND_RESOURCE)
-        .map(|object| object.bytes);
-    declared_arrival_ceiling(generation.boot_action, resources)
+    declared_arrival_ceiling(generation.boot_action, resource_objects(generation))
 }
 
 /// The component arrivals a finite plane's graph service handles when the
@@ -1320,6 +1328,57 @@ fn graph_arrival_ceiling_verdict(
 /// refusal here reads as no declaration rather than a second verdict.
 pub fn graph_arrival_ceiling(generation: &Generation<'_>) -> Option<usize> {
     graph_arrival_ceiling_verdict(generation).ok().flatten()
+}
+
+/// The reader table the resource objects declare: `None` when no object
+/// carries one, otherwise the one decoded table. More than one object, an
+/// object that does not decode, and a row naming an instance `declared`
+/// refuses are refused: a reader the generation does not declare is authority
+/// for a name no instance carries.
+fn declared_resource_readers<'a>(
+    resources: impl IntoIterator<Item = &'a [u8]>,
+    declared: impl Fn(&[u8; 32]) -> bool,
+) -> Result<Option<ResourceReaders<'a>>, GenerationError> {
+    let mut readers = None;
+    for bytes in resources {
+        if !bytes.starts_with(&resource_reader::MAGIC) {
+            continue;
+        }
+        let names_declared = |table: &ResourceReaders<'_>| {
+            (0..table.row_count())
+                .all(|row| table.row(row).is_some_and(|(_, reader)| declared(&reader)))
+        };
+        let table = ResourceReaders::decode(bytes).ok().filter(names_declared);
+        if table.is_none() || readers.is_some() {
+            return Err(GenerationError::UnsatisfiableResourceReaders);
+        }
+        readers = table;
+    }
+    Ok(readers)
+}
+
+/// Every reader table this generation carries is the only one, decodes, and
+/// names declared instances only.
+fn resource_readers_admission(generation: &Generation<'_>) -> Result<(), GenerationError> {
+    let declared = |reader: &[u8; 32]| {
+        (0..generation.instance_count()).any(|index| {
+            generation
+                .instance(index)
+                .is_ok_and(|instance| resource_reader::reader_identity(instance.name) == *reader)
+        })
+    };
+    declared_resource_readers(resource_objects(generation), declared).map(drop)
+}
+
+/// The authenticated reader table, or `None` when the generation carries
+/// none. Admission has already refused a malformed, repeated or undeclared
+/// table, so a refusal here reads as no declaration: no instance is a reader.
+/// The rows are not matched against the instance table again.
+pub(crate) fn resource_readers_object<'a>(
+    generation: &Generation<'a>,
+) -> Option<ResourceReaders<'a>> {
+    let readers = declared_resource_readers(resource_objects(generation), |_| true);
+    readers.ok().flatten()
 }
 
 /// Every resident row names an instance this generation declares, so a
@@ -2106,6 +2165,7 @@ impl Admission {
         let recording_entries = recording_policy_admission(generation)?;
         instance_lifetime_admission(generation)?;
         graph_arrival_ceiling_verdict(generation)?;
+        resource_readers_admission(generation)?;
         let mut bootstrap_objects = 0;
         let mut component_objects = 0;
         for index in 0..generation.object_count() {
@@ -2426,6 +2486,25 @@ pub fn declared_crossing_grants(
 #[cfg(test)]
 mod large_image_tests;
 
+/// A resource-reader object holding `rows` as given, without sorting or
+/// validating them, so a test can also build a table admission must refuse.
+#[cfg(test)]
+pub(crate) fn resource_readers_bytes(rows: &[(u32, [u8; 32])]) -> alloc::vec::Vec<u8> {
+    let total = resource_reader::HEADER_BYTES + rows.len() * resource_reader::ENTRY_BYTES;
+    let mut bytes = alloc::vec::Vec::new();
+    bytes.extend_from_slice(&resource_reader::MAGIC);
+    bytes.extend_from_slice(&resource_reader::FORMAT_VERSION.to_le_bytes());
+    bytes.extend_from_slice(&(resource_reader::HEADER_BYTES as u32).to_le_bytes());
+    bytes.extend_from_slice(&0u64.to_le_bytes());
+    bytes.extend_from_slice(&(rows.len() as u32).to_le_bytes());
+    bytes.extend_from_slice(&(total as u32).to_le_bytes());
+    for (resource, identity) in rows {
+        bytes.extend_from_slice(&resource.to_le_bytes());
+        bytes.extend_from_slice(identity);
+    }
+    bytes
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -2489,6 +2568,63 @@ mod tests {
             assert_eq!(
                 super::declared_arrival_ceiling(action, resources),
                 Err(GenerationError::UnsatisfiableGraphArrivalCeiling)
+            );
+        }
+    }
+
+    /// A resource carries no reader table, or the one table whose every row
+    /// names a declared instance.
+    #[test]
+    fn a_generation_takes_its_one_declared_reader_table() {
+        use boot_contracts::resource_reader::{RESOURCE_ZENOH_GRANTS, Resource};
+        let table = super::resource_readers_bytes(&[(RESOURCE_ZENOH_GRANTS, [0x11; 32])]);
+        let other = *b"SLIMELT\0";
+        let declared = |reader: &[u8; 32]| *reader == [0x11; 32];
+        let readers = super::declared_resource_readers([&other[..], &table[..]], declared)
+            .unwrap()
+            .unwrap();
+        assert!(readers.names(Resource::ZenohGrants, &[0x11; 32]));
+        assert!(
+            super::declared_resource_readers([&other[..]], declared)
+                .unwrap()
+                .is_none()
+        );
+        let empty = super::resource_readers_bytes(&[]);
+        assert_eq!(
+            super::declared_resource_readers([&empty[..]], declared)
+                .unwrap()
+                .unwrap()
+                .row_count(),
+            0
+        );
+    }
+
+    /// A second table, one that does not decode, and a row naming an instance
+    /// the generation does not declare are each refused at admission.
+    #[test]
+    fn a_duplicate_malformed_or_undeclared_reader_table_is_refused() {
+        use boot_contracts::resource_reader::{RESOURCE_ENTROPY_AUTHORITY, RESOURCE_ZENOH_GRANTS};
+        let table = super::resource_readers_bytes(&[(RESOURCE_ZENOH_GRANTS, [0x11; 32])]);
+        let undeclared = super::resource_readers_bytes(&[
+            (RESOURCE_ENTROPY_AUTHORITY, [0x11; 32]),
+            (RESOURCE_ZENOH_GRANTS, [0x22; 32]),
+        ]);
+        let unknown = super::resource_readers_bytes(&[(8, [0x11; 32])]);
+        let unsorted = super::resource_readers_bytes(&[
+            (RESOURCE_ZENOH_GRANTS, [0x11; 32]),
+            (RESOURCE_ENTROPY_AUTHORITY, [0x11; 32]),
+        ]);
+        for resources in [
+            alloc::vec![&table[..], &table[..]],
+            alloc::vec![&table[..table.len() - 1]],
+            alloc::vec![&undeclared[..]],
+            alloc::vec![&unknown[..]],
+            alloc::vec![&unsorted[..]],
+        ] {
+            assert_eq!(
+                super::declared_resource_readers(resources, |reader| *reader == [0x11; 32])
+                    .unwrap_err(),
+                GenerationError::UnsatisfiableResourceReaders
             );
         }
     }

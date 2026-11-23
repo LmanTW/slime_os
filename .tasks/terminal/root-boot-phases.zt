@@ -1,0 +1,143 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.milestone "01a1f287-45a5-7d08-9204-06ba2bad331f" "root-boot-phases" "planes-mechanism"
+  "The root's boot and launch run as phases that return, and their decisions have host tests"
+  "The library compiles the root's boot sequence and graph runtime, and no host test runs them. slime_root::boot::run holds 510 code lines and launch_instance_graph 1054. The library names fatal! in 160 places, and a function that reaches one stops the root and does not return. The decisions those two functions make are computed between kernel calls: what each instance needs, in which order instances start, which grant fills which slot. A host cannot invoke seL4, so today it cannot check one of them.")
+  with {
+    intent = #active;
+    depends = {
+      "01a1f136-14af-768c-bb13-2917ec15696b";
+      "01a1f283-00b8-7499-9d83-63c21fc66bb6";
+    };
+    owns = {
+      "slime-root/src/**";
+    };
+    nonGoals = {
+      h.nonGoal "A change to what the root does or prints. Every record keeps its text, and every kernel call keeps its place in the order." h.agentDefault;
+      h.nonGoal "A split of serve_instance_graph, the service loop of 1488 code lines. It returns a result in this item and keeps its length. The policy arms leave the root in stage one of docs/decisions/root-task-scope.md, and the dispatch role has 14 lines of room." (h.acceptedDefault "Claude Code session session_01Udthew69PFkRyDtWmFtXKa, 2026-11-19: the owner chose the proposed option of two, to split the service loop after the policy role leaves");
+      h.nonGoal "A split of serve_spawn, construct_child and TaskTable::create, and a result from release_child. The core role has 12 lines of room, and release_child has 22 callers in the first two." h.agentDefault;
+      h.nonGoal "A trait over the kernel's operations, with a fake for the host. The estimate is 400 to 700 code lines, and the series has 57 lines of room. The order of kernel calls and the rollback paths stay without a host test." (h.acceptedDefault "Claude Code session session_01Udthew69PFkRyDtWmFtXKa, 2026-11-19: the owner chose the proposed option of three, plan and apply");
+      h.nonGoal "The 41 fatal! invocations of the binary: slime-root/src/main.rs and slime-root/src/fixture_runtime.rs. The fixture leaves the product root in the next root item." h.agentDefault;
+      h.nonGoal "The other eight functions above the limit. Three are in roles that leave the root: serve_lifecycle_request, serve_io_resource and serve_capability_export. Two are in the harness role. main shrinks when the fixture leaves the product root. grow and preflight_spawn_grants are in the core role, which has 12 lines of room. Each keeps its entry in the checker's table." h.agentDefault;
+      h.nonGoal "A host test of the installs of an instance's bindings, of the activation order and of the shared-granule flag of the IO quota. The generation that the host tests read, slime-root/fixtures/admission-v5.bin, declares no binding and no dependency, so a test on it checks nothing. Each as a pure function costs 15 to 20 code lines, and the series has 57 lines of room." h.agentDefault;
+      h.nonGoal "A higher ceiling of any role or of the series." h.agentDefault;
+      h.nonGoal "An exam on the Evidence runner for the gates that pin the text of a fatal record. The evidence branch holds no record of them. The implementation pull request runs them and reports each." h.agentDefault;
+    };
+    requirements = {
+      h.req "launch-path-functions-fit-the-limit"
+        "root_size_check counts at most 150 code lines in the longest function of slime-root/src/boot.rs and slime-root/src/graph_runtime.rs, and reports the count as launchPathLongestFunctionCodeLines. main holds 1054 there."
+        { "root_size_check"; };
+      h.req "two-fewer-long-functions"
+        "root_size_check counts at most 12 functions above 150 code lines, and reports the count as functionsOverLimit. main holds 14. The checker refuses a function above the limit that its table does not name."
+        { "root_size_check"; };
+      h.req "the-library-returns-instead-of-stopping"
+        "root_size_check counts at most 8 fatal! invocations in the library's files, and reports the count as libraryFatalSites. main holds 160. The functions of the boot, the launch and the service loop return a result, and their caller stops the root."
+        { "root_size_check"; };
+      h.req "decisions-have-host-tests"
+        "test_sel4_root runs at least 380 host tests, and reports the count as hostTests. main runs 369. The new tests call the functions that decide the image and CSpace funding, the foundation accounting, the bound of the legacy memory window, the admitted resources, the arena size of a large image and the launch plan of an instance."
+        { "test_sel4_root"; };
+      h.req "series-within-its-ceiling"
+        "root_size_check counts at most 34100 code lines in the nine series roles. The ceiling does not rise."
+        { "root_size_check"; };
+      h.req "fixture-boots-on-aarch64"
+        "sel4_root_boot_check passes: the root fixture boots on qemu-arm-virt through the phases."
+        { "sel4_root_boot_check"; };
+      h.req "fixture-boots-on-riscv64"
+        "riscv64_sel4_root_boot_check passes: the root fixture boots on qemu-riscv-virt through the phases."
+        { "riscv64_sel4_root_boot_check"; };
+      h.req "fixture-boots-on-x86-64"
+        "x86_64_sel4_root_boot_check passes: the root fixture boots on qemu-pc99 through the phases."
+        { "x86_64_sel4_root_boot_check"; };
+      h.req "product-graph-boots"
+        "sel4_boot_check passes: the product root launches its component graph through the phases and serves it."
+        { "sel4_boot_check"; };
+      h.req "console-install-stays-in-main"
+        "root_console_check passes: main installs the root's console UART once, before the first record, and the console record audit accepts the root's sources."
+        { "root_console_check"; };
+      h.req "a-refused-generation-keeps-its-record"
+        "sel4_matrix_check passes: a generation that admission refuses still prints the record that the gate pins, with the name of the refusal."
+        { "sel4_matrix_check"; };
+    };
+    acceptance = {
+      h.observedWhere "root_size_check" {
+        h.atMost "launchPathLongestFunctionCodeLines" 150;
+        h.atMost "functionsOverLimit" 12;
+        h.atMost "libraryFatalSites" 8;
+        h.atMost "seriesCodeLines" 34100;
+      };
+      h.observedWhere "test_sel4_root" {
+        h.atLeast "hostTests" 380;
+      };
+      h.observed "sel4_root_boot_check";
+      h.observed "riscv64_sel4_root_boot_check";
+      h.advisory (h.observed "x86_64_sel4_root_boot_check");
+      h.observed "sel4_boot_check";
+      h.observed "root_console_check";
+      h.advisory (h.observed "sel4_matrix_check");
+    };
+    invariants = {
+      h.invariant "records-keep-their-text"
+        "Every record that the root prints before it stops keeps its text, byte for byte. Checkers pin the prefix SLIME_ROOT FATAL and, in five places, part of a message."
+        h.agentDefault;
+      h.invariant "kernel-calls-keep-their-order"
+        "The root makes the same kernel calls in the same order. A phase holds the calls that one stretch of the old function held."
+        h.agentDefault;
+      h.invariant "host-tested-code-does-not-print"
+        "A function that a host test calls prints no record and invokes no seL4 operation. It returns a value or a typed error, and the phase that called it prints."
+        h.agentDefault;
+      h.invariant "main-keeps-the-first-two-phases"
+        "main initializes the object allocator and installs the root's console before the first phase of the library. The two console audits read slime-root/src/main.rs, and this item changes neither."
+        h.agentDefault;
+      h.invariant "every-configuration-still-builds"
+        "The thirteen configurations that the implementation of root-library built still build. The implementation pull request reports each build as observed or not observed."
+        h.agentDefault;
+      h.invariant "the-bug-and-the-first-library-item-close-first"
+        "The implementation pull request makes this item active after the items host-test-count-in-recipe and root-library are terminal. The first lets a pull request add a host test, and a milestone does not start while a backlog bug is open (V7)."
+        h.agentDefault;
+    };
+    decisions = {
+      h.decided "plan-and-apply"
+        "A pure function computes each decision, and a phase applies it with the kernel calls. Host tests call the pure functions."
+        "the allocator and the task table call seL4 directly, and a host cannot invoke seL4. The decisions need the generation and a few numbers, and the crate already tests planners of this shape: vspace_arena_plan, plan_task_backing and admit_total_slots. The estimate is 40 to 70 code lines against 400 to 700 for a trait over the kernel"
+        (h.acceptedDefault "Claude Code session session_01Udthew69PFkRyDtWmFtXKa, 2026-11-19: the owner chose the proposed option of three, plan and apply")
+        { "decisions-have-host-tests"; };
+      h.decided "a-limit-of-150-code-lines"
+        "No function of slime-root holds more than 150 code lines, except those that the checker's table names. The checker measures it."
+        "of 1638 functions outside test items, 14 are above 150 and 28 above 100, and the median holds 8 lines. A count of code lines does not charge a function for its comments. The table gives each named function a ceiling, so none grows, and a new long function is refused"
+        (h.acceptedDefault "Claude Code session session_01Udthew69PFkRyDtWmFtXKa, 2026-11-19: the owner chose the proposed option of three, 150 code lines measured by the size checker")
+        { "launch-path-functions-fit-the-limit"; "two-fewer-long-functions"; };
+      h.decided "the-record-is-printed-where-the-failure-is"
+        "A phase that cannot go on prints its record and returns an error that carries no text. The caller stops the root."
+        "a record that travels in the error needs a buffer of a fixed size or the heap, and a record cut to fit would change a text that checkers pin. Printed at its place, each record keeps its text and its position among the others"
+        h.agentDefault
+        { "the-library-returns-instead-of-stopping"; "a-refused-generation-keeps-its-record"; };
+      h.decided "eight-places-may-still-stop"
+        "The bound on libraryFatalSites is 8."
+        "five invocations have no caller that could stop the root in their place: four in the Milk-V Duo S reset helpers, which never return or run as a device callback, and one in release_child, which has 22 callers in two functions this item does not split. Three more are room for a place of the same kind that the implementation finds"
+        h.agentDefault
+        { "the-library-returns-instead-of-stopping"; };
+      h.decided "eleven-more-host-tests"
+        "The bound on hostTests is 380."
+        "the requirement names six decisions. A draft of the implementation, on a local branch, holds 13 tests of them and runs 382 tests in all. The bound is the 369 of main and eleven; two tests are room"
+        h.agentDefault
+        { "decisions-have-host-tests"; };
+      h.decided "matrix-gate-is-advisory"
+        "The acceptance on sel4_matrix_check is advisory."
+        "the gate pins the record of a refused generation with the name of the refusal, so it is the gate most likely to see a changed record. The evidence branch holds no record of it, and the item root-child-crate could not close while it bound a target that the Evidence runner had never passed. The implementation pull request runs it and the four other gates that pin a message"
+        h.agentDefault
+        { "a-refused-generation-keeps-its-record"; };
+      h.decided "mandatory-targets-have-passing-records"
+        "Every mandatory acceptance binds a target that the evidence branch records as passed."
+        "on the evidence branch at cc1cc32 every record of these targets passed: root_size_check 5, test_sel4_root 12, sel4_root_boot_check 2, riscv64_sel4_root_boot_check 2, sel4_boot_check 4, root_console_check 6"
+        h.agentDefault
+        { "product-graph-boots"; "console-install-stays-in-main"; };
+      h.decided "graders-change-in-the-planning-pull-request"
+        "The planning pull request of this item changes the size checker. It measures every function against the limit, counts the fatal! invocations of the library, and lowers the ceiling on what only the binary compiles from 9350 to 1150. It also moves the reader of Rust to scripts/lib/rust_source.py and the count of host tests to a script of its own, and it corrects one control of that count."
+        "the checker is in the grader set of root_size_check, which promises bind, so it changes only in a pull request that adds an item (V4). The item root-library left the lower ceiling to this pull request. The review of the item host-test-count-in-recipe found the weak control, and found that the count as a mode of the size checker put every ceiling edit into the closure of test_sel4_root and its dependents"
+        h.agentDefault
+        { "launch-path-functions-fit-the-limit"; "two-fewer-long-functions"; "the-library-returns-instead-of-stopping"; };
+    };
+  };
+
+item

@@ -18,9 +18,19 @@
 mod exam;
 
 #[cfg(test)]
+mod grading;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::zenoh_service::{Core, Row};
+
+    /// The grading exam: a second run, a malformed request and a stalled link, each printed as `[zenoh-exam] grading
+    /// ...` lines. The checker looks for this test by its path.
+    #[test]
+    fn the_grading_exam() {
+        super::grading::run();
+    }
 
     /// The server exam: the server answers each request of the client protocol and the test prints one
     /// `[zenoh-exam] server ...` line for each answer. The checker looks for this test by its path.
@@ -530,6 +540,14 @@ impl<const H: usize> Server<H> {
     /// Whether `holder` has a session.
     pub fn attached(&self, holder: usize) -> bool {
         self.phases.get(holder) == Some(&Phase::Attached)
+    }
+
+    /// Ends `holder`'s session whatever it was. The host calls it for a holder that died or expired. The holder is
+    /// refused every later request and cannot attach again in this run, and no other holder changes.
+    pub fn lose(&mut self, holder: usize) {
+        if let Some(phase) = self.phases.get_mut(holder) {
+            *phase = Phase::Ended;
+        }
     }
 
     /// Puts `holder` back to having no session. The host calls it when it could not give an attached holder its

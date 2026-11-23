@@ -157,7 +157,7 @@ impl<'a> AdaptivePolicy<'a> {
     /// spending what this line accounts for. `pool_bytes` is the residual
     /// after reservation: a report of what remains, never a promise about it.
     pub fn report(&self) {
-        slime_root::diagnostic_println!(
+        crate::diagnostic_println!(
             "SLIME_MEM policy entitlements={} subjects={} guarantee_pages={} reserved_bytes={} reserved_slots={} reserved_descriptors={} reserved_extents={} reserved_tables={} pool_bytes={}",
             self.policy.entitlement_count(),
             self.policy.subject_count(),
@@ -203,7 +203,7 @@ impl<'a> AdaptivePolicy<'a> {
         if admitted {
             self.live += 1;
         }
-        slime_root::diagnostic_println!(
+        crate::diagnostic_println!(
             "SLIME_MEM adaptive incarnation instance={} entitlement={} live={} admitted={} cause={}",
             instance,
             token.as_str(),
@@ -243,7 +243,7 @@ impl<'a> AdaptivePolicy<'a> {
         base: usize,
     ) {
         let Some(binding) = binding else {
-            slime_root::diagnostic_println!(
+            crate::diagnostic_println!(
                 "SLIME_MEM entitlement task={} instance={} entitlement=none incarnation=0 guarantee=0 maximum=0 mode=none installed=0 base=0x0",
                 id.0,
                 instance,
@@ -254,7 +254,7 @@ impl<'a> AdaptivePolicy<'a> {
             .policy
             .entitlement(binding.entitlement)
             .map(|entitlement| EntitlementToken::new(&entitlement.identity));
-        slime_root::diagnostic_println!(
+        crate::diagnostic_println!(
             "SLIME_MEM entitlement task={} instance={} entitlement={} incarnation={} guarantee={} maximum={} mode={} installed={} base={:#x}",
             id.0,
             instance,
@@ -340,7 +340,7 @@ impl<'a> AdaptivePolicy<'a> {
         let committed = self.ledger.entitlement_pages(binding.entitlement);
         let pool = self.ledger.available().bytes;
         match outcome {
-            Ok(()) => slime_root::diagnostic_println!(
+            Ok(()) => crate::diagnostic_println!(
                 "SLIME_MEM adaptive grant task={} instance={} entitlement={} delta={} previous={} pages={} guaranteed={} elastic={} entitlement_committed={} pool_bytes={} base={:#x}",
                 id.0,
                 instance,
@@ -354,7 +354,7 @@ impl<'a> AdaptivePolicy<'a> {
                 pool,
                 base,
             ),
-            Err(error) => slime_root::diagnostic_println!(
+            Err(error) => crate::diagnostic_println!(
                 "SLIME_MEM adaptive refused task={} instance={} entitlement={} delta={} pages={} cause={} entitlement_committed={} pool_bytes={}",
                 id.0,
                 instance,
@@ -387,7 +387,7 @@ impl<'a> AdaptivePolicy<'a> {
     ) {
         let (resource, required, available) = error.limit();
         let inventory = allocator.elastic_inventory();
-        slime_root::diagnostic_println!(
+        crate::diagnostic_println!(
             "SLIME_MEM adaptive limit task={} instance={} delta={} resource={} required={} available={} ledger_pool={} inventory_bytes={} inventory_slots={} largest_block={}",
             id.0,
             instance,
@@ -400,7 +400,7 @@ impl<'a> AdaptivePolicy<'a> {
             inventory.slots,
             allocator.largest_aligned_ordinary_block(),
         );
-        slime_root::diagnostic_println!(
+        crate::diagnostic_println!(
             "SLIME_MEM funding reserve={} root_owned={} system_owned={} common_held={} inventory_bytes={}",
             self.ledger.operational_reserve().bytes,
             self.ledger.root_owned().bytes,
@@ -408,7 +408,7 @@ impl<'a> AdaptivePolicy<'a> {
             self.ledger.common_held().bytes,
             inventory.bytes,
         );
-        slime_root::diagnostic_println!(
+        crate::diagnostic_println!(
             "SLIME_MEM operational remaining={} spent={}",
             self.ledger.remaining_operational_reserve().bytes,
             self.ledger.operational_spent().bytes,
@@ -424,7 +424,7 @@ impl<'a> AdaptivePolicy<'a> {
     /// transcript that said "reservation" instead would describe the symptom.
     /// A zero delta is a size query and still answers.
     pub fn refuse_unbound(&self, id: TaskId, instance: &str, delta: usize, pages: usize) {
-        slime_root::diagnostic_println!(
+        crate::diagnostic_println!(
             "SLIME_MEM adaptive refused task={} instance={} entitlement=none delta={} pages={} cause=entitlement entitlement_committed=0 pool_bytes={}",
             id.0,
             instance,
@@ -472,7 +472,7 @@ impl<'a> AdaptivePolicy<'a> {
             self.live = self.live.saturating_sub(1);
         }
         let token = self.token_for(binding.entitlement);
-        slime_root::diagnostic_println!(
+        crate::diagnostic_println!(
             "SLIME_MEM adaptive retired task={} instance={} entitlement={} returned_pages={} entitlement_committed={} quarantined={}",
             id.0,
             instance,
@@ -509,13 +509,13 @@ impl AdmissionFailure {
             Self::Unfundable {
                 required,
                 available,
-            } => slime_root::diagnostic_println!(
+            } => crate::diagnostic_println!(
                 "SLIME_MEM FAIL adaptive guarantee exceeds inventory required={required} available={available} published=0"
             ),
-            Self::Window { pages, limit } => slime_root::diagnostic_println!(
+            Self::Window { pages, limit } => crate::diagnostic_println!(
                 "SLIME_MEM FAIL adaptive maximum exceeds window pages={pages} limit={limit} published=0"
             ),
-            other => slime_root::diagnostic_println!(
+            other => crate::diagnostic_println!(
                 "SLIME_MEM FAIL adaptive guarantee exceeds inventory required=0 available=0 published=0 detail={other:?}"
             ),
         }

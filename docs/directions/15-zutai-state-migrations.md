@@ -21,7 +21,7 @@ state.
 A migration is attached to a schema version pair (v1→v2) as a pure
 Zutai function from old binding bytes to new binding bytes. Pure means:
 no clock, no entropy, no I/O — the same determinism discipline
-[D3 deterministic-component authority](../../roadmap/08-native-development.md#deterministic-component-authority) defines, enforced here
+[D3 deterministic-component authority](../plans/native-development.md#deterministic-component-authority) defines, enforced here
 by the evaluator rather than by grants.
 
 Dry-run: the builder (or a host tool) applies the migration to a fixture

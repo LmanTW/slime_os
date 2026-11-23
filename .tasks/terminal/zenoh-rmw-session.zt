@@ -1,0 +1,86 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a1cb73-ab5b-7711-8c1a-2a033f84b417" "zenoh-rmw-session" "zenoh-transport"
+  "Zenoh Profile 0 holds a session with an rmw_zenoh peer: aliases, queryables and liveliness tokens"
+  "A ROS 2 Kilted node that uses rmw_zenoh_cpp 0.6.10 (zenoh 1.10.1) opens a Zenoh session and declares its graph before it publishes: up to 22 key-expression aliases, 9 queryables, one subscriber on its own admin space, and 12 liveliness tokens under `@ros2_lv`. Profile 0 refuses each of those declarations, and refuses the INIT extensions the peer sends, so no rmw_zenoh peer can hold a session with a Slime node. Three sessions of that peer were captured once against a Profile 0 listener with no router, and they show that a direct link without a router or gossip is enough for the peer's `ros2 topic list` to see the node.")
+  with {
+    intent = #active;
+    owns = {
+      "components/lib/src/zenoh_profile0*";
+      "components/lib/src/zenoh_rmw*";
+      "components/lib/src/lib.rs";
+      "contracts/zenoh-rmw-session/**";
+      "scripts/generate/generate-zenoh-rmw-bindings.py";
+    };
+    nonGoals = {
+      h.nonGoal "Reading a liveliness token into a graph: the codec for `@ros2_lv` keys, the QoS substring and name mangling, and the graph cache belong to the follow-up item `zenoh-rmw-graph`." h.agentDefault;
+      h.nonGoal "Declaring or answering anything for the peer. The session accepts the peer's declarations and sends no declaration, token or query reply of its own." h.agentDefault;
+      h.nonGoal "Answering a queryable, a query or an INTEREST. The session accepts and records the declaration and nothing else." h.agentDefault;
+      h.nonGoal "The probe connection the peer opens first: it carries an INTEREST on `@ros2_lv/0/**` and ends with no CLOSE, and this item does not judge it." h.agentDefault;
+      h.nonGoal "A router, scouting, gossip, a client peer, and any peer other than rmw_zenoh_cpp 0.6.10 on zenoh 1.10.1." h.agentDefault;
+      h.nonGoal "ROS 2 services, actions and a native subscriber token: the captured sessions hold one subscriber token and no service client." h.agentDefault;
+      h.nonGoal "Changing what the default configuration refuses. The graph is opt-in, and every pinned refusal of the stock-peer and undeclare exams keeps its name, class and bytes." h.agentDefault;
+      h.nonGoal "A session batch above 512 bytes. The listener announced 512 and the peer sent at most 487; a peer that ignores the announcement is not judged." h.agentDefault;
+      h.nonGoal "Running the peer in CI. The capture is replayed from bytes; building the peer from nix-ros-overlay takes about 40 minutes and is an explicit local experiment." h.agentDefault;
+    };
+    requirements = {
+      h.req "replays-every-captured-batch"
+        "A listener session configured for the graph takes each of the 60 batches the three rmw_zenoh nodes sent, in capture order, and no replay is refused."
+        { "zenoh_rmw_check"; };
+      h.req "counts-equal-the-bytes"
+        "For each node, the session reports the same count of aliases, subscribers, queryables, tokens, undeclarations and pushes that the host reference reads from the captured bytes."
+        { "zenoh_rmw_check"; };
+      h.req "reference-writes-the-capture"
+        "The host reference writes each of the 51 captured frames again byte for byte from the fields it read, a PUSH included, and the captured bytes match a pinned digest."
+        { "zenoh_rmw_check"; };
+      h.req "listener-announces-512"
+        "For each node, the listener's INIT_ACK announces a batch of 512 bytes, carries no extension and offers the cookie the peer's OPEN_SYN echoes."
+        { "zenoh_rmw_check"; };
+      h.req "listener-sends-no-reply"
+        "After the OPEN_ACK, the listener sends 0 bytes for each of the three captured sessions."
+        { "zenoh_rmw_check"; };
+      h.req "bounds-keys-at-253"
+        "A graph configuration takes a key of 253 bytes, the longest the peer declared, and refuses a key of 254 bytes as over the bound."
+        { "zenoh_rmw_check"; };
+      h.req "refuses-what-it-must"
+        "The session refuses eleven named variants of what the peer sent, each as the pinned class: three by the default configuration, which keeps the graph opt-in, and eight by a graph configuration."
+        { "zenoh_rmw_check"; };
+      h.req "controls-are-refused"
+        "The judge refuses 182 corrupted records before it judges the real run."
+        { "zenoh_rmw_check"; };
+      h.req "neighbours-pass-unchanged"
+        "The stock corpus, the stock-peer exam and the undeclare exam pass unchanged beside the new slice."
+        { "zenoh_rmw_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_rmw_check" {
+        h.count "casesObserved" 75;
+        h.count "negativeControlsRefused" 182;
+      };
+    };
+    decisions = {
+      h.decided "graph-is-opt-in"
+        "Queryable, token and alias declarations, the INIT extensions, and a push to a key the session never subscribed to are taken only by a session whose parameters enable the graph."
+        "the stock-peer and subscribers exams pin each of those as a refusal, and a planning item cannot edit them, so a default that changed would stale both exams"
+        h.agentDefault
+        { "refuses-what-it-must"; "neighbours-pass-unchanged"; };
+      h.decided "declarations-are-recorded-not-answered"
+        "The session accepts a queryable or token declaration, keeps it in a bounded table, and sends nothing in reply."
+        "the peer needed no reply to any declaration in the three captures, and answering one is the follow-up item's graph work"
+        h.agentDefault
+        { "replays-every-captured-batch"; };
+      h.decided "announce-512"
+        "The listener announces a 512-byte batch in its INIT_ACK and relies on the peer to stay within it."
+        "the peer sent at most 487 bytes in every capture after the announcement, where it had sent up to 2001 bytes when the listener announced 65535"
+        h.agentDefault
+        { "replays-every-captured-batch"; };
+      h.decided "two-planning-prs"
+        "The session, and the token and graph semantics, are two items in two planning pull requests; this one is the first."
+        "the first needs the decoder and session to take new declarations, and the second needs a codec and a graph cache that read what the first records"
+        h.agentDefault
+        { "replays-every-captured-batch"; };
+    };
+  };
+
+item

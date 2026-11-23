@@ -14,11 +14,11 @@ default the fetched evidence ref), the author and the approvals on the
 current head; `--forge` reads the last three from the code host. Equal
 inputs give an equal verdict, locally, for an agent and in CI.
 
-The judge's code is the base commit's. CI extracts `lib.JUDGE_PATHS` from
-the base commit and runs that copy with `SPEC_ROOT` naming the head
+The judge's code is the base commit's. CI extracts `lib.JUDGE_PATHS` and
+`REVIEW_AGENTS` from the base commit and runs that copy with `SPEC_ROOT` naming the head
 checkout and `SPEC_JUDGE=base`, so a pull request cannot rewrite the
-judge, `HUMAN_OWNERS`, `AGENT_ACCOUNTS` or `specs/allowed_signers` that
-judge it. Run from a checkout with `--base`, this script hands over to
+judge, `HUMAN_OWNERS`, `AGENT_ACCOUNTS`, `REVIEW_AGENTS` or
+`specs/allowed_signers` that judge it. Run from a checkout with `--base`, this script hands over to
 the base copy the same way; that hand-off is a convenience, because a
 head that rewrites this file also rewrites the hand-off. A base without
 a judge runs the head's code and says so.
@@ -26,9 +26,13 @@ a judge runs the head's code and says so.
 Rules: V1 class (every changed path has a class, and one class per pull
 request), V2 planning first (`owns` of an item on base that is #active on
 head covers every implementation path), V3 no self-grading, V4 grader
-approval, V5 legal intent, V6 closeout by witness, V7 backlog first, V9
-provenance (warning), V10 frozen area requirements. `--report` prints the
-verdict and exits 0.
+approval, V5 legal intent, V6 closeout by witness, V7 backlog first, V8 R4
+floor (a bound target's floor on `negativeControlsRefused` drops only with a
+known limit added in the same pull request), V9 provenance (warning), V10
+frozen area requirements, V11 independent review (every pull request but a
+closeout has an approval on its head from `HUMAN_OWNERS` or `REVIEW_AGENTS`,
+and that approval also satisfies V4 and V5). `--report` prints the verdict
+and exits 0.
 """
 
 from __future__ import annotations
@@ -56,9 +60,9 @@ DERIVED = (
     "contracts/system-test-run/v2/runs/",
 )
 PROCESS = (".github/", "docs/", ".agents/", ".claude/", "scripts/spec/", "roadmap/", ".devloop/", "contracts/task/", "contracts/observation/")
-PROCESS_FILES = ("HUMAN_OWNERS", "AGENT_ACCOUNTS", "specs/allowed_signers", "specs/targets.toml", "specs/schema.zt", "specs/helpers.zt", "specs/legacy.zt")
+PROCESS_FILES = ("HUMAN_OWNERS", "AGENT_ACCOUNTS", rules.REVIEW_AGENTS, "specs/allowed_signers", "specs/targets.toml", "specs/schema.zt", "specs/helpers.zt", "specs/legacy.zt")
 APPROVED_PATHS = ("scripts/spec/", "contracts/task/", "contracts/observation/")
-APPROVED_FILES = ("HUMAN_OWNERS", "AGENT_ACCOUNTS", "specs/allowed_signers")
+APPROVED_FILES = ("HUMAN_OWNERS", "AGENT_ACCOUNTS", rules.REVIEW_AGENTS, "specs/allowed_signers")
 IMPLEMENTATION = (
     "components/", "slime-root/", "boot-contracts/", "contracts/", "scripts/build/", "scripts/generate/",
     "scripts/tools/", "sdk/", "tools/", "sel4/", "deps/", "nix/", "evidence/", "verification/", "assets/",
@@ -75,7 +79,7 @@ def from_base(base: str, argv: list[str]) -> int | None:
     if os.environ.get("SPEC_JUDGE") == "base" or lib.read_blob(base, "scripts/spec/check") is None:
         return None
     with tempfile.TemporaryDirectory(prefix="slime-spec-judge-") as temporary:
-        lib.extract(base, list(lib.JUDGE_PATHS), Path(temporary))
+        lib.extract(base, [*lib.JUDGE_PATHS, rules.REVIEW_AGENTS], Path(temporary))
         env = os.environ | {"SPEC_ROOT": str(lib.ROOT), "SPEC_JUDGE": "base"}
         return subprocess.run([sys.executable, str(Path(temporary) / "scripts" / "spec" / "check"), *argv], env=env, check=False).returncode
 
@@ -139,7 +143,11 @@ def judge_sides(args: argparse.Namespace, base_sha: str, base: Side, head: Side,
     newly = head.bound - base.bound
     base_grader = base.grader_files(base.bound)
     promised_grader = base.grader_files(base.promised)
-    head_new_grader = head.grader_files(newly)
+    # A file that this pull request adds is a grader when a target bound on
+    # head reads it. `joined` holds those that a target bound on base reads.
+    head_grader = head.grader_files(head.bound)
+    joined = head.grader_files(base.bound & head.bound)
+    joined_promised = head.grader_files(base.promised & head.bound)
     base_items = {i.id: i for i in base.items}
     added_items = {i.id for i in head.items if i.id not in base_items}
 
@@ -166,12 +174,16 @@ def judge_sides(args: argparse.Namespace, base_sha: str, base: Side, head: Side,
             continue
         for path in sorted(paths):
             once = status if status != "R" else ("D" if path == old else "A")
-            classes[path] = classify(path, once, base, head, base_grader, head_new_grader, just_classes, intent_only, findings)
+            classes[path] = classify(path, once, base, head, base_grader, head_grader, just_classes, intent_only, findings)
         for path in paths:
             if path in base_grader and status in {"M", "D", "R"}:
                 findings.needs_approval("V4", f"{path} is in the grader set of a bound target")
                 if path in promised_grader and not added_items:
                     findings.error("V4", f"{path} grades a promise; change it from a new item")
+            elif status == "A" and path in joined:
+                findings.needs_approval("V4", f"{path} joins the grader set of a bound target")
+                if path in joined_promised and not added_items:
+                    findings.error("V4", f"{path} joins the graders of a promise; add it from a new item")
             if path.startswith(APPROVED_PATHS) or path in APPROVED_FILES:
                 findings.needs_approval("V4", f"{path} is part of the judge")
             if path.startswith("contracts/") and path.endswith("/schema.zt") and status != "A":
@@ -199,11 +211,14 @@ def judge_sides(args: argparse.Namespace, base_sha: str, base: Side, head: Side,
     rules.check_transitions(base.items, head.items, findings)
     rules.check_backlog(base.items, head.items, lambda: failing_promises(head), findings)
     rules.check_frozen_areas(base.areas, head.areas, findings)
+    rules.check_control_floor(base.items, base.areas, head.items, head.areas, findings)
     approvers = {a.strip() for a in args.approvers.split(",") if a.strip()}
-    rules.judge_approvals(findings, args.author, approvers, set(lib.names(lib.ROOT / "HUMAN_OWNERS")))
+    # V11 exempts a closeout, which V6 judges from a signed witness, and a head
+    # that changes no path.
+    rules.judge_approvals(findings, args.author, approvers, set(lib.names(lib.ROOT / "HUMAN_OWNERS")), reviewable=bool(rows) and kind != "closeout")
 
 
-def classify(path, status, base, head, base_grader, head_new_grader, just_classes, intent_only, findings) -> set[str]:
+def classify(path, status, base, head, base_grader, head_grader, just_classes, intent_only, findings) -> set[str]:
     if path.startswith(DERIVED):
         return {"derived"}
     if path.startswith((".tasks/items/", ".tasks/terminal/")) and path.endswith(".zt") and Path(path).name not in lib.ITEM_SOURCES:
@@ -225,9 +240,13 @@ def classify(path, status, base, head, base_grader, head_new_grader, just_classe
         return {"planning"}
     if path == "Justfile" or path.startswith("just/"):
         return set(just_classes) or {"neutral"}
+    # A grader file is an exam wherever it lives: a generator that a bound
+    # recipe runs with --check grades that target as a checker does. An added
+    # file is one when any target bound on head reads it, a target that base
+    # already bound included: a module that an existing checker now imports.
+    if path in base_grader or (status == "A" and path in head_grader):
+        return {"planning"}
     if path.startswith(("scripts/check/", "scripts/lib/")):
-        if path in base_grader or (status == "A" and path in head_new_grader):
-            return {"planning"}
         return {"process"}
     if path.startswith("contracts/") and path.endswith("/schema.zt"):
         return {"planning"} if status == "A" else {"implementation"}

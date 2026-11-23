@@ -15,8 +15,8 @@ Scope, stated exactly rather than as "GitHub's rules":
   code contributes its *literal* text: `` `release_trust_check` `` keeps its
   underscores, because they are code, not emphasis.
 * **Duplicates** take an incrementing suffix in document order — the second
-  `## Verification` is `#verification-1`. 39 slugs repeat in this repository's
-  roadmap files, so this is load-bearing rather than hypothetical.
+  `## Verification` is `#verification-1`. Slugs repeat in this repository's
+  `docs/plans/` pages, so this is load-bearing rather than hypothetical.
 * **Explicit anchors** are `<a id="…">` and `<a name="…">`, used to retain an
   address a heading no longer produces.
 

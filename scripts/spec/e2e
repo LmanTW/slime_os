@@ -5,8 +5,8 @@
 
 Builds a fresh Git repository from this checkout's scripts/spec, the task
 and observation contracts and the area schema, with one area, a Justfile,
-a product directory, two signing keys and two HUMAN_OWNERS. It then walks
-the exit fixtures of devloop-v1.5-bootstrap:
+a product directory, two signing keys, two HUMAN_OWNERS and one account in
+REVIEW_AGENTS. It then walks the exit fixtures of devloop-v1.5-bootstrap:
 
   M1  an area target gets a signed record on the evidence branch; a
       #planned item's target is not claimed and a planning merge records
@@ -15,10 +15,20 @@ the exit fixtures of devloop-v1.5-bootstrap:
   M2  refused: a pull request carrying a checker and product code, one its
       author approved alone, one that rewrites scripts/spec/check to pass
       itself, one touching an unlisted path, and product code no #active
-      item owns.
+      item owns. Also refused (V11): a head with no review, one a stranger
+      approved, one the review agent opened and approved, and one approved
+      by an account the pull request itself adds to REVIEW_AGENTS.
+  R4  refused (V8): an item that lowers its floor on negativeControlsRefused,
+      one that removes the predicate, one that moves the predicate to an
+      advisory acceptance, and one that lowers the floor again under a known
+      limit an earlier pull request added. A lowering that adds
+      an R4 known limit passes with a review and is refused (V4) without one.
   M3  planning -> implementation -> closeout with no re-record; the closeout
       still passes after main moves past the witness; a missing or forged
       witness and an edited terminal item are refused.
+
+Last, `publish` refuses a local evidence branch that is behind the fetched
+one or has another history, and accepts one that equals it or is ahead.
 
 Every negative control has a positive twin in the same walk. Reports
 `casesObserved` and `negativeControlsRefused` through the gate protocol
@@ -41,6 +51,7 @@ ROOT = HERE.parents[1]
 sys.dont_write_bytecode = True  # scripts/spec is under codePaths; no ignored bytes beside it
 sys.path.insert(0, str(HERE))
 import lib  # noqa: E402
+import rules  # noqa: E402
 
 PASSED: list[str] = []
 FAILED: list[str] = []
@@ -85,7 +96,12 @@ area
 
 JUSTFILE = '''area_exam:
     python3 scripts/check/area-exam.py
+    python3 scripts/generate/area-gen.py --check
 '''
+
+# A generator that a bound recipe runs: a grader file outside scripts/check/
+# and scripts/lib/.
+GENERATOR = "import sys\nsys.exit(0)\n"
 
 FEATURE_RECIPE = '''
 feature_exam:
@@ -94,17 +110,24 @@ feature_exam:
 
 FEATURE = "01a1c4a0-e2e0-7000-8000-0000000000f1"
 BUG = "01a1c4a0-e2e0-7000-8000-0000000000b1"
+GENERATED = "01a1c4a0-e2e0-7000-8000-0000000000c1"
+MODULE = "01a1c4a0-e2e0-7000-8000-0000000000c2"
 MILESTONE = "01a1c4a0-e2e0-7000-8000-0000000000a1"
+# The fixture's one account in REVIEW_AGENTS. `Fixture.check` gives its approval
+# by default, as a reviewed head has; a control that needs an unreviewed head
+# passes "".
+REVIEWER = "review-bot"
 
 
-def item(kind: str, uid: str, slug: str, intent: str = "planned", target: str = "feature_exam", extra: str = "") -> str:
+def item(kind: str, uid: str, slug: str, intent: str = "planned", target: str = "feature_exam", extra: str = "", controls: int | None = 2, more: str = "") -> str:
+    floor = "" if controls is None else f' h.atLeast "negativeControlsRefused" {controls};'
     return f'''s ::= import "./schema.zt";
 h ::= import "./helpers.zt";
 item :: s.Item = (h.{kind} "{uid}" "{slug}" "e2e" "Fixture {slug}" "The e2e fixture item {slug}.") with {{
   intent = #{intent};
   owns = {{ "components/e2e/**"; }};
   requirements = {{ (h.req "cases" "The exam observes three cases." {{ "{target}"; }}) with {{ provenance = h.fromHuman "three cases, each one a refusal" "docs/e2e.md"; }}; }};
-  acceptance = {{ h.observedWhere "{target}" {{ h.count "casesObserved" 3; h.atLeast "negativeControlsRefused" 1; }}; }};
+  acceptance = {{ h.observedWhere "{target}" {{ h.count "casesObserved" 3;{floor} }}; {more} }};
   {extra}
 }};
 item
@@ -137,12 +160,12 @@ class Fixture:
     def spec(self, tool: str, *args: str) -> subprocess.CompletedProcess:
         return self.run(sys.executable, str(self.root / "scripts" / "spec" / tool), *args, check=False)
 
-    def check(self, base: str = "main", author: str = "dev", approvers: str = "", *extra: str) -> subprocess.CompletedProcess:
+    def check(self, base: str = "main", author: str = "dev", approvers: str = REVIEWER, *extra: str) -> subprocess.CompletedProcess:
         """Judge HEAD as CI does: the judge is extracted from `base`, never run from the head."""
         judge = self.root.parent / "judge"
         shutil.rmtree(judge, ignore_errors=True)
         judge.mkdir()
-        archive = subprocess.run(["git", "archive", base, *lib.JUDGE_PATHS], cwd=self.root, capture_output=True, check=True).stdout
+        archive = subprocess.run(["git", "archive", base, *lib.JUDGE_PATHS, rules.REVIEW_AGENTS], cwd=self.root, capture_output=True, check=True).stdout
         subprocess.run(["tar", "-x", "-C", str(judge)], input=archive, check=True)
         env = self.env | {"SPEC_ROOT": str(self.root), "SPEC_JUDGE": "base"}
         command = [sys.executable, str(judge / "scripts" / "spec" / "check"), "--base", base, "--author", author, "--approvers", approvers, *extra]
@@ -195,10 +218,12 @@ def build(root: Path, keys: Path) -> Fixture:
     fixture.write("specs/allowed_signers", "\n".join(signers) + "\n")
     fixture.write("HUMAN_OWNERS", "owner\nsecond\n")
     fixture.write("AGENT_ACCOUNTS", "# none yet\n")
+    fixture.write(rules.REVIEW_AGENTS, f"{REVIEWER}\n")
     fixture.write("specs/e2e.zt", AREA)
     fixture.write("docs/e2e.md", "# Fixture\n")
     fixture.write("scripts/lib/e2e_judge.py", "CASES = 3\n")
     fixture.write("scripts/check/area-exam.py", EXAM)
+    fixture.write("scripts/generate/area-gen.py", GENERATOR)
     fixture.write("components/e2e/lib.rs", "// product\n")
     fixture.write("Justfile", JUSTFILE)
     fixture.write(".gitignore", "build/\n__pycache__/\n")
@@ -207,9 +232,32 @@ def build(root: Path, keys: Path) -> Fixture:
     return fixture
 
 
+def plan_hosts(f: Fixture) -> None:
+    """`ci --plan` gives each shard the host class `specs/targets.toml` lists its targets under."""
+    facts = f.root / "specs" / "targets.toml"
+
+    def shards() -> tuple[list, str]:
+        done = f.spec("ci", "--plan", "4")
+        try:
+            return json.loads(done.stdout), done.stdout + done.stderr
+        except json.JSONDecodeError:
+            return [], done.stdout + done.stderr
+
+    rows, detail = shards()
+    ok(rows == [{"shard": "0", "host": "aarch64", "targets": "area_exam"}], "an unlisted target is planned on the aarch64 host class", detail)
+    f.write("specs/targets.toml", '[host]\nx86_64 = ["area_exam"]\n')
+    rows, detail = shards()
+    ok(rows == [{"shard": "0", "host": "x86_64", "targets": "area_exam"}], "a target listed under a host class is planned on that class", detail)
+    f.write("specs/targets.toml", '[host]\nx86_64 = ["area_exam"]\nriscv64 = ["area_exam"]\n')
+    done = f.spec("ci", "--plan", "4")
+    ok(done.returncode != 0 and "under" in done.stdout + done.stderr, "a target listed under two host classes is refused", done.stdout + done.stderr)
+    facts.unlink()
+
+
 def m1_planning(f: Fixture) -> None:
     done = f.spec("check")
     ok(done.returncode == 0, "check passes on the fixture", done.stdout + done.stderr)
+    plan_hosts(f)
     done = f.spec("ci", "--signer", "ci", "--key", f.sign_key("ci"))
     ok(done.returncode == 0 and f.records("area_exam") == 1, "an area target gets a record on the evidence branch", done.stdout + done.stderr)
     listing = f.run("git", "ls-tree", "--name-only", "refs/heads/evidence:area_exam", check=False).stdout.split()
@@ -235,9 +283,11 @@ def m1_planning(f: Fixture) -> None:
     f.branch("cancel")
     f.write(".tasks/items/feature-a.zt", item("task", FEATURE, "feature-a", intent="cancelled"))
     f.commit("cancel")
-    refused(f.check(), "V4", "entering #cancelled without an approval")
+    refused(f.check("main", "dev", ""), "V4", "entering #cancelled without an approval")
     done = f.check("main", "dev", "owner")
     ok(done.returncode == 0, "entering #cancelled with an owner's approval passes", done.stdout + done.stderr)
+    done = f.check()
+    ok(done.returncode == 0, "entering #cancelled with the review agent's approval passes", done.stdout + done.stderr)
 
     f.branch("backlog-base")
     f.write(".tasks/items/open-bug.zt", item("bug", BUG, "open-bug", target="area_exam"))
@@ -273,12 +323,72 @@ def m2_classes(f: Fixture) -> None:
     refused(f.check("main", "owner", "owner"), "V4", "a grader change its author approved alone")
     done = f.check("main", "owner", "second")
     ok(done.returncode == 0 and "class: planning" in done.stdout, "the same change approved by another owner passes", done.stdout + done.stderr)
+    done = f.check("main", "owner", REVIEWER)
+    ok(done.returncode == 0 and "class: planning" in done.stdout, "the same change approved by the review agent passes", done.stdout + done.stderr)
+    refused(f.check("main", REVIEWER, REVIEWER), "V4", "a grader change the review agent opened and approved")
+
+    f.branch("generator-unplanned")
+    f.write("scripts/generate/area-gen.py", GENERATOR + "# weaker\n")
+    f.commit("generator change")
+    refused(f.check(), "V4", "a change of a generator that grades a promise, from no new item")
+
+    f.branch("generator-mixed")
+    f.write("scripts/generate/area-gen.py", GENERATOR + "# weaker\n")
+    f.write("components/e2e/lib.rs", "// product and generator together\n")
+    f.commit("generator and product")
+    refused(f.check(), "V1", "a pull request carrying a generator in a grader set and product code")
+
+    f.branch("generator-planned")
+    f.write("scripts/generate/area-gen.py", GENERATOR + "# another row\n")
+    f.write(".tasks/items/generated-a.zt", item("task", GENERATED, "generated-a", target="area_exam"))
+    f.commit("plan a generator change")
+    done = f.check()
+    ok(done.returncode == 0 and "class: planning" in done.stdout, "a generator in a grader set changes from a new item", done.stdout + done.stderr)
+
+    f.branch("grader-module-planned")
+    f.write("scripts/lib/e2e_cases.py", "EXTRA = 0\n")
+    f.write("scripts/check/area-exam.py", EXAM.replace("import e2e_judge\n", "import e2e_cases\nimport e2e_judge\n"))
+    f.write(".tasks/items/generated-b.zt", item("task", MODULE, "generated-b", target="area_exam"))
+    f.commit("plan a checker that imports a new module")
+    done = f.check()
+    ok(done.returncode == 0 and "class: planning" in done.stdout, "a new module that a bound checker imports is a grader, from a new item", done.stdout + done.stderr)
+    refused(f.check("main", "owner", "owner"), "V4", "a new grader module its author approved alone")
+
+    f.branch("grader-module-mixed")
+    f.write("scripts/lib/e2e_cases.py", "EXTRA = 0\n")
+    f.write("scripts/check/area-exam.py", EXAM.replace("import e2e_judge\n", "import e2e_cases\nimport e2e_judge\n"))
+    f.write(".tasks/items/generated-b.zt", item("task", MODULE, "generated-b", target="area_exam"))
+    f.write("components/e2e/lib.rs", "// product and a new grader module together\n")
+    f.commit("a new grader module and product")
+    refused(f.check(), "V1", "a pull request carrying a new grader module and product code")
+
+    f.branch("module-no-grader-reads")
+    f.write("scripts/lib/e2e_unread.py", "UNREAD = 0\n")
+    f.commit("a module that no bound checker imports")
+    done = f.check()
+    ok(done.returncode == 0 and "class: process" in done.stdout, "a new module that no bound checker imports stays process", done.stdout + done.stderr)
 
     f.branch("judge-rewrite")
     judge = f.root / "scripts" / "spec" / "check"
     judge.write_text(judge.read_text().replace("def main() -> int:\n", "def main() -> int:\n    return 0\n", 1))
     f.commit("make the judge pass")
-    refused(f.check(), "V4", "a pull request rewriting scripts/spec/check to pass itself")
+    refused(f.check("main", "dev", ""), "V4", "a pull request rewriting scripts/spec/check to pass itself")
+
+    f.branch("unreviewed")
+    f.write("docs/e2e.md", "# Fixture\n\nA process change.\n")
+    f.commit("docs")
+    refused(f.check("main", "dev", ""), "V11", "a pull request with no review of its head")
+    refused(f.check("main", "dev", "stranger"), "V11", "a pull request approved by an account in neither list")
+    refused(f.check("main", REVIEWER, REVIEWER), "V11", "a pull request the review agent opened and approved")
+    done = f.check()
+    ok(done.returncode == 0 and "class: process" in done.stdout, "the same pull request with the review agent's approval passes", done.stdout + done.stderr)
+    done = f.check("main", "dev", "owner")
+    ok(done.returncode == 0, "the same pull request with an owner's approval passes", done.stdout + done.stderr)
+
+    f.branch("self-listed")
+    f.write(rules.REVIEW_AGENTS, f"{REVIEWER}\nsneaky\n")
+    f.commit("list a review agent")
+    refused(f.check("main", "dev", "sneaky"), "V11", "a pull request approved by an account it adds to REVIEW_AGENTS")
 
     f.branch("unlisted")
     f.write("weird/thing.txt", "?\n")
@@ -289,6 +399,48 @@ def m2_classes(f: Fixture) -> None:
     f.write("components/other/lib.rs", "// nobody owns this\n")
     f.commit("unowned product code")
     refused(f.check(), "V2", "product code no #active item owns")
+    f.run("git", "checkout", "-q", "main")
+
+
+LIMIT = 'knownLimits = { h.knownLimit "feature_exam" "Two controls became one." h.agentDefault; };'
+
+
+def r4_floor(f: Fixture) -> None:
+    """feature-a is #planned on main with a floor of 2 on feature_exam."""
+    path = ".tasks/items/feature-a.zt"
+    f.branch("lower-floor")
+    f.write(path, item("task", FEATURE, "feature-a", controls=1))
+    f.commit("lower the control floor")
+    refused(f.check(), "V8", "an item that lowers its floor on negativeControlsRefused")
+
+    f.branch("drop-floor")
+    f.write(path, item("task", FEATURE, "feature-a", controls=None))
+    f.commit("drop the control predicate")
+    refused(f.check(), "V8", "an item that removes its negativeControlsRefused predicate")
+
+    f.branch("advisory-floor")
+    advisory = 'h.advisory (h.observedAs "floor" "feature_exam" { h.atLeast "negativeControlsRefused" 2; });'
+    f.write(path, item("task", FEATURE, "feature-a", controls=None, more=advisory))
+    f.commit("move the control floor to an advisory acceptance")
+    refused(f.check(), "V8", "an item that moves its floor to an advisory acceptance")
+
+    f.branch("raise-floor")
+    f.write(path, item("task", FEATURE, "feature-a", controls=3))
+    f.commit("raise the control floor")
+    done = f.check()
+    ok(done.returncode == 0 and "class: planning" in done.stdout, "an item that raises its floor passes", done.stdout + done.stderr)
+
+    f.branch("limited-floor")
+    f.write(path, item("task", FEATURE, "feature-a", controls=1, extra=LIMIT))
+    f.commit("lower the control floor under a known limit")
+    refused(f.check("main", "dev", ""), "V4", "an R4 known limit without a review")
+    done = f.check()
+    ok(done.returncode == 0 and "class: planning" in done.stdout, "a lowered floor with an R4 known limit and a review passes", done.stdout + done.stderr)
+
+    f.branch("limited-again", "limited-floor")
+    f.write(path, item("task", FEATURE, "feature-a", controls=0, extra=LIMIT))
+    f.commit("lower the control floor again")
+    refused(f.check("limited-floor"), "V8", "a second lowering under a known limit an earlier pull request added")
     f.run("git", "checkout", "-q", "main")
 
 
@@ -317,8 +469,8 @@ def m3_closeout(f: Fixture) -> None:
     done = f.spec("closeout", "--forge", "local", "--dry-run")
     ok("closeout/feature-a" in done.stdout, "the closeout bot prepares one move", done.stdout + done.stderr)
     f.run("git", "checkout", "-q", "closeout/feature-a")
-    done = f.check()
-    ok(done.returncode == 0 and "class: closeout" in done.stdout, "the closeout pull request passes after main moved past the witness", done.stdout + done.stderr)
+    done = f.check("main", "dev", "")
+    ok(done.returncode == 0 and "class: closeout" in done.stdout, "the closeout pull request passes with no review, after main moved past the witness", done.stdout + done.stderr)
     refused(f.check("main", "dev", "", "--evidence", before_witness), "V6", "a closeout without a done witness")
 
     forged = f.root.parent / "forged" / "done"
@@ -361,6 +513,39 @@ def owners_floor(f: Fixture) -> None:
     f.run("git", "checkout", "-q", "main")
 
 
+def stale_evidence(f: Fixture) -> None:
+    """`publish` against a fetched evidence ref. The fixture has no remote, so the walk sets the ref itself."""
+    fetched = "refs/remotes/origin/evidence"
+
+    def tip() -> str:
+        return f.run("git", "rev-parse", "refs/heads/evidence").stdout.strip()
+
+    def tree() -> str:
+        return f.run("git", "rev-parse", "refs/heads/evidence^{tree}").stdout.strip()
+
+    def publish(label: str, accepted: bool) -> None:
+        done = f.spec("publish")
+        stale = done.returncode != 0 and "does not contain" in done.stderr
+        if accepted:
+            ok(not stale, label, done.stdout + done.stderr)
+        else:
+            ok(stale, f"refuses: {label}", done.stdout + done.stderr)
+            if stale:
+                REFUSED.append(label)
+
+    f.run("git", "update-ref", fetched, tip())
+    publish("publish accepts a local evidence branch equal to the fetched one", True)
+    f.run("git", "update-ref", fetched, f.run("git", "rev-parse", "refs/heads/evidence~1").stdout.strip())
+    publish("publish accepts a local evidence branch ahead of the fetched one", True)
+    ahead = f.run("git", "commit-tree", tree(), "-p", tip(), "-m", "the remote moved").stdout.strip()
+    f.run("git", "update-ref", fetched, ahead)
+    publish("publish on a local evidence branch behind the fetched one", False)
+    other = f.run("git", "commit-tree", tree(), "-m", "another history").stdout.strip()
+    f.run("git", "update-ref", fetched, other)
+    publish("publish on a local evidence branch with another history", False)
+    f.run("git", "update-ref", "-d", fetched)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--keep", action="store_true")
@@ -371,8 +556,10 @@ def main() -> int:
         fixture = build(temporary / "repo", temporary / "keys")
         m1_planning(fixture)
         m2_classes(fixture)
+        r4_floor(fixture)
         m3_closeout(fixture)
         owners_floor(fixture)
+        stale_evidence(fixture)
     finally:
         if args.keep:
             print(f"kept {temporary}")

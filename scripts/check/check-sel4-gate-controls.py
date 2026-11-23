@@ -39,7 +39,8 @@ from sel4_plane import run_plane, verify_image_identity  # noqa: E402
 # silently weaken a gate. Boot-layout fixture equality is controlled separately.
 GATES: tuple[tuple[str, str, int], ...] = (
     ("sel4_channel_plane", "check/check-sel4-channel-plane.py", 18),
-    ("sel4_io_network_plane", "check/check-sel4-io-network-plane.py", 261),
+    # 261 before the rmw_zenoh arm, which declares 24: one admission, a 3-line chain for each of the node and the peer, 16 sample lines and one health marker.
+    ("sel4_io_network_plane", "check/check-sel4-io-network-plane.py", 285),
     # 109 for the product, pwm and mavlink arms, plus the serial arm's 40-marker
     # chain, its probe's 11-line chain and its 2 markers no other arm declares.
     ("sel4_component_graph", "check/check-sel4-component-graph.py", 162),
@@ -238,14 +239,14 @@ def boot_plane_transcript(gate, marker_transcript: str) -> str:
         for component in slices[needle]:
             expanded.append(spawn_line(cursor, component))
             cursor += 1
-    # Only components the gate's *own, unmutated* CHAINS declaration does not
-    # already require an idle-without-role line for: chain 4/5 name nine of
-    # the ten in causal order (readiness before each participant's own
-    # marker). Derived from `gate.CHAINS` rather than from `lines` — `lines`
-    # is this call's possibly-*mutated* transcript, and computing the filter
-    # from it would silently re-add whichever marker the deletion mutation
-    # below just removed, defeating the very test that removal drives. Only
-    # `fabric-proxy` is absent from every chain.
+    # Only components the gate's *own, unmutated* declaration does not already
+    # require an idle-without-role line for: `EXPECTED_UNORDERED` names nine of
+    # the ten, with no order among them. Derived from the gate's declaration
+    # rather than from `lines` — `lines` is this call's possibly-*mutated*
+    # transcript, and computing the filter from it would silently re-add
+    # whichever marker the deletion mutation below just removed, defeating the
+    # very test that removal drives. Only `fabric-proxy` is absent from the
+    # declaration.
     chain_literals = {
         literal_for(pattern) for _, chain in chains_from_gate(gate) for pattern in chain
     }
@@ -442,8 +443,62 @@ def check_gate(name: str, relative_path: str, expected_required: int) -> int:
             ) is None:
                 fail(f"{name}: generic nonzero-exit failure marker misses status {status}")
         evaluated += 1
+        evaluated += boot_plane_order_controls(gate, baseline)
 
     return evaluated + len(failures)
+
+
+def boot_plane_order_controls(gate, baseline: str) -> int:
+    """The ready and idle lines of the call and operation planes carry no order.
+
+    Each worker and each participant is its own task, and fourteen boots of one
+    image printed these lines in four orders. The gate must accept the three
+    that differ from its declaration, and still refuse a transcript that lacks
+    one of the lines. It must also refuse `--no-build`: that option booted
+    with no image path.
+    """
+    lines = baseline.splitlines()
+    unordered = [literal_for(pattern) for pattern in getattr(gate, "EXPECTED_UNORDERED", ())]
+    if len(unordered) != 11 or any(lines.count(line) != 1 for line in unordered):
+        fail("sel4_boot_plane: synthetic transcript does not hold each order-independent line once")
+    call_ready, call = unordered[0], unordered[1:5]
+    operation_ready, operation = unordered[5], unordered[6:]
+    first = min(lines.index(line) for line in unordered)
+    rest = [line for line in lines if line not in unordered]
+
+    def arranged(order: list[str]) -> str:
+        return "\n".join([*rest[:first], *order, *rest[first:]]) + "\n"
+
+    observed = (
+        ("a call ready line after its participants", [operation_ready, *operation, *call, call_ready]),
+        ("an operation ready line after every other line", [*operation, call_ready, *call, operation_ready]),
+        (
+            "two call participants before the operation plane",
+            [*call[2:], operation_ready, *operation, call_ready, *call[:2]],
+        ),
+    )
+    for description, order in observed:
+        if rejects(gate, arranged(order)):
+            fail(f"sel4_boot_plane: rejected an observed order: {description}")
+    # Each refusal starts from an observed order, not the declared one: the
+    # deletion loop of `check_gate` already removes each line from the declared
+    # order.
+    reordered = observed[0][1]
+    refused = 0
+    for line in unordered:
+        if not rejects(gate, arranged([other for other in reordered if other != line])):
+            fail(f"sel4_boot_plane: accepted a reordered transcript that lacks {line!r}")
+        refused += 1
+    script = ROOT / "scripts" / "check" / "check-sel4-boot-plane.py"
+    result = subprocess.run(
+        [_sys.executable, str(script), "--no-build"], cwd=ROOT, capture_output=True, text=True, timeout=30, check=False
+    )
+    if result.returncode != 2 or "unrecognized arguments: --no-build" not in result.stderr:
+        fail(
+            "sel4_boot_plane: --no-build was not refused as an unknown option "
+            f"(status {result.returncode}): {result.stderr[-200:]!r}"
+        )
+    return len(observed) + refused + 1
 
 
 def check_http_evidence_controls() -> int:
@@ -711,11 +766,88 @@ def check_root_memory_runtime_control() -> int:
             "sel4_root_boot: credited qemu-riscv-virt with passing a superseded "
             "window it never had"
         )
+    # An RV64 inventory in the shape the qemu-riscv-virt root publishes. Before
+    # it probes, that root funds its metadata from the tails of the two highest
+    # frame-capable ranges, so its probe is in the third. The addresses are the
+    # observed ones.
+    spent = (
+        (0x1_3FC0_0000, 256 * 4096),
+        (0x1_3FD0_0000, 64 * 4096),
+        (0x1_3FD4_0000, 32 * 4096),
+        (0x1_3FD6_0000, 16 * 4096),
+        (0x1_3FD7_1800, 2048),
+    )
+    top_tail = (0x1_3FD6_0010, 16 * 4096 - 16)
+    next_tail = (0x1_3FD4_0010, 32 * 4096 - 16)
+
+    def spent_inventory(
+        tails: tuple[tuple[int, int], ...],
+        probe_paddr: int = 0x1_3FD0_1000,
+        late: tuple[tuple[int, int], ...] = (),
+    ) -> str:
+        def records(entries: tuple[tuple[int, int], ...]) -> str:
+            return "".join(
+                f"SLIME_BACKING infrastructure_tail parent={734 - index} paddr={paddr} bytes={size}\n"
+                for index, (paddr, size) in enumerate(entries)
+            )
+
+        return (
+            records(tails)
+            + inventory(spent, probe_paddr=probe_paddr, beyond_legacy=0)
+            + records(late)
+        )
+
+    accepted_tails = (
+        ("the observed tails and the probe in the third range", spent_inventory((top_tail, next_tail))),
+        (
+            "a tail that leaves two frames free, and the probe in one of them",
+            spent_inventory(((0x1_3FD6_2000, 14 * 4096),), probe_paddr=0x1_3FD6_1000),
+        ),
+    )
+    for description, transcript in accepted_tails:
+        if rejects_inventory(transcript, "qemu-riscv-virt"):
+            fail(f"sel4_root_boot: rejected {description}")
+    tail_mutations = (
+        ("a probe below two ranges that no tail spent", spent_inventory(())),
+        ("a probe below a range whose tail the root did not report", spent_inventory((top_tail,))),
+        (
+            "a probe below a range whose tail leaves a frame free",
+            spent_inventory(((0x1_3FD6_2000, 14 * 4096), next_tail)),
+        ),
+        (
+            "a probe inside the bytes a tail spent, in the highest capable range",
+            spent_inventory(((0x1_3FD6_2000, 14 * 4096),), probe_paddr=0x1_3FD6_3000),
+        ),
+        (
+            "a tail that stops before the end of its range",
+            spent_inventory(((0x1_3FD6_0010, 15 * 4096 - 16), next_tail)),
+        ),
+        (
+            "a tail that starts where its range starts",
+            spent_inventory(((0x1_3FD6_0000, 16 * 4096), next_tail)),
+        ),
+        (
+            "a tail in no enumerated range",
+            spent_inventory((top_tail, next_tail, (0x2_0000_0000, 4096))),
+        ),
+        (
+            "two tails in one range, the later one the larger",
+            spent_inventory(((0x1_3FD6_8000, 8 * 4096), next_tail, top_tail)),
+        ),
+        (
+            "tails that the root reports only after the probe",
+            spent_inventory((), late=(top_tail, next_tail)),
+        ),
+    )
+    for description, mutated in tail_mutations:
+        if not rejects_inventory(mutated, "qemu-riscv-virt"):
+            fail(f"sel4_root_boot: accepted {description}")
+    refused = len(mutations) + 1 + len(tail_mutations)
     print(
         "seL4 gate control check: root memory evidence rejected "
-        f"{len(mutations) + 1} launcher-only and inventory mutations"
+        f"{refused} launcher-only, inventory and infrastructure-tail mutations"
     )
-    return len(mutations) + 1
+    return refused
 
 
 def check_layout_gate() -> int:
@@ -2928,6 +3060,93 @@ def check_private_memory_capacity_controls() -> int:
 
 
 
+def check_export_share_controls() -> int:
+    """The loan gate's export arm judges counts, so each control changes one.
+
+    The baseline is what a root with the share prints: four retained exports,
+    the refusal, the release at the receiver's retirement, and a census whose
+    imports are the one import line. A control that changes two lines keeps
+    every other count consistent, so the arm refuses it for the named reason.
+    """
+    gate = load_script("sel4_loan_plane_export_share", "check/check-sel4-loan-plane.py")
+    gate.fail = reject_control
+    share = gate.EXPORT_SHARE
+    refusal = gate.EXPORT_SHARE_REFUSED
+    retained = [
+        f"SLIME_GRAPH capability exported task=1 id={identity} kind=shared-buffer rights=0x4 retain=1"
+        for identity in range(2, 2 + share)
+    ]
+    loan_export = "SLIME_GRAPH capability exported task=1 id=1 kind=loan rights=0x200 retain=0"
+    loan_import = "SLIME_GRAPH capability imported task=2 id=1 kind=loan rights=0x200 retain=0"
+    receiver_exit = "SLIME_GRAPH component exit task=0 status=0"
+    release = f"SLIME_GRAPH exports released task=0 count={share}"
+    drain = "SLIME_GRAPH served live=0 unsupported=0 buffers=9 windows=0 tasks=0"
+
+    def census(exports: int, imports: int, tail: str = "outstanding=0 tickets=0") -> str:
+        return (
+            f"SLIME_GRAPH capabilities exports={exports} imports={imports} "
+            f"cancels=0 finalized={exports} {tail}"
+        )
+
+    def build(*, retained_lines=retained, order=None, released=release, counts=None) -> str:
+        middle = order if order is not None else [refusal, receiver_exit, released]
+        return "\n".join([
+            loan_export,
+            loan_import,
+            "SLIME_GRAPH component exit task=2 status=0",
+            *retained_lines,
+            *middle,
+            "[init] export ticket left for reclamation",
+            "SLIME_GRAPH component exit task=1 status=0",
+            drain,
+            counts if counts is not None else census(len(retained_lines) + 1, 1),
+        ]) + "\n"
+
+    transcript = build()
+    gate.check_export_share(transcript)
+    fifth = f"SLIME_GRAPH capability exported task=1 id={share + 2} kind=shared-buffer rights=0x4 retain=1"
+    mutations = [
+        ("export share: no refusal", transcript.replace(refusal + "\n", "")),
+        ("export share: two refusals", transcript.replace(refusal, refusal + "\n" + refusal)),
+        (
+            "export share: a fifth export admitted before the refusal",
+            build(retained_lines=[*retained, fifth], released=release.replace(f"count={share}", f"count={share + 1}")),
+        ),
+        (
+            "export share: refused below the share",
+            build(retained_lines=retained[:-1], released=release.replace(f"count={share}", f"count={share - 1}")),
+        ),
+        ("export share: nothing released", build(order=[refusal, receiver_exit])),
+        ("export share: released before the task exited", build(order=[refusal, release, receiver_exit])),
+        ("export share: released for a task that never exited", transcript.replace(release, release.replace("task=0", "task=7"))),
+        (
+            "export share: released only when the graph drained",
+            build(order=[refusal, receiver_exit]).replace(drain, drain + "\n" + release),
+        ),
+        ("export share: release of no export", transcript.replace(release, release.replace(f"count={share}", "count=0"))),
+        ("export share: release count short", transcript.replace(release, release.replace(f"count={share}", f"count={share - 1}"))),
+        ("export share: an unimported export counted as an import", build(counts=census(share + 1, share + 1))),
+        ("export share: census imports differ from the import lines", build(counts=census(share + 1, 2))),
+        ("export share: census exports differ from the export lines", build(counts=census(share + 2, 1))),
+        ("export share: an export outstanding", build(counts=census(share + 1, 1, "outstanding=1 tickets=1"))),
+        ("export share: a ticket outstanding", build(counts=census(share + 1, 1, "outstanding=0 tickets=1"))),
+        ("export share: a cancel in the scenario", transcript.replace("cancels=0", "cancels=1")),
+        ("export share: no census", build(counts="")),
+        ("export share: no drained graph", transcript.replace(drain + "\n", "")),
+        ("export share: one export identity twice", transcript.replace("id=3 kind=shared-buffer", "id=2 kind=shared-buffer")),
+        ("export share: import of an unknown export", transcript.replace(loan_import, loan_import.replace("id=1", "id=99"))),
+        ("export share: import before its export", transcript.replace(loan_export + "\n" + loan_import, loan_import + "\n" + loan_export)),
+        ("export share: one export imported twice", transcript.replace(loan_import, loan_import + "\n" + loan_import)),
+    ]
+    for description, mutated in mutations:
+        if mutated == transcript:
+            fail(f"{description}: mutation did not change the transcript")
+        require_rejection(
+            description, "export share:", lambda mutated=mutated: gate.check_export_share(mutated)
+        )
+    return len(mutations)
+
+
 def check_large_image_controls() -> int:
     """Exercise grader plumbing with synthetic evidence, not a large-image boot."""
     from types import SimpleNamespace
@@ -3084,7 +3303,11 @@ def check_console_lines() -> None:
         check=True,
         stdout=subprocess.PIPE,
     ).stdout.decode()
-    sources = {path: (ROOT / path).read_text(encoding="utf-8") for path in listed.split("\0") if path}
+    sources = {
+        path: (ROOT / path).read_text(encoding="utf-8")
+        for path in listed.split("\0")
+        if path and not path.startswith(console_lines.NOT_COMPONENTS)
+    }
     try:
         counts = console_lines.audit(sources)
     except console_lines.AuditError as error:
@@ -3145,6 +3368,7 @@ def main() -> None:
     total += check_robot_withdrawn_controls()
     for name, relative_path, expected_required in GATES:
         total += check_gate(name, relative_path, expected_required)
+    total += check_export_share_controls()
     total += check_large_image_controls()
     total += check_root_memory_runtime_control()
     total += check_http_evidence_controls()

@@ -1,0 +1,41 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a20871-083e-7525-bb70-543f121d8c42" "zenoh-rmw-token-exam-repair" "zenoh-transport"
+  "Repair the token exam so it observes the tokens the link holds after a withdrawal and its QoS control changes the QoS substring"
+  "The exam of `zenoh-rmw-token` landed with two gaps that its review found. No transcript line states the tokens the link holds after it withdraws the publisher token, so a link that dropped the node token too prints the same lines. One control, named a publisher token with the QoS substring dropped, changed the first `::` of the key, which lies in the type name, and so tested the type and not the QoS substring.")
+  with {
+    intent = #active;
+    depends = { "01a20852-64d5-76b3-acce-bb1e92bc4708"; };
+    owns = {
+      "scripts/lib/zenoh_rmw_token_exam.py";
+    };
+    nonGoals = {
+      h.nonGoal "Any change to the item `zenoh-rmw-token` beyond what the exam change needs: its two counts, its problem text, and the statements of the requirements and the decision that the review of the exam named. A planning PR revises that item once." h.agentDefault;
+      h.nonGoal "Product code, the checker or the recipe. This item replaces lines of one exam file." h.agentDefault;
+      h.nonGoal "A new case in any other exam. The Put exam, the router link exam and the live exam keep their counts." h.agentDefault;
+    };
+    requirements = {
+      h.req "held-tokens-are-observed"
+        "The transcript prints a `held` line for each run and mode: the tokens the link holds after the withdrawal, which is the node token alone. The judge refuses a link that holds none, both, or a changed id."
+        { "zenoh_rmw_token_check"; };
+      h.req "qos-control-changes-the-qos-substring"
+        "The control that changes a publisher token's QoS substring edits the substring the default QoS gives, and the judge refuses the transcript for it."
+        { "zenoh_rmw_token_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_rmw_token_check" {
+        h.count "casesObserved" 32;
+        h.count "negativeControlsRefused" 87;
+      };
+    };
+    decisions = {
+      h.decided "one-exam-file-and-two-counts"
+        "The repair replaces lines of `scripts/lib/zenoh_rmw_token_exam.py`. It raises the cases from 26 to 32 and the controls from 73 to 87 in that file and in `zenoh-rmw-token`."
+        "the counts are pinned in both, and the checker refuses a pin that differs from the item's acceptance"
+        h.agentDefault
+        { "held-tokens-are-observed"; "qos-control-changes-the-qos-substring"; };
+    };
+  };
+
+item

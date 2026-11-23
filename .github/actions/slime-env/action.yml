@@ -191,9 +191,11 @@ runs:
         # workspaces, the shared base rust-sel4 checkout, and one per patched
         # physical platform's independent loader submodule
         # (`sel4/pins.toml`'s `[rust_sel4_<platform>]` tables).
+        # The root fixture's child crate, `components/root-child`, is a
+        # workspace of its own.
         for manifest in \
           Cargo.toml \
-          slime-root/child/Cargo.toml \
+          components/root-child/Cargo.toml \
           deps/rust-sel4/Cargo.toml \
           deps/rust-sel4-bcm2712-rpi5/Cargo.toml \
           deps/rust-sel4-cv1800b-duo/Cargo.toml \

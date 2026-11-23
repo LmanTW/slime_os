@@ -1,0 +1,60 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a1ed80-b13c-70ad-b27f-69434eccb321" "zenoh-rmw-component" "zenoh-transport"
+  "A component drives the graph link: it declares one subscription, publishes Puts and drains the samples the link queued"
+  "The graph link serves an owner's subscription, and nothing owns one. No component runs a graph link over a network-service connection, so no seL4 guest can exchange a topic with an rmw_zenoh peer. The service component runs the plain link, which cannot carry a graph session. A composition can name the crate only after it has a manifest, a release profile, a component spec and a lockfile entry. The service component shows the form. Its crate and registration are judged by file facts, apart from the composition that boots it.")
+  with {
+    intent = #active;
+    owns = {
+      "components/applications/zenoh-rmw-node/**";
+      "contracts/component-spec/v1/components/zenoh-rmw-node.zti";
+      "Cargo.toml";
+      "Cargo.lock";
+    };
+    depends = { "01a1ec26-5415-70d1-96fd-4ab9ec1e28f4"; };
+    nonGoals = {
+      h.nonGoal "A composition, a system spec, a generation manifest, a closure or a QEMU gate that boots the component. The next item composes it with a native peer." h.agentDefault;
+      h.nonGoal "Running the component. This item judges that the crate and its registration exist, by file facts, and the link it drives is judged by `zenoh_rmw_data_link_check`." h.agentDefault;
+      h.nonGoal "Changing the graph link, the graph session or any shared library file. The component uses the calls the data link item added." h.agentDefault;
+      h.nonGoal "More than one subscription, a token, a query, a router or a client INIT." h.agentDefault;
+      h.nonGoal "Holders, grants or the service's ring. This component owns its link and its one subscription and has no holder." h.agentDefault;
+    };
+    requirements = {
+      h.req "the-crate-exists"
+        "The crate has a package named `slime-component-zenoh-rmw-node` and a binary named `zenoh-rmw-node`. It depends on the component library and the build support crate, it has a `build.rs` that calls `configure`, and its `main.rs` is `#![no_std]` and enters through `slime_rt::entry!`."
+        { "zenoh_rmw_component_check"; };
+      h.req "the-crate-is-registered"
+        "The root `Cargo.toml` holds a release profile for the package, and `Cargo.lock` names it. A component spec of that name exists with binary `zenoh-rmw-node` and the test environment `zenoh_rmw_component_check`."
+        { "zenoh_rmw_component_check"; };
+      h.req "the-crate-drives-the-link"
+        "`main.rs` names a `GraphLinkOf` and `Params::GRAPH`, declares the subscription with `declare_subscriber`, writes Puts with `send_put`, drains the queue with `pop_sample`, and attaches to the network service."
+        { "zenoh_rmw_component_check"; };
+      h.req "the-library-calls-exist"
+        "The library exports `zenoh_rmw_link`, and that file defines `pop_sample`, `declare_subscriber` and `send_put`."
+        { "zenoh_rmw_component_check"; };
+      h.req "controls-are-refused"
+        "The judge refuses 23 synthetic file sets, one for each fact, and names the fact it refused."
+        { "zenoh_rmw_component_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_rmw_component_check" {
+        h.count "casesObserved" 23;
+        h.count "negativeControlsRefused" 23;
+      };
+    };
+    decisions = {
+      h.decided "judged-by-file-facts-like-the-service"
+        "The crate and its registration are judged by patterns over their files, with one synthetic control for each, as the Zenoh service component is. What the crate does is judged by the booted composition in the next item."
+        "a `no_std` seL4 guest does not run on the host. Its source shows only that the calls exist, so this item claims no more"
+        h.agentDefault
+        { "the-crate-drives-the-link"; "controls-are-refused"; };
+      h.decided "an-application-beside-the-peer"
+        "The crate lives under `components/applications`, beside `zenoh-peer`, because it owns a connection and serves no holder."
+        "the service component is a service because it serves holders by grants, and this component has none"
+        h.agentDefault
+        { "the-crate-exists"; };
+    };
+  };
+
+item

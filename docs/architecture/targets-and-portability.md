@@ -102,7 +102,7 @@ overlay above the VideoCore base. Memory, GIC-400/GICv2, the 54 MHz generic time
 and UART10 at `0x107d001000` come from seL4's platform description and BootInfo,
 not a Slime-side board table. The physical gate binds media to the built image
 and fails closed without serial evidence; it never substitutes QEMU. P4's
-[serial rationale](../../roadmap/07-architecture-portability.md#why-serial-is-the-only-evidence-path)
+[serial rationale](../plans/rpi5-ros2-demo.md#why-serial-is-the-only-evidence-path)
 explains why display output or a debugger cannot replace its ordered transcript.
 
 The named Framework 13 cold-booted the exact P6 removable image twice on

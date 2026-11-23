@@ -119,8 +119,9 @@ the spec, recipe, and checker must land together.
 
 Author `contracts/system-spec/v1/systems/sel4-widget.zti` (copy the nearest
 plane spec — `sel4-io-queue.zti` is a good minimal one: three components, one
-endpoint grant, three notifications). Register it in `DERIVED_GENERATION_FIXTURES`
-in [`scripts/lib/system_spec.py`](../../scripts/lib/system_spec.py), then:
+endpoint grant, three notifications). The spec file is the registration:
+`DERIVED_GENERATION_FIXTURES` in
+[`scripts/lib/system_spec.py`](../../scripts/lib/system_spec.py) reads the directory. Then:
 
 ```sh
 python3 scripts/generate/generate-generation-from-spec.py
@@ -237,7 +238,9 @@ After the planning PR merges and the item is `#active`, the `Evidence`
 workflow runs the bound recipe on `main`. It writes a signed record to the
 `evidence` branch, keyed by the recipe's closure digest. Locally,
 `just spec_record widget_check` runs the recipe the same way and writes
-`build/observations/widget_check.zt`. A target listed under `operator` in
+`build/observations/widget_check.zt`. The workflow runs a target on an AArch64
+runner, unless `[host]` in `specs/targets.toml` lists it under another host
+class. A target listed under `operator` in
 `specs/targets.toml` needs hardware CI does not have. An operator runs it with
 `scripts/spec/record <target> --signer <principal> --key <key>`.
 

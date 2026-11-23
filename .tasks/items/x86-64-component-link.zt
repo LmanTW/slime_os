@@ -1,0 +1,75 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.bug "01a1f14c-a92d-7c08-ba24-869ece42ec46" "x86-64-component-link" "product"
+  "The x86-64 C component link runs the host gcc"
+  "scripts/build/build-c-component.py links a C component through the Clang driver. The bare-metal toolchain of the pinned Clang 21.1.8 handles aarch64-none-elf and riscv64-none-elf and runs ld.lld itself. It does not handle x86_64-none-elf, so the driver runs a program named gcc from PATH and adds -m64. On the AArch64 runner of the Evidence workflow that gcc refused -m64, and x86_64_sel4_root_boot_check failed in the image build after 30 s (run 44321295747, job 134874252504, main at ba33e0a). On an x86-64 host the link passes, and a host program that no component pin names takes part in a product link.")
+  with {
+    intent = #planned;
+    owns = {
+      "scripts/build/build-c-component.py";
+    };
+    nonGoals = {
+      h.nonGoal "A pc99 image on an AArch64 host. flake.nix supplies the pinned OVMF and GRUB on x86_64-linux only, and scripts/lib/pc99_media.py refuses to assemble a pc99 image without them. The Evidence workflow records the x86-64 targets on an x86-64 runner."
+        (h.fromHuman "x86-64 runner (Recommended)" "Claude Code session session_01UdthewZRTzmSVdfHTxprgf, 2026-11-19, answering where the x86-64 gates are recorded");
+      h.nonGoal "A run of the exam on an AArch64 host. x86_64_component_link_check builds the pc99 image first, for the installed seL4 headers, so it runs on an x86-64 host. Its closed PATH stands in for a host whose gcc refuses the link." h.agentDefault;
+      h.nonGoal "The AArch64 and RISC-V links. The Clang driver runs ld.lld itself for both targets, and the builder keeps that link." h.agentDefault;
+      h.nonGoal "A change to scripts/build/build-sel4.py. It is a release input of every image closure, and it calls the component builder as before." h.agentDefault;
+      h.nonGoal "The component builder as a release input of the image closures. RELEASE_INPUTS in scripts/generate/generate-system-image-closures.py does not name scripts/build/build-c-component.py, and the closure digest of a target without declared inputs covers no file under scripts/build/." h.agentDefault;
+    };
+    requirements = {
+      h.req "links-on-a-closed-path"
+        "The x86-64 build of the product Slisp component succeeds on a PATH that holds ld.lld and a trap under ten host tool names, and no trap runs."
+        { "x86_64_component_link_check"; };
+      h.req "writes-a-static-executable"
+        "The file that this build writes is a little-endian ELF64 file of type ET_EXEC for machine 62, with no PT_DYNAMIC and no PT_INTERP program header."
+        { "x86_64_component_link_check"; };
+      h.req "the-trap-catches-the-driver-link"
+        "x86_64_component_link_check refuses two controls on that PATH: gcc run by name, and one x86_64-none-elf object linked through the Clang driver. Each fails, and the trap records gcc."
+        { "x86_64_component_link_check"; };
+      h.req "fixture-boots-on-x86-64"
+        "x86_64_sel4_root_boot_check passes: the root fixture boots on qemu-pc99."
+        { "x86_64_sel4_root_boot_check"; };
+    };
+    acceptance = {
+      h.observedWhere "x86_64_component_link_check" {
+        h.count "casesObserved" 3;
+        h.count "negativeControlsRefused" 2;
+      };
+      h.observed "x86_64_sel4_root_boot_check";
+    };
+    decisions = {
+      h.decided "the-builder-runs-ld-lld-for-x86-64"
+        "build-c-component.py runs ld.lld itself for the x86-64 link. It keeps the Clang driver link for AArch64 and RISC-V."
+        "the driver's choice of a link program for x86_64-none-elf is a property of the Clang release, and the host supplies that program. The pinned ld.lld is on the PATH of the dev shell, and the driver already runs it for the other two targets"
+        (h.fromHuman "Yes, as a bug item (Recommended)" "Claude Code session session_01UdthewZRTzmSVdfHTxprgf, 2026-11-19, answering whether a work item makes x86-64 components link with ld.lld directly")
+        { "links-on-a-closed-path"; };
+      h.decided "a-checker-for-the-component-build"
+        "A new checker, scripts/check/check-c-component-link.py, owns the programs that a C component build may run. It takes the architecture as an argument, and the recipe x86_64_component_link_check runs it for x86-64."
+        "no checker runs build-c-component.py apart from an image build, and no image build can tell which program linked a component. The boundary is the same for each architecture of the builder, so the checker is not named after this bug"
+        h.agentDefault
+        { "links-on-a-closed-path"; "the-trap-catches-the-driver-link"; };
+      h.decided "the-recipe-declares-its-inputs"
+        "x86_64_component_link_check declares its inputs: the builder, components/slisp/, components/runtime/c/ and components/runtime/include/."
+        "without declared inputs the closure digest covers the four product trees and no file under scripts/build/. A later change to the builder would then leave the record valid. Declared inputs are no grader files, so an implementation pull request may change the builder (V3)"
+        h.agentDefault
+        { "links-on-a-closed-path"; };
+      h.decided "the-driver-link-is-a-control"
+        "The second control links one object through the Clang driver and requires the trap to record gcc."
+        "it shows that the closed PATH catches the route the builder used. A later Clang may link x86_64-none-elf with ld.lld itself. The control then fails, and the builder's own link step and this control change together in one planning pull request"
+        h.agentDefault
+        { "the-trap-catches-the-driver-link"; };
+      h.decided "the-root-boot-stays-bound"
+        "The item binds x86_64_sel4_root_boot_check beside the new recipe."
+        "the owner chose that target for this item, and the failure was observed in it. Its closure digest does not cover the builder, so a record of it from before the change satisfies the acceptance. x86_64_component_link_check is the exam of the change"
+        (h.fromHuman "Yes, as a bug item (Recommended)" "Claude Code session session_01UdthewZRTzmSVdfHTxprgf, 2026-11-19, accepting a bug item that binds x86_64_sel4_root_boot_check")
+        { "fixture-boots-on-x86-64"; };
+      h.decided "an-x86-64-host-class"
+        "A process pull request lists x86_64_component_link_check under the host class x86_64 in specs/targets.toml before the implementation pull request makes this item active."
+        "the Evidence workflow runs an unlisted target on an AArch64 runner, where the pc99 image build that the gate starts with cannot pass. specs/targets.toml is a process path, and a pull request carries one class (V1)"
+        h.agentDefault
+        { "links-on-a-closed-path"; };
+    };
+  };
+
+item

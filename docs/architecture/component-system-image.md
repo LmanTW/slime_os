@@ -83,10 +83,17 @@ may change. Nonloaded metadata such as RISC-V attributes may move in the file, b
 its attributes and bytes must remain identical. The stripped image is admitted
 again before wrapping; stripping cannot make a previously refused input acceptable.
 
-The root builder likewise embeds `slime-root-child.delivery.elf` beside the
-symbol-bearing `slime-root-child.elf` in the child Cargo output directory. It keeps
-the child fixture and all its boot/fault checks. Never apply this stripping step
-blindly to the final loader ELF: the packaged image contains sectionless payloads.
+The root builder likewise writes `slime-root-child.delivery.elf` beside the
+symbol-bearing `slime-root-child.elf` in the child Cargo output directory. The
+fixture root embeds the delivery copy and keeps the child fixture and all its
+boot/fault checks. Never apply this stripping step blindly to the final loader
+ELF: the packaged image contains sectionless payloads.
+
+A product root embeds no child image. `slime-root/src/main.rs` declares the
+fixture's module behind `cfg(slime_root_fixture)`, and `slime-root/build.rs`
+sets that cfg from `SLIME_ROOT_FIXTURE=1`. A product root whose generation
+holds no loadable executable prints
+`SLIME_ROOT FATAL generation has no loadable executable` and stops.
 
 The root-only `root-image` Cargo profile is separate from the component and host
 release profiles. Its build disables target-default unwind tables because the

@@ -16,11 +16,12 @@ the authoritative detail.
    hands control to the kernel;
 2. the pinned **seL4 kernel** — from `just run` onward, the only privileged
    code in the system;
-3. **`slime-root`**, the initial task, with two payloads compiled in: the
-   **generation** (the deterministic manifest declaring every executable,
-   instance, grant, and budget — built by `scripts/build/build-generation.py`
-   from `contracts/generation-manifest/v1/fixtures/`) and a small native child fixture
-   used by the verification boot.
+3. **`slime-root`**, the initial task, with the **generation** compiled in
+   (the deterministic manifest declaring every executable, instance, grant,
+   and budget — built by `scripts/build/build-generation.py` from
+   `contracts/generation-manifest/v1/fixtures/`). The fixture root, which the
+   verification boot `just sel4_root_boot_check` uses, also embeds a small
+   native child; a product root does not.
 
 There is no disk and no loader search path: every byte the system will ever
 execute is in this image, named by the generation, hash-verified at admission.
@@ -37,8 +38,9 @@ invisible except as the mechanism every later step invokes.
 ### 2. Root self-checks — `SLIME_ROOT allocator`, `SLIME_TIMER`, `SLIME_FOUNDATION`
 
 `slime-root` starts single-threaded and proves its own foundations before
-touching the generation (`slime-root/src/main.rs`, staged exactly as its
-module doc describes):
+touching the generation. `slime-root/src/main.rs` brings up the allocator and
+the console, and `run` in `slime-root/src/boot.rs` does the rest, in one order
+for every root image:
 
 - **Allocator** (`object_allocator.rs`): takes deterministic ownership of
   BootInfo's CSlots and untypeds, and reports the budget it will allocate
@@ -53,8 +55,10 @@ module doc describes):
   machine actually declares. `just run` attaches no disk, so this reports
   absence — the storage gates attach one and assert the opposite.
 
-Everything here fails via `fatal!`, which prints `SLIME_ROOT FATAL` and
-parks the root. Nothing panics; every failure is a typed, printed refusal.
+A step that cannot go on prints `SLIME_ROOT FATAL <reason>`, and the root
+parks. `main` does both with `fatal!`. A phase of `run` prints the record with
+`stop!` and returns a `Stop`, and `main` parks the root. Nothing panics; every
+failure is a typed, printed refusal.
 
 ### 3. Generation admission — `SLIME_ROOT generation admitted`
 

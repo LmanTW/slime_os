@@ -1,0 +1,88 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.bug "01a207ed-7d10-7968-a939-be290a4ee018" "root-export-share" "planes-mechanism"
+  "The root's export table gives each sender a share and releases a retired task's exports"
+  "The root keeps every capability export that no receiver has imported in one table of 64 entries. It bounds no sender, and the retirement of a task removes none of its entries. On main at 47acd9e2 a sample-lender that made 70 retained exports and finalized none had 64 admitted. The root refused the 65th with ERR_OUT_OF_MEMORY, and the delegation of that lender then failed. The table is global, so the root refuses every later export of every component. An entry also stays when its sender exits before it finalizes the export, and when its receiver exits without an import. The comment on reclaim_dead_task says that retirement settles in-flight capabilities. No code does.")
+  with {
+    intent = #planned;
+    owns = {
+      "slime-root/src/**";
+      "components/lib/src/loan_plane.rs";
+    };
+    nonGoals = {
+      h.nonGoal "A receiver that lives and never imports. It still holds up to one share of each sender that exports to it. The fix lets a sender cancel a finalized export, which changes EXPORT_CANCEL in contracts/syscall-abi/v1. That is a follow-up item." h.agentDefault;
+      h.nonGoal "A share that the generation declares. The generation manifest has no field that bounds in-flight exports, and this item adds none." h.agentDefault;
+      h.nonGoal "The return of a moved capability to a sender that lives when its receiver exits. The release removes the export and its ticket, as the drain of the graph does today." h.agentDefault;
+      h.nonGoal "A booted case of a sender that exits before it finalizes an export. capability_delegate finalizes a logical export before it sends, so no component reaches that state through the runtime. A host test holds that entry." h.agentDefault;
+      h.nonGoal "A change to sample-lender or sample-receiver. The sample plane runs them as the x86 oracle built them." h.agentDefault;
+      h.nonGoal "The architecture page docs/architecture/ipc-and-capabilities.md. A process pull request states the share and the release there." h.agentDefault;
+    };
+    requirements = {
+      h.req "a-sender-holds-at-most-its-share"
+        "The root refuses an export of a sender that holds 4 exports no receiver has imported. In the loan plane init makes 5 retained exports to the console, which imports none. The root admits 4 and answers the fifth with ERR_OUT_OF_MEMORY, and init prints the refusal."
+        { "sel4_export_share_check"; "test_sel4_root"; };
+      h.req "a-full-share-takes-no-entry-of-another-sender"
+        "The table holds one share for every task the root can run. A host test fills the share of one sender and requires the root to admit an export of a second sender."
+        { "test_sel4_root"; };
+      h.req "retirement-releases-the-exports-of-a-task"
+        "When a task exits, the root removes every export that names it as sender or as receiver, finalized or not, before the graph drains. The root prints the task and the count. In the loan plane each release follows the exit line of its task, and the releases count every export that no receiver imported. A host test retires one task and requires that exactly its entries leave."
+        { "sel4_export_share_check"; "test_sel4_root"; };
+      h.req "the-census-counts-an-import-only-for-an-import"
+        "The closing census of the root counts as imports only the exports that a receiver imported. On main the drain counts each finalized export that it removes as an import. The loan plane there reports imports=2 after one import line."
+        { "sel4_export_share_check"; };
+      h.req "the-arm-refuses-a-forged-transcript"
+        "The export arm of the loan gate refuses 22 changed transcripts. They cover a missing or second refusal, a refusal above or below the share, a release that is absent, early, late, empty, short or for a task that did not exit, each census count, and each export identity rule."
+        { "sel4_gate_control_check"; };
+    };
+    acceptance = {
+      h.observed "sel4_export_share_check";
+      h.observedWhere "test_sel4_root" {
+        h.atLeast "hostTests" 400;
+      };
+      h.observed "sel4_gate_control_check";
+    };
+    invariants = {
+      h.invariant "the-host-tests-reach-the-admitting-function"
+        "serve_capability_export stores an export only through the function that the two new host tests call. The tests fail when that function admits every export, and when the retirement of a task releases nothing. The implementation pull request names the function and reports both runs."
+        h.agentDefault;
+      h.invariant "the-release-precedes-the-arena-phase"
+        "The release runs while the CNode of the retired task exists. The root deletes the mirror of an export ticket in that CNode."
+        h.agentDefault;
+      h.invariant "the-loan-plane-keeps-its-gate"
+        "sel4_loan_check, sel4_sample_check and sel4_demo_check pass on the implementation. The loan plane still leaves an export that no receiver imports."
+        h.agentDefault;
+      h.invariant "the-series-keeps-its-ceilings"
+        "root_size_check passes with the ceilings of main: 14950 for the core role, 3050 for the sharedBuffer role and 32950 for the series. A draft of the change holds 14945, 3044 and 32940 code lines."
+        h.agentDefault;
+    };
+    decisions = {
+      h.decided "the-share-is-four-and-the-root-holds-it"
+        "The share is the constant 4 in the root."
+        "a measurement before this item reported a peak of two exports of one sender in sel4_demo_check and of one in twelve other planes. Four leaves a factor of two. The planning of this item did not repeat that measurement, and it did not cover io_network_check. On a draft of the change sel4_demo_check passes with a share of 4, of 2 and of 1. A share in the generation needs a new field of the manifest, and no composition needs a share of its own today"
+        h.agentDefault
+        { "a-sender-holds-at-most-its-share"; };
+      h.decided "the-table-holds-every-share"
+        "The table holds MAX_TASKS times the share, 192 entries."
+        "a table below that sum lets the senders that reach their shares first take the entries of the others. The size of one entry and of the table in the root image is not measured"
+        h.agentDefault
+        { "a-full-share-takes-no-entry-of-another-sender"; };
+      h.decided "one-recipe-runs-the-loan-gate-with-an-arm"
+        "A new recipe, sel4_export_share_check, runs check-sel4-loan-plane.py with --export-share. sel4_loan_check does not run the arm."
+        "main carries the root without the share until the implementation merges, and sel4_loan_check must pass there. The loan plane already leaves one export for the root to reclaim, so the arm needs no new composition and no new checker"
+        h.agentDefault
+        { "a-sender-holds-at-most-its-share"; "retirement-releases-the-exports-of-a-task"; };
+      h.decided "the-arm-judges-counts-and-requires-no-exit-order"
+        "The arm compares the census and the release lines with the export and import lines that the root printed. It does not require which of init and the console exits first."
+        "init has no supervision handle of the console, so nothing orders the two exits. The totals hold in either order. A root that prints a release and leaves the entry to the drain still counts it as an import, and the arm refuses that census"
+        h.agentDefault
+        { "retirement-releases-the-exports-of-a-task"; "the-census-counts-an-import-only-for-an-import"; };
+      h.decided "the-count-of-host-tests-is-the-acceptance"
+        "The acceptance of the host tests is their count, 400. main runs 398."
+        "the items of the root series bind the same count, and the invariant the-host-tests-reach-the-admitting-function states what the two tests must show"
+        h.agentDefault
+        { "a-full-share-takes-no-entry-of-another-sender"; };
+    };
+  };
+
+item

@@ -5,12 +5,28 @@
 //! count that same counter, so a read stays in the calling thread. On RISC-V
 //! and x86_64 the root's clock is a device register userspace cannot read, so
 //! the read is the root call `crate::syscall` already owns.
+//!
+//! An AArch64 image built with `SLIME_SYSTEM_TIMER=1` is in the second group:
+//! its root counts the SoC's system timer, and no code of the image reads or
+//! writes a generic-timer register.
+
+/// Whether the root of this image counts a device timer on AArch64. The image
+/// builder sets the variable for the root and for every component alike.
+#[cfg(target_arch = "aarch64")]
+const ROOT_SERVES_THE_CLOCK: bool = match option_env!("SLIME_SYSTEM_TIMER") {
+    Some(value) => matches!(value.as_bytes(), b"1"),
+    None => false,
+};
 
 /// Read the hardware monotonic counter that the root's timers count.
 pub fn monotonic_read() -> Result<u64, i64> {
     #[cfg(target_arch = "aarch64")]
     {
-        Ok(read_cntpct())
+        if ROOT_SERVES_THE_CLOCK {
+            crate::syscall::monotonic_read()
+        } else {
+            Ok(read_cntpct())
+        }
     }
     #[cfg(not(target_arch = "aarch64"))]
     {
@@ -26,7 +42,11 @@ pub fn monotonic_read() -> Result<u64, i64> {
 pub fn monotonic_frequency() -> Result<u64, i64> {
     #[cfg(target_arch = "aarch64")]
     {
-        Ok(read_cntfrq())
+        if ROOT_SERVES_THE_CLOCK {
+            crate::syscall::monotonic_frequency()
+        } else {
+            Ok(read_cntfrq())
+        }
     }
     #[cfg(not(target_arch = "aarch64"))]
     {

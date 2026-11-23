@@ -14,8 +14,8 @@ arms with `#[cfg(target_arch = ...)]`, and P6.1 makes `x86_64` an admitted
 seL4 architecture alongside them. A `cfg` arm is the boundary working, not a
 breach of it. What would be a breach — an inline `mov %cr4`, a `wrmsr`, a
 hard-coded `R_X86_64_*` relocation — is still refused, and P6's own source
-boundary (`roadmap/07-architecture-portability.md`) keeps privileged x86
-mechanism outside these trees.
+boundary (archived `roadmap/07-architecture-portability.md`, located through
+`docs/history.md`) keeps privileged x86 mechanism outside these trees.
 """
 
 from __future__ import annotations

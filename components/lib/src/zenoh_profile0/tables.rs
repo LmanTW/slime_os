@@ -115,6 +115,17 @@ impl<const N: usize, const K: usize> SlotTable<N, K> {
         Some((meta.id, key))
     }
 
+    /// The id and key of a slot whose removal is deferred. A frame that removes a declaration reports it
+    /// from here before it settles the removal.
+    pub fn pending(&self, index: usize) -> Option<(u64, &[u8])> {
+        let meta = self.meta.get(index)?;
+        if meta.state != PENDING {
+            return None;
+        }
+        let key = self.keys.get(index)?.get(..usize::from(meta.len))?;
+        Some((meta.id, key))
+    }
+
     /// The first used slot, for a table that holds one.
     pub fn first(&self) -> Option<(u64, &[u8])> {
         if self.used == 0 {
