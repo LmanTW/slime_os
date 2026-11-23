@@ -1,0 +1,67 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a20854-dd6d-7325-a645-1853023d6ec4" "zenoh-link-v3-reader" "zenoh-transport"
+  "The Zenoh service builds its session parameters from a configuration of the version 3 link-limits contract"
+  "`contracts/zenoh-link-limits/v3` declares `localSubscriptions`, and `components/proto/src/zenoh_link_v3_limits.rs` holds its constants. Nothing reads them. `Params::from_limits` sets `local` to 1. The Zenoh service builds `Params { local: 3, per_side: 2, events: 4, ..Params::DEMO }` as a literal, so no contract judges its count against its stack.")
+  with {
+    depends = { "01a1ef06-fb8b-7046-b24b-47fccf60c29f"; };
+    owns = {
+      "components/lib/src/zenoh_link_limits_v3*";
+      "components/lib/src/lib.rs";
+      "components/services/zenoh-service/src/main.rs";
+    };
+    nonGoals = {
+      h.nonGoal "Any change to `contracts/zenoh-link-limits/v3`, its generated constants or its exam. This item reads them and edits none." h.agentDefault;
+      h.nonGoal "A reader of a v3 record file. The service holds one configuration as a constant. A record reader and the lanes configuration are later items." h.agentDefault;
+      h.nonGoal "The links of `zenoh-peer`, `zenoh-rmw-peer` and `lidar-publisher`. Each keeps its own `Params`." h.agentDefault;
+      h.nonGoal "`Params::from_limits` and the v1 `Limits`. A v1 link keeps one local subscription." h.agentDefault;
+      h.nonGoal "The stack exam's measured values. The exam pins the link type with 2 aliases, and this item moves that one pin." h.agentDefault;
+      h.nonGoal "Runs, heap links and fragments. The service's link is a fixed link with no run." h.agentDefault;
+    };
+    requirements = {
+      h.req "the-service-link-has-two-aliases"
+        "The `Link` type of the service declares 2 key aliases. The contract requires at most as many subscribers as keys, and the service's link takes 2 subscribers from its peer."
+        { "zenoh_link_v3_reader_check"; };
+      h.req "the-service-configuration-is-a-v3-configuration"
+        "The service holds one configuration, named `service`. It is a fixed link with a batch of 514 bytes and 12-byte samples. It has 2 keys, 2 subscribers, 3 local subscriptions, no run and 4 outstanding samples. Its stack is 32768 bytes. The contract's decoder accepts a record that carries it."
+        { "zenoh_link_v3_reader_check"; };
+      h.req "the-stack-covers-the-configuration"
+        "The stack that the Rust arithmetic returns for the configuration is 6038 bytes, equal to the contract's. The declared stack is at least that. The contract refuses the configuration with one byte less."
+        { "zenoh_link_v3_reader_check"; };
+      h.req "the-parameters-follow-the-configuration"
+        "The service builds its session parameters from the configuration. The parameters have a body of 512 bytes and an announced batch of 514. They have 2 aliases, 2 subscribers of the peer, 3 local subscriptions, 4 events and 4 samples. No literal `local: 3` remains in the service."
+        { "zenoh_link_v3_reader_check"; };
+      h.req "the-reader-refuses-what-the-contract-refuses"
+        "The reader names the class the contract's rule gives for each of five changed configurations: a stack one byte under, no local subscription, 65536 local subscriptions, 3 subscribers on 2 keys, and a run on a fixed link."
+        { "zenoh_link_v3_reader_check"; };
+      h.req "controls-are-refused"
+        "The judge refuses 41 inputs. 5 remove one declaration from a synthetic file set. 36 corrupt an honest transcript or change the configuration or the cases that it judges."
+        { "zenoh_link_v3_reader_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_link_v3_reader_check" {
+        h.count "casesObserved" 14;
+        h.count "negativeControlsRefused" 41;
+      };
+    };
+    decisions = {
+      h.decided "announce-the-framed-batch"
+        "The service announces a batch of 514 bytes in its INIT, where it announced 512. The link type's framed size is 514, and the configuration's batch is the framed size."
+        "`Params::from_limits` announces the configuration's batch and uses two bytes less for the body. No configuration gives a body of 512 and an announcement of 512, which the literal gave. The user chose to announce 514"
+        (h.acceptedDefault "the user's answer \"Do 1.\" to the three options for the service's announced batch, 2026-11-23, which took the recommended option 1")
+        { "the-service-configuration-is-a-v3-configuration"; "the-parameters-follow-the-configuration"; };
+      h.decided "two-aliases-for-two-subscribers"
+        "The service's configuration declares 2 keys and the link type declares 2 aliases."
+        "the contract requires `maxSubscribers <= maxKeys`, and the session requires its alias count to equal the link type's. A configuration of 2 subscribers on 1 key is refused by the decoder"
+        h.agentDefault
+        { "the-service-link-has-two-aliases"; };
+      h.decided "one-constant-configuration"
+        "The service holds its configuration as a constant of the component library and does not read a record file. The exam checks the constant against the contract's decoder."
+        "the service has no file to read. A record reader needs a delivery path for the record, which is a larger change than this item states"
+        h.agentDefault
+        { "the-service-configuration-is-a-v3-configuration"; };
+    };
+  };
+
+item

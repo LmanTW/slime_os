@@ -383,6 +383,15 @@ zenoh_service_link_check:
 zenoh_service_stack_check:
     python3 scripts/check/check-zenoh-profile0.py --slice service-stack
 
+# Judges that the Zenoh service builds its session parameters from a configuration of `contracts/zenoh-link-limits/v3`. The judge
+# requires the link type with 2 aliases, the module of the reader, and the service's call of it, and requires the literal
+# `local: 3` to be gone. A Rust test prints the configuration, the stack it requires and the parameters it derives, and the
+# judge compares them with the contract's arithmetic and the contract's decoder. The expectation is
+# scripts/lib/zenoh_link_v3_reader_exam.py. The recipe is in no aggregate. It fails until the reader lands.
+[group('hardware')]
+zenoh_link_v3_reader_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice link-v3-reader
+
 # Judges what the Zenoh service does with a holder that faults or never detaches. A reference model of the holder roster
 # writes every line of eight scripted scenarios, and the Rust test must print them. The service reclaims a holder whose
 # task the root reports dead, expires a holder that has not detached when the wait ends, refuses a reclaimed holder every

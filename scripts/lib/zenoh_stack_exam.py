@@ -85,7 +85,7 @@ def declared_stack(text: str | None = None) -> int:
     return int(found.group(1))
 
 
-LINK_ALIAS = "pub type Link<'a, 'b> = LinkOf<Stream<Wire<'a, 'b>>, 514, 1, 5, 129, PAYLOAD, 8, 4>;"
+LINK_ALIAS = "pub type Link<'a, 'b> = LinkOf<Stream<Wire<'a, 'b>>, 514, 2, 5, 129, PAYLOAD, 8, 4>;"
 FRAME_ARRAYS = (
     "let mut record = [0u8; limits_wire::RECORD_LEN];",
     "let mut object = [0u8; TABLE_BYTES];",
@@ -543,7 +543,7 @@ def source_controls() -> int:
     refused += _refused(
         "a component with another Link type",
         good,
-        main=main.replace(LINK_ALIAS, LINK_ALIAS.replace("514, 1, 5, 129", "514, 1, 5, 130")),
+        main=main.replace(LINK_ALIAS, LINK_ALIAS.replace("514, 2, 5, 129", "514, 2, 5, 130")),
     )
     refused += _refused(
         "a component with no Link alias",

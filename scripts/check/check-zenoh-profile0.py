@@ -139,6 +139,7 @@ import zenoh_rmw_link_exam
 import zenoh_lanes_exam
 import zenoh_links_exam
 import zenoh_link_v3_limits_exam
+import zenoh_link_v3_reader_exam
 import zenoh_grants_exam
 import zenoh_client_exam
 import zenoh_client_abort_exam
@@ -3636,6 +3637,56 @@ def service_stack_main(controls_only: bool) -> int:
     return 0
 
 
+LINK_V3_READER_CASES = 14
+LINK_V3_READER_CONTROLS = 41
+LINK_V3_READER_FILTER = "zenoh_link_limits_v3::"
+# The exam's own Rust test, by name: a filter that matches nothing passes silently.
+LINK_V3_READER_TESTS = ("zenoh_link_limits_v3::the_reader_exam",)
+assert len(LINK_V3_READER_TESTS) == 1
+
+
+def run_link_v3_reader() -> list[str]:
+    stdout, output = cargo_tests((LINK_V3_READER_FILTER,), {**_os.environ})
+    passed = tests_passed(output)
+    missing = [name for name in LINK_V3_READER_TESTS if name not in passed]
+    if missing:
+        fail(f"link-v3-reader: the exam's tests did not run and pass ({len(missing)} of {len(LINK_V3_READER_TESTS)}): {', '.join(missing[:4])}")
+    return [line[len("linkv3 "):] for line in exam_lines(stdout) if line.startswith("linkv3 ")]
+
+
+def link_v3_reader_main(controls_only: bool) -> int:
+    if all(name in tests_passed("") for name in LINK_V3_READER_TESTS):
+        fail("control: a run with the link-v3-reader exam test missing was read as complete")
+    exam = zenoh_link_v3_reader_exam
+    try:
+        refused_controls = exam.all_controls()
+        item_cases, item_controls = exam.item_pins()
+        honest = exam.judge(exam.good_lines())
+    except exam.ReaderError as error:
+        fail(f"link-v3-reader: {error}")
+    if honest + len(exam.FACTS) + len(exam.ABSENT) != LINK_V3_READER_CASES:
+        fail(f"link-v3-reader: an honest transcript and the facts are {honest + len(exam.FACTS) + len(exam.ABSENT)} cases, the checker pins {LINK_V3_READER_CASES}")
+    if refused_controls != LINK_V3_READER_CONTROLS:
+        fail(f"link-v3-reader: {refused_controls} controls, the checker pins {LINK_V3_READER_CONTROLS}")
+    if item_cases and item_cases != LINK_V3_READER_CASES:
+        fail(f"link-v3-reader: the item fixes {item_cases} cases, the checker pins {LINK_V3_READER_CASES}")
+    if item_controls and item_controls != LINK_V3_READER_CONTROLS:
+        fail(f"link-v3-reader: the item requires {item_controls} controls, the checker pins {LINK_V3_READER_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 link-v3-reader judge: refused {refused_controls} corrupted inputs")
+        return 0
+    try:
+        cases = exam.check_facts() + exam.judge(run_link_v3_reader())
+    except exam.ReaderError as error:
+        fail(f"link-v3-reader: {error}")
+    if cases != LINK_V3_READER_CASES:
+        fail(f"link-v3-reader: the run observed {cases} cases, the checker pins {LINK_V3_READER_CASES}")
+    print(f"[zenoh-profile0] slice=link-v3-reader cases={cases} controls={refused_controls}")
+    devloop_observations.record(casesObserved=cases, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 link-v3-reader check: the service builds its session parameters from a configuration the version 3 contract accepts")
+    return 0
+
+
 def composition_main(controls_only: bool) -> int:
     contract = zenoh_exchange.demo()
     try:
@@ -3761,7 +3812,7 @@ def lost_holder_main(controls_only: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-client", "rmw-router-link", "rmw-client-put", "rmw-live", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "lanes", "link-limits-v3", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service-peer", "service-four", "service", "service-link", "holder-fault", "service-stack", "lost-holder"), required=True)
+    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-client", "rmw-router-link", "rmw-client-put", "rmw-live", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "lanes", "link-limits-v3", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service-peer", "service-four", "service", "service-link", "holder-fault", "service-stack", "link-v3-reader", "lost-holder"), required=True)
     parser.add_argument("--controls-only", action="store_true")
     arguments = parser.parse_args()
     if arguments.slice == "composition":
@@ -3836,6 +3887,8 @@ def main() -> int:
         return service_main(arguments.controls_only)
     if arguments.slice == "service-link":
         return service_link_main(arguments.controls_only)
+    if arguments.slice == "link-v3-reader":
+        return link_v3_reader_main(arguments.controls_only)
     if arguments.slice == "service-stack":
         return service_stack_main(arguments.controls_only)
     if arguments.slice == "holder-fault":
