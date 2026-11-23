@@ -1,0 +1,70 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a2095e-8c5f-717f-af72-60abb7f7ed80" "zenoh-rmw-discover" "zenoh-transport"
+  "`ros2 node list` shows a Slime node that a client-role link declared through a live rmw_zenohd"
+  "The client-role link declares liveliness tokens, and its exam judges the bytes. No run has shown that `ros2` builds a graph from them. Probes with the Python wire library listed `/slime_node` and `/chatter`, and the Rust link took no part. The live program exchanges samples and declares no token.")
+  with {
+    owns = {
+      "verification/zenoh-live/**";
+    };
+    nonGoals = {
+      h.nonGoal "A change to the library, a component, a composition, a system spec, a QEMU gate or a NIC. The program is a host binary built from the library." h.agentDefault;
+      h.nonGoal "A change to `zenoh-rmw-live` or its exam. The program keeps the `inbound` and `outbound` directions as they are, and this item adds `discover`." h.agentDefault;
+      h.nonGoal "Pinning the ROS packages in `flake.nix`. The operator names the router and the ROS install in two environment variables, and CI does not run the target." h.agentDefault;
+      h.nonGoal "A subscription token, a service token, a second node, a namespace other than `/`, and a key alias or a QoS wrapper on a token." h.agentDefault;
+      h.nonGoal "A ROS node that receives the Slime publisher's Puts. `zenoh-rmw-live` covers that." h.agentDefault;
+    };
+    requirements = {
+      h.req "ros2-lists-the-slime-node"
+        "A client-role link declares the node token and the publisher token of `slime_node` and holds its session open. Then `ros2 node list` prints `/slime_node` and nothing else. `ros2 topic list` prints `/chatter` and the two built-in topics `/parameter_events` and `/rosout`."
+        { "zenoh_rmw_discover_check"; };
+      h.req "the-tokens-leave-with-the-session"
+        "After the link closes with reason 0, `ros2 node list` prints no node and `ros2 topic list` prints the two built-in topics alone. The link withdraws no token before the close."
+        { "zenoh_rmw_discover_check"; };
+      h.req "the-ros-side-is-ros2s-own-output"
+        "The checker starts `rmw_zenohd`, runs the program with `discover`, and runs `ros2 node list --no-daemon` and `ros2 topic list --no-daemon` itself. The `ros` lines are what it read. The checker refuses any program line that is not a `live` line."
+        { "zenoh_rmw_discover_check"; };
+      h.req "the-run-prints-its-phases-in-order"
+        "The judge refuses a transcript with lines out of order, a short line, or a listing that is missing or read twice. It refuses a line kind that a run prints once and that appears twice. A run prints the handshake, the two token lines, the two listings while the session is open, the close and the two listings after it."
+        { "zenoh_rmw_discover_check"; };
+      h.req "controls-are-refused"
+        "The judge refuses 39 corrupted transcripts before it judges the run."
+        { "zenoh_rmw_discover_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_rmw_discover_check" {
+        h.count "casesObserved" 8;
+        h.count "negativeControlsRefused" 39;
+      };
+    };
+    decisions = {
+      h.decided "an-operator-signs-the-discover-record"
+        "`zenoh_rmw_discover_check` is to be an operator target. A later process PR adds it to `specs/targets.toml`. The item closes when an operator in `specs/allowed_signers` runs it and signs the record."
+        "CI has no router and no ROS packages. A done witness for an item about `ros2` must rest on a run that ran `ros2`"
+        h.agentDefault
+        { "ros2-lists-the-slime-node"; "the-tokens-leave-with-the-session"; };
+      h.decided "the-operator-names-the-environment"
+        "The recipe reads the router and the ROS install from `SLIME_ROS_ENV` and `SLIME_RMW_ZENOHD`. A missing variable fails the run."
+        "the pinned ROS packages are not in `flake.nix`, and a path the checker invented would claim an environment nobody pinned"
+        h.agentDefault
+        { "the-ros-side-is-ros2s-own-output"; };
+      h.decided "the-checker-reads-ros2-without-a-daemon"
+        "The checker runs `ros2 node list --no-daemon` and `ros2 topic list --no-daemon`. The program holds its session open until the checker writes a line to its stdin."
+        "a daemon could keep a graph the router lost, and the close would then appear to withdraw nothing"
+        h.agentDefault
+        { "ros2-lists-the-slime-node"; "the-tokens-leave-with-the-session"; };
+      h.decided "the-program-declares-through-the-library"
+        "The `discover` direction calls `LinkOf::declare_token` for the node token with id 10 and the publisher token with id 11. It builds the two keys from its own ZID and the chatter key."
+        "the exam must judge tokens the Rust link wrote, and a key the checker wrote would test the checker"
+        h.agentDefault
+        { "ros2-lists-the-slime-node"; };
+      h.decided "the-program-is-a-crate-outside-the-workspace"
+        "The program stays `verification/zenoh-live`, with its own `Cargo.toml` and an empty `[workspace]`. This item and `zenoh-rmw-live` both own the path."
+        "the `discover` direction shares the handshake and the framing with the other two, and a second crate would copy them"
+        h.agentDefault
+        { "ros2-lists-the-slime-node"; };
+    };
+  };
+
+item

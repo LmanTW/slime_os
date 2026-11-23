@@ -154,6 +154,16 @@ zenoh_rmw_token_check:
 zenoh_rmw_live_check:
     python3 scripts/check/check-zenoh-profile0.py --slice rmw-live
 
+# A client-role Profile 0 link declares the node token and the publisher token of `slime_node` through a live rmw_zenohd,
+# and `ros2 node list` and `ros2 topic list` show them while the session is open and not after it closes. The checker
+# starts the router, runs the host program in verification/zenoh-live with `discover`, and runs `ros2` itself. The
+# expectation is scripts/lib/zenoh_rmw_discover_exam.py. The operator names the router and the ROS install in
+# SLIME_ROS_ENV and SLIME_RMW_ZENOHD, because the pinned ROS packages are not in flake.nix. CI does not run it. It is to be an
+# operator target in specs/targets.toml, and an operator signs its record.
+[group('hardware')]
+zenoh_rmw_discover_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice rmw-discover
+
 # A Profile 0 graph link that declares its owner's subscription, writes its owner's Puts and holds the samples
 # it receives in a bounded queue. The two captured data sessions of an rmw_zenoh_cpp peer are written to it
 # whole, one byte at a time and all at once. A talker's 11 samples reach the queue in order and 28 other pushes
