@@ -45,7 +45,7 @@ FACTS: tuple[facts.Fact, ...] = (
      '    { grant = "delta-zenoh-provision"; slot = 28; };\n    { grant = "gamma-zenoh-provision"; slot = 27; };'),
     ("spec-grants", SPEC, r"^\s*zenohGrants = \[\n(?:\s+\{ holder = \"[\w-]+\"; key[^\n]*\n){6}\s*\];$",
      "  zenohGrants = [\n" + "".join('    { holder = "a"; key = "k"; };\n' for _ in range(6)) + "  ];"),
-    ("manifest-name", MANIFEST, rf'\bname = "{SYSTEM}";', f'  name = "{SYSTEM}";'),
+    ("manifest-generation", MANIFEST, rf"^\s*generation = {arm.FOUR_GENERATION};$", f"  generation = {arm.FOUR_GENERATION};"),
     ("manifest-grants", MANIFEST, r"^\s*zenohGrants = \[$", "  zenohGrants = ["),
     ("inventory", "contracts/composition-inventory/v1/inventory.zti", rf'composition = "{SYSTEM}";(?:(?!\n    \}};)[^}}])*?owningGate = "zenoh_service_four_check";',
      f'    {{\n      composition = "{SYSTEM}";\n      owningGate = "zenoh_service_four_check";\n    }};'),

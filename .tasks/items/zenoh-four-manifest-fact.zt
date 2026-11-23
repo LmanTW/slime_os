@@ -1,0 +1,35 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.bug "01a2072f-fd19-7088-965d-563f1dedc445" "zenoh-four-manifest-fact" "zenoh-service-core"
+  "The four-holder judge reads the generation of the manifest and not a name the manifest lacks"
+  "The fact `manifest-name` of `zenoh_service_four_exam.py` requires the line `name = \"sel4-zenoh-service-four\";` in the generation manifest. The manifest has no top-level name. It holds a generation, so the fact fails on the manifest the generator writes and the recipe `zenoh_service_four_check` cannot pass.")
+  with {
+    owns = {
+      "scripts/lib/zenoh_service_four_exam.py";
+    };
+    nonGoals = {
+      h.nonGoal "The other 20 facts, the transcript controls and the arm. They match the files the generators write." h.agentDefault;
+      h.nonGoal "The counts. The fact keeps its place, so the judge still holds 21 facts and 68 controls." h.agentDefault;
+    };
+    requirements = {
+      h.req "the-manifest-fact-reads-the-generation"
+        "The fact `manifest-generation` requires the line `generation = 174;` in the manifest of `sel4-zenoh-service-four`. A manifest with another generation fails it, and the generated manifest passes it."
+        { "zenoh_service_four_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_service_four_check" {
+        h.count "casesObserved" 30;
+        h.count "negativeControlsRefused" 68;
+      };
+    };
+    decisions = {
+      h.decided "read-the-generation"
+        "The fact reads the generation line, which the generator writes. It does not ask the manifest for a name."
+        "the manifest schema carries a generation and no name, and the closure and the test-run record already hold the name"
+        h.agentDefault
+        { "the-manifest-fact-reads-the-generation"; };
+    };
+  };
+
+item
