@@ -1854,7 +1854,6 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
         Ok(outcome)
     }
 
-    /// Writes a FRAME undeclaring this side's subscriber `id` on `key`.
     /// The ids of the liveliness tokens this side holds, in the order it declared them.
     pub fn tokens_held(&self) -> &[u32] {
         &self.tokens[..self.token_n]
@@ -1903,6 +1902,7 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
         Ok(outcome)
     }
 
+    /// Writes a FRAME undeclaring this side's subscriber `id` on `key`.
     pub fn send_undeclare_subscriber<'a>(
         &mut self,
         id: u32,
