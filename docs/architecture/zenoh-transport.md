@@ -509,14 +509,34 @@ timestamp. `scripts/lib/zenoh_rmw_client_put_exam.py` judges a client-role link 
 `zenoh_rmw_router_data`, fed whole, one byte at a time and all at once. The link publishes four Puts on the chatter key,
 and the exam compares each with the bytes `scripts/lib/zenoh_wire.py` writes. The router is not in that exam.
 
+The live run, `zenoh_rmw_live_check`, is the first run of this link against a router. The checker starts `rmw_zenohd` and a
+`demo_nodes_cpp` node for each of two directions and runs `verification/zenoh-live` against them. The program is a host
+binary built from the library, outside the root workspace. It prints only `live` lines. The checker reads the listener's
+own log and adds the `ros` lines, and it fails the run on any program line of another kind.
+
+| Direction | ROS node | What the link did | What shows it |
+| --- | --- | --- | --- |
+| Inbound | `talker` | Subscribed on the chatter key and delivered at least 4 samples | The program's `sample` lines. Each carries a sequence number that agrees with its `Hello World: N` string, and the numbers rise by one |
+| Outbound | `listener` | Wrote 6 Puts on the chatter key, 0.5 s apart | The listener's own `I heard: [Hello Slime N]` lines, read by the checker |
+
+`scripts/lib/zenoh_rmw_live_exam.py` judges the transcript and refuses 38 corrupted ones. The controls show that a bad
+transcript is refused. They do not show that a router ran.
+
 Known limits:
 
-- The plain session and the plain link take the role. The graph link and the graph session do not, and no component
-  connects to a router yet.
+- The plain session and the plain link take the role. The graph link and the graph session do not. The link is not
+  visible to `ros2 topic list` or `ros2 node list`.
 - A router writes nothing back, so the link cannot tell a matched Put from a dropped one.
-- Two host probes, on one host and with the Python wire library, ran a client behind `rmw_zenohd` and a ROS `listener`.
-  The router delivered a Put only to a listener whose subscription had the same key, type hash included, and dropped
-  the others without a reply. The probes are not fixtures, and no Rust link has met a router.
+- The live target is an operator target in `specs/targets.toml`, and CI does not run it. The router and the nodes come
+  from packages `flake.nix` does not pin, which the operator names in four environment variables. The item closes only
+  when an operator in `specs/allowed_signers` signs a record of a run. No such record exists, and the runs behind this page
+  are the author's, on one host with `rmw_zenoh_cpp` 0.6.10-r1 and `demo_nodes_cpp` 0.36.6-r1.
+- The handshake line prints `whatami=0` as a literal, because the library does not expose the router's `whatami`. A
+  client-role session reaches `Open` only after an `INIT_ACK` of `whatami` 0, so the line follows from the decoder and is
+  not a reading. The outbound direction prints no router line of its own.
+- Two host probes, with the Python wire library, ran a client behind `rmw_zenohd` and a ROS `listener`. The router
+  delivered a Put only to a listener whose subscription had the same key, type hash included, and dropped the others
+  without a reply. The probes are not fixtures.
 - A Put in fragments keeps the declared-key check for every session that fragments, because no exam observes a client
   writing fragments. A session that does not fragment refuses a Put in fragments as over the bound, before the key check.
 - A client-role session reads a FRAME through the plain decoder, including one that negotiated lanes. The session sends a
@@ -609,6 +629,9 @@ Known limits:
   Zlib-licensed transitive crates, which the root `deny.toml` does not allow;
 - `just zenoh_rmw_client_check` — a connector with the client role against two handshakes of `rmw_zenohd`: 13 cases
   and 52 controls. A connector with no role still refuses them; explicit, not part of `all`;
+- `just zenoh_rmw_live_check` — a client-role link against a live `rmw_zenohd`, a talker and a listener: at least 12
+  cases and 38 controls. The checker starts the router and the nodes, the operator names them in four environment
+  variables, and CI does not run it; an operator target, explicit, not part of `all`;
 - `just zenoh_rmw_client_put_check` — a client-role link writes four Puts through the handshakes of two `rmw_zenohd` runs:
   25 cases and 66 controls. No router runs, and a link with no role still refuses an undeclared key; explicit, not part of
   `all`;
