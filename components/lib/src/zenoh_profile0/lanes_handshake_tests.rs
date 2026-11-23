@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::zenoh_profile0::encode::{init_ack, init_ack_qos, init_syn, init_syn_qos};
+use crate::zenoh_profile0::session::SessionOf;
 use crate::zenoh_profile0::{decode_batch, decode_batch_qos};
 
 const ZID: [u8; 3] = [0x11, 0x22, 0x33];
@@ -46,13 +47,16 @@ fn params() -> Params {
     }
 }
 
-fn session(role: Role, runs: usize) -> Session {
+/// A session built for `R` runs, the number its type declares.
+type Held<const R: usize> = SessionOf<1, 2, MAX_KEY_BYTES, MAX_EVENTS, R>;
+
+fn session<const R: usize>(role: Role) -> Held<R> {
     let cookie = if role == Role::Listener {
         &COOKIE[..]
     } else {
         &[]
     };
-    Session::with_lanes(role, &config(&ZID, cookie), params(), runs).expect("session")
+    Held::<R>::with_lanes(role, &config(&ZID, cookie), params(), R).expect("session")
 }
 
 #[test]
@@ -98,8 +102,9 @@ fn the_decoder_reports_the_extension_and_refuses_it_where_it_always_did() {
 
 #[test]
 fn a_session_with_one_run_writes_the_init_it_always_wrote() {
-    for runs in [0, 1] {
-        let mut connector = session(Role::Connector, runs);
+    {
+        let runs = 1;
+        let mut connector = session::<1>(Role::Connector);
         let mut out = [0u8; MAX_BATCH_BYTES];
         let outcome = connector.connect(0, &mut out).expect("connect");
         assert_eq!(hex(outcome.batch(&out)), SYN, "{runs} runs");
@@ -109,7 +114,7 @@ fn a_session_with_one_run_writes_the_init_it_always_wrote() {
 
 #[test]
 fn a_connector_with_runs_offers_and_the_peer_accepts() {
-    let mut connector = session(Role::Connector, 2);
+    let mut connector = session::<2>(Role::Connector);
     let mut out = [0u8; MAX_BATCH_BYTES];
     let outcome = connector.connect(0, &mut out).expect("connect");
     assert_eq!(hex(outcome.batch(&out)), SYN_QOS);
@@ -121,7 +126,7 @@ fn a_connector_with_runs_offers_and_the_peer_accepts() {
 
 #[test]
 fn a_connector_with_runs_whose_peer_declines_has_one_lane() {
-    let mut connector = session(Role::Connector, 2);
+    let mut connector = session::<2>(Role::Connector);
     let mut out = [0u8; MAX_BATCH_BYTES];
     connector.connect(0, &mut out).expect("connect");
     let peer = unhex("6109214455660a000804aabbccdd");
@@ -131,7 +136,7 @@ fn a_connector_with_runs_whose_peer_declines_has_one_lane() {
 
 #[test]
 fn a_connector_with_one_run_refuses_an_init_ack_with_the_extension() {
-    let mut connector = session(Role::Connector, 1);
+    let mut connector = session::<1>(Role::Connector);
     let mut out = [0u8; MAX_BATCH_BYTES];
     connector.connect(0, &mut out).expect("connect");
     let peer = unhex("e109214455660a000804aabbccdd01");
@@ -144,7 +149,7 @@ fn a_connector_with_one_run_refuses_an_init_ack_with_the_extension() {
 
 #[test]
 fn a_listener_with_runs_answers_an_offer_with_the_extension() {
-    let mut listener = session(Role::Listener, 2);
+    let mut listener = session::<2>(Role::Listener);
     let mut out = [0u8; MAX_BATCH_BYTES];
     let peer = unhex("c109214455660a000801");
     let reply = listener.on_batch(&peer, 0, &mut out).expect("INIT_SYN");
@@ -154,7 +159,7 @@ fn a_listener_with_runs_answers_an_offer_with_the_extension() {
 
 #[test]
 fn a_listener_with_runs_answers_a_silent_peer_without_it() {
-    let mut listener = session(Role::Listener, 2);
+    let mut listener = session::<2>(Role::Listener);
     let mut out = [0u8; MAX_BATCH_BYTES];
     let peer = unhex("4109214455660a0008");
     let reply = listener.on_batch(&peer, 0, &mut out).expect("INIT_SYN");
@@ -164,7 +169,7 @@ fn a_listener_with_runs_answers_a_silent_peer_without_it() {
 
 #[test]
 fn a_listener_with_one_run_answers_an_offer_without_the_extension() {
-    let mut listener = session(Role::Listener, 1);
+    let mut listener = session::<1>(Role::Listener);
     let mut out = [0u8; MAX_BATCH_BYTES];
     let peer = unhex("c109214455660a000801");
     let reply = listener.on_batch(&peer, 0, &mut out).expect("INIT_SYN");
@@ -173,13 +178,34 @@ fn a_listener_with_one_run_answers_an_offer_without_the_extension() {
 }
 
 #[test]
-fn the_run_count_is_at_most_sixteen() {
+fn the_run_count_is_the_one_the_type_declares_and_at_most_sixteen() {
     let config = config(&ZID, &[]);
-    assert!(Session::with_lanes(Role::Connector, &config, params(), 16).is_ok());
+    assert!(Held::<16>::with_lanes(Role::Connector, &config, params(), 16).is_ok());
+    // A run count that is not the type's is refused, below it, above it and at zero.
+    for runs in [0, 1, 3, 17] {
+        assert_eq!(
+            Held::<2>::with_lanes(Role::Connector, &config, params(), runs).err(),
+            Some(SessionError::InvalidConfig),
+            "{runs} runs in a type of 2"
+        );
+    }
     assert_eq!(
-        Session::with_lanes(Role::Connector, &config, params(), 17).err(),
+        Held::<17>::with_lanes(Role::Connector, &config, params(), 17).err(),
         Some(SessionError::InvalidConfig)
     );
+    // A session that does not fragment may hold none, as a fixed link does. One that fragments needs a run.
+    assert!(Held::<0>::with_lanes(Role::Connector, &config, params(), 0).is_ok());
+    let fragmenting = Params {
+        fragments: true,
+        timeout_ms: 5000,
+        message_limit: 4096,
+        ..params()
+    };
+    assert_eq!(
+        Held::<0>::with_lanes(Role::Connector, &config, fragmenting, 0).err(),
+        Some(SessionError::InvalidConfig)
+    );
+    assert!(Held::<1>::with_lanes(Role::Connector, &config, fragmenting, 1).is_ok());
     assert_eq!(PEER_ZID.len(), 3);
 }
 

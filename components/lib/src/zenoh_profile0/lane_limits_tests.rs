@@ -120,8 +120,24 @@ fn a_declaration_the_version_one_rules_refuse_is_refused_here() {
 
 #[test]
 fn the_margins_cover_the_state_a_run_and_the_lanes_hold() {
-    // A table of runs holds one `Run` for each, and the contract charges 64 bytes for it.
-    assert!(core::mem::size_of::<Run>() as u64 <= RUN_OVERHEAD_BYTES);
+    // A slot of the session's table holds a `Run` and the `Lane` it serves. The contract charges 64 bytes for each
+    // run beyond the first, so a slot, and the growth of the session for one more run, must fit it.
+    let slot = (core::mem::size_of::<Run>()
+        + core::mem::size_of::<crate::zenoh_profile0::lane::Lane>()) as u64;
+    assert!(slot <= RUN_OVERHEAD_BYTES, "a slot is {slot} bytes");
+    type Held<const R: usize> = crate::zenoh_profile0::session::SessionOf<1, 2, 129, 4, R>;
+    // The table is part of the session, and padding may round a step, so the check is on the steps and on the
+    // whole growth from 2 runs to 16, which must stay within the 14 runs the contract charges for.
+    let step = (core::mem::size_of::<Held<3>>() - core::mem::size_of::<Held<2>>()) as u64;
+    assert!(
+        (1..=RUN_OVERHEAD_BYTES).contains(&step),
+        "a run adds {step} bytes to a session"
+    );
+    let grown = (core::mem::size_of::<Held<16>>() - core::mem::size_of::<Held<2>>()) as u64;
+    assert!(
+        grown <= 14 * RUN_OVERHEAD_BYTES,
+        "14 runs add {grown} bytes to a session"
+    );
     // The counters are one 32-bit sequence number for each of the 16 lanes, which is all the contract charges.
     assert_eq!(
         (MAX_RUNS_LIMIT * core::mem::size_of::<u32>()) as u64,

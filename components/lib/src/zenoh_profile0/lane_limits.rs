@@ -11,7 +11,8 @@ use super::limits::{HANDSHAKE_BYTES, Limits, LimitsError, Mode};
 /// The most runs a link may hold: a lane is a priority (0 to 7) and a reliability, so a stock peer has at
 /// most 16 messages open.
 pub const MAX_RUNS_LIMIT: usize = 16;
-/// The state of one run beyond the first, held with a margin over `size_of::<Reassembly>()`.
+/// The state of one run beyond the first, held with a margin over what a slot of the session's table holds: a
+/// `Run` and the `Lane` it serves.
 pub const RUN_OVERHEAD_BYTES: u64 = 64;
 /// The sequence counters of the lanes, charged once for a link with several runs.
 pub const LANE_COUNTER_BYTES: u64 = 64;

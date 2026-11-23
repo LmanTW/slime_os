@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::zenoh_profile0::encode::FrameEncoder;
+use crate::zenoh_profile0::session::SessionOf;
 use std::vec::Vec;
 
 const KEY: &str = "0/slime_demo/counter/slime_demo_msgs::msg::dds_::Counter_/RIHS01_a82fd5ffcb96d0a197a5ad3680d1c4e6ba43a962928ecd592fb565eb8129595b";
@@ -53,8 +54,11 @@ fn lane_frame(reliable: bool, priority: u8, sn: u32, body: &[u8]) -> Vec<u8> {
 /// A listener with 2 runs and a connector with 2 runs, both open with the QoS extension negotiated.
 /// The connector declares the subscription, so the listener holds the peer's subscriber on `KEY`, and the
 /// listener, the receiver of the frames under test, has its own subscription on `KEY`.
-fn open_pair() -> (Session, Session) {
-    let mut a = Session::with_lanes(
+/// A session built for 2 runs: the two that a pair of the exam's lanes needs.
+type Two = SessionOf<1, 2, MAX_KEY_BYTES, MAX_EVENTS, 2>;
+
+fn open_pair() -> (Two, Two) {
+    let mut a = Two::with_lanes(
         Role::Connector,
         &Config {
             zid: &[0xa1; 8],
@@ -67,7 +71,7 @@ fn open_pair() -> (Session, Session) {
     )
     .expect("connector");
     let cookie = [0xc0u8; 8];
-    let mut b = Session::with_lanes(
+    let mut b = Two::with_lanes(
         Role::Listener,
         &Config {
             zid: &[0xb2; 8],
@@ -107,7 +111,7 @@ fn open_pair() -> (Session, Session) {
 }
 
 /// The listener declares its subscription and the connector, the sender of the frames, learns of it.
-fn subscribed() -> (Session, Session) {
+fn subscribed() -> (Two, Two) {
     let (mut sender, mut receiver) = open_pair();
     let mut out = [0u8; MAX_BATCH_BYTES];
     let declare = receiver
@@ -119,8 +123,8 @@ fn subscribed() -> (Session, Session) {
     (sender, receiver)
 }
 
-fn feed(
-    session: &mut Session,
+fn feed<const R: usize>(
+    session: &mut SessionOf<1, 2, MAX_KEY_BYTES, MAX_EVENTS, R>,
     batch: &[u8],
     now: u64,
 ) -> Result<Vec<std::string::String>, SessionError> {
@@ -421,9 +425,9 @@ fn heap_params() -> Params {
     }
 }
 
-fn heap_pair() -> (Session, Session) {
+fn heap_pair() -> (Two, Two) {
     let mk = |role, zid: &[u8; 8], sn, cookie: &[u8]| {
-        Session::with_lanes(
+        Two::with_lanes(
             role,
             &Config {
                 zid,
@@ -465,7 +469,13 @@ fn heap_pair() -> (Session, Session) {
     (a, b)
 }
 
+/// The fragments of one Put of `size` payload bytes on the default priority.
 fn fragments(first_sn: u32, size: usize) -> Vec<Vec<u8>> {
+    fragments_on(5, first_sn, size)
+}
+
+/// The same fragments on `priority`: the default has no extension, any other the mandatory one after the number.
+fn fragments_on(priority: u8, first_sn: u32, size: usize) -> Vec<Vec<u8>> {
     let mut message = std::vec![0x7du8, 0x00, 0x81, 0x01];
     message.extend_from_slice(KEY.as_bytes());
     message.extend_from_slice(&[0x01 | 0x80, 0x43, 33]);
@@ -483,7 +493,12 @@ fn fragments(first_sn: u32, size: usize) -> Vec<Vec<u8>> {
         let room = 200usize;
         let end = (at + room).min(message.len());
         let more = end < message.len();
-        let mut body = std::vec![0x06 | 0x20 | if more { 0x40 } else { 0 }, sn as u8];
+        let flags =
+            0x06 | 0x20 | if more { 0x40 } else { 0 } | if priority == 5 { 0 } else { 0x80 };
+        let mut body = std::vec![flags, sn as u8];
+        if priority != 5 {
+            body.extend_from_slice(&[0x31, priority]);
+        }
         body.extend_from_slice(&message[at..end]);
         out.push(body);
         at = end;
@@ -492,57 +507,223 @@ fn fragments(first_sn: u32, size: usize) -> Vec<Vec<u8>> {
     out
 }
 
+/// The storage of each run a `Two` session holds, one cell for each slot, as a link lends it.
+struct Cells {
+    cells: [Vec<u8>; 2],
+}
+
+impl Cells {
+    fn new() -> Self {
+        Self {
+            cells: [std::vec![0u8; 4096], std::vec![0u8; 4096]],
+        }
+    }
+}
+
+/// Feeds one fragment the way a link does: the lane from the header, the slot the session names for it, and the
+/// storage of that slot.
+fn fragment_in(
+    session: &mut Two,
+    cells: &mut Cells,
+    batch: &[u8],
+    now: u64,
+) -> Result<usize, SessionError> {
+    let header = crate::zenoh_profile0::lane::decode_lane_fragment(batch, None).expect("header");
+    let slot = session
+        .run_slot(header.lane)
+        .ok_or(SessionError::LaneLimit)?;
+    let outcome = session.on_lane_fragment(batch, now, &mut cells.cells[slot])?;
+    Ok(outcome.events.len())
+}
+
 #[test]
-fn a_fragmented_message_moves_the_default_lane_counter() {
+fn a_fragmented_message_moves_the_lane_counter_it_is_on() {
     let (_, mut receiver) = heap_pair();
-    let mut cell = std::vec![0u8; 4096];
-    let mut out = [0u8; MAX_BATCH_BYTES];
+    let mut cells = Cells::new();
     let parts = fragments(100, 300);
     assert_eq!(parts.len(), 3);
     for (at, part) in parts.iter().enumerate() {
-        let outcome = receiver
-            .on_batch_with(part, 10 + at as u64, &mut out, &mut cell)
-            .expect("fragment");
-        assert_eq!(outcome.events.len(), usize::from(at == 2), "fragment {at}");
+        let events =
+            fragment_in(&mut receiver, &mut cells, part, 10 + at as u64).expect("fragment");
+        assert_eq!(events, usize::from(at == 2), "fragment {at}");
     }
-    // One counter serves the plain path, the lane path and the fragments, so all three agree.
-    assert_eq!(receiver.expected_rx_sn(), 103);
     assert_eq!(receiver.lane_next(Lane::DEFAULT), 103);
+    assert!(!receiver.reassembling());
+    // The next number is taken and a number the fragments already used is refused.
     let body = put_body(1);
+    let mut out = [0u8; MAX_BATCH_BYTES];
     let next = lane_frame(true, 5, 103, &body);
-    let taken = receiver.on_batch_with(&next, 20, &mut out, &mut cell);
+    let taken = receiver.on_batch_with(&next, 20, &mut out, &mut cells.cells[0]);
     assert_eq!(taken.map(|outcome| outcome.events.len()), Ok(1));
-    // A number the fragments already used is refused, not taken again.
     let replay = lane_frame(true, 5, 100, &body);
     assert_eq!(
         receiver
-            .on_batch_with(&replay, 21, &mut out, &mut cell)
+            .on_batch_with(&replay, 21, &mut out, &mut cells.cells[0])
             .err(),
         Some(SessionError::SequenceMismatch)
     );
 }
 
 #[test]
-fn a_reliable_frame_on_the_lane_of_an_open_run_ends_the_run_and_is_refused() {
+fn two_lanes_hold_two_runs_at_once_in_two_cells() {
+    let (_, mut receiver) = heap_pair();
+    let mut cells = Cells::new();
+    let first = fragments_on(2, 100, 300);
+    let second = fragments_on(5, 100, 300);
+    // The runs interleave, and each completes into a sample of its own.
+    let mut samples = 0;
+    for at in 0..3 {
+        samples += fragment_in(&mut receiver, &mut cells, &first[at], 10 + at as u64).expect("p2");
+        samples += fragment_in(&mut receiver, &mut cells, &second[at], 10 + at as u64).expect("p5");
+        if at < 2 {
+            assert!(receiver.reassembling());
+        }
+    }
+    assert_eq!(samples, 2);
+    assert!(!receiver.reassembling());
+    assert_eq!(
+        receiver.lane_next(Lane {
+            priority: 2,
+            reliable: true
+        }),
+        103
+    );
+    assert_eq!(receiver.lane_next(Lane::DEFAULT), 103);
+    assert_eq!(
+        receiver.lane_next(Lane {
+            priority: 7,
+            reliable: true
+        }),
+        100
+    );
+}
+
+#[test]
+fn the_slot_a_lane_is_given_is_the_slot_it_keeps() {
+    let (_, mut receiver) = heap_pair();
+    let mut cells = Cells::new();
+    let lane = |priority| Lane {
+        priority,
+        reliable: true,
+    };
+    // An idle session offers the first free slot to any lane.
+    assert_eq!(receiver.run_slot(lane(2)), Some(0));
+    assert_eq!(receiver.run_slot(lane(5)), Some(0));
+    let first = fragments_on(2, 100, 300);
+    fragment_in(&mut receiver, &mut cells, &first[0], 10).expect("first");
+    // The lane of the open run keeps its slot, and another lane is offered the next free one.
+    assert_eq!(receiver.run_slot(lane(2)), Some(0));
+    assert_eq!(receiver.run_slot(lane(5)), Some(1));
+    let second = fragments_on(5, 100, 300);
+    fragment_in(&mut receiver, &mut cells, &second[0], 11).expect("second");
+    assert_eq!(receiver.run_slot(lane(5)), Some(1));
+    // Every slot is open, so a third lane has none, and the two open lanes keep theirs.
+    assert_eq!(receiver.run_slot(lane(7)), None);
+    assert_eq!(receiver.run_slot(lane(2)), Some(0));
+}
+
+#[test]
+fn a_first_fragment_with_every_run_open_is_refused_as_lane_limit() {
+    let (_, mut receiver) = heap_pair();
+    let mut cells = Cells::new();
+    for (priority, at) in [(2, 10), (5, 11)] {
+        let parts = fragments_on(priority, 100, 300);
+        fragment_in(&mut receiver, &mut cells, &parts[0], at).expect("first");
+    }
+    // The session itself says so, given a cell for a slot that does not exist.
+    let third = fragments_on(7, 100, 300);
+    let mut spare = std::vec![0u8; 4096];
+    assert_eq!(
+        receiver.on_lane_fragment(&third[0], 12, &mut spare).err(),
+        Some(SessionError::LaneLimit)
+    );
+    assert_eq!(
+        receiver.lane_next(Lane {
+            priority: 7,
+            reliable: true
+        }),
+        100
+    );
+    // A wrong first number is judged before the room for it.
+    let wrong = fragments_on(7, 105, 300);
+    assert_eq!(
+        receiver.on_lane_fragment(&wrong[0], 13, &mut spare).err(),
+        Some(SessionError::SequenceMismatch)
+    );
+}
+
+#[test]
+fn a_session_with_lanes_refuses_a_fragment_through_the_one_cell_path() {
     let (_, mut receiver) = heap_pair();
     let mut cell = std::vec![0u8; 4096];
     let mut out = [0u8; MAX_BATCH_BYTES];
     let parts = fragments(100, 300);
-    receiver
-        .on_batch_with(&parts[0], 10, &mut out, &mut cell)
-        .expect("first fragment");
-    assert!(receiver.reassembling());
-    let body = put_body(1);
-    let frame = lane_frame(true, 5, 101, &body);
     assert_eq!(
         receiver
-            .on_batch_with(&frame, 11, &mut out, &mut cell)
+            .on_batch_with(&parts[0], 10, &mut out, &mut cell)
             .err(),
         Some(SessionError::UnexpectedMessage)
     );
-    // The run is gone, as it is for a plain FRAME, and the counter did not move.
     assert!(!receiver.reassembling());
-    assert_eq!(receiver.lane_next(Lane::DEFAULT), 100);
+}
+
+#[test]
+fn a_reliable_frame_on_the_lane_of_an_open_run_ends_that_run_and_is_refused() {
+    let (_, mut receiver) = heap_pair();
+    let mut cells = Cells::new();
+    let body = put_body(1);
+    let mut out = [0u8; MAX_BATCH_BYTES];
+    for priority in [5u8, 2] {
+        let parts = fragments_on(priority, 100, 300);
+        fragment_in(&mut receiver, &mut cells, &parts[0], 10).expect("first fragment");
+        let lane = Lane {
+            priority,
+            reliable: true,
+        };
+        assert!(receiver.reassembling());
+        let frame = lane_frame(true, priority, 101, &body);
+        assert_eq!(
+            receiver
+                .on_batch_with(&frame, 11, &mut out, &mut cells.cells[0])
+                .err(),
+            Some(SessionError::UnexpectedMessage),
+            "priority {priority}"
+        );
+        // The run of that lane is gone, and the counter did not move.
+        assert!(!receiver.reassembling(), "priority {priority}");
+        assert_eq!(receiver.lane_next(lane), 100);
+    }
+}
+
+#[test]
+fn a_frame_on_another_lane_is_taken_inside_an_open_run() {
+    let (_, mut receiver) = heap_pair();
+    let mut cells = Cells::new();
+    let mut out = [0u8; MAX_BATCH_BYTES];
+    let parts = fragments_on(2, 100, 300);
+    fragment_in(&mut receiver, &mut cells, &parts[0], 10).expect("first fragment");
+    assert!(receiver.reassembling());
+    let body = put_body(1);
+    // The run belongs to priority 2. A reliable FRAME on the default priority has its own counter and is
+    // delivered, and neither it nor a best-effort FRAME ends the run.
+    let reliable = lane_frame(true, 5, 100, &body);
+    let taken = receiver.on_batch_with(&reliable, 11, &mut out, &mut cells.cells[1]);
+    assert_eq!(taken.map(|outcome| outcome.events.len()), Ok(1));
+    let best_effort = lane_frame(false, 5, 100, &body);
+    let taken = receiver.on_batch_with(&best_effort, 12, &mut out, &mut cells.cells[1]);
+    assert_eq!(taken.map(|outcome| outcome.events.len()), Ok(1));
+    assert!(receiver.reassembling());
+    for (at, part) in parts[1..].iter().enumerate() {
+        fragment_in(&mut receiver, &mut cells, part, 13 + at as u64).expect("fragment");
+    }
+    assert!(!receiver.reassembling());
+    assert_eq!(
+        receiver.lane_next(Lane {
+            priority: 2,
+            reliable: true
+        }),
+        103
+    );
 }
 
 #[test]
@@ -566,81 +747,122 @@ fn the_room_a_lane_frame_asks_for_covers_what_it_raises() {
     assert_eq!(receiver.events_needed(&bad), (0, 0));
 }
 
-#[test]
-fn a_frame_on_another_lane_is_taken_inside_an_open_run() {
-    let (_, mut receiver) = heap_pair();
-    let mut cell = std::vec![0u8; 4096];
+/// A pair whose lease is far past any clock these tests reach, so only a run's timeout can end a run.
+fn long_lease_pair() -> Two {
+    let mk = |role, zid: &[u8; 8], sn, cookie: &[u8]| {
+        Two::with_lanes(
+            role,
+            &Config {
+                zid,
+                lease_ms: 1_000_000,
+                initial_sn: sn,
+                cookie,
+            },
+            heap_params(),
+            2,
+        )
+        .expect("session")
+    };
+    let mut a = mk(Role::Connector, &[0xa1; 8], 100, &[]);
+    let mut b = mk(Role::Listener, &[0xb2; 8], SN0, &[0xc0; 8]);
     let mut out = [0u8; MAX_BATCH_BYTES];
-    let parts = fragments(100, 300);
-    receiver
-        .on_batch_with(&parts[0], 10, &mut out, &mut cell)
-        .expect("first fragment");
-    assert!(receiver.reassembling());
-    // The run belongs to the default lane. A reliable FRAME on priority 2 has its own counter and is delivered,
-    // and a best-effort FRAME on the default priority does too. Neither ends the run.
-    let body = put_body(1);
-    let reliable = lane_frame(true, 2, 100, &body);
-    let taken = receiver.on_batch_with(&reliable, 11, &mut out, &mut cell);
-    assert_eq!(taken.map(|outcome| outcome.events.len()), Ok(1));
-    let best_effort = lane_frame(false, 5, 100, &body);
-    let taken = receiver.on_batch_with(&best_effort, 12, &mut out, &mut cell);
-    assert_eq!(taken.map(|outcome| outcome.events.len()), Ok(1));
-    assert!(receiver.reassembling());
-    // The run goes on and completes, so the other lanes did not disturb it.
-    for (at, part) in parts[1..].iter().enumerate() {
-        receiver
-            .on_batch_with(part, 13 + at as u64, &mut out, &mut cell)
-            .expect("fragment");
-    }
-    assert_eq!(receiver.lane_next(Lane::DEFAULT), 103);
+    let syn = a.connect(0, &mut out).expect("c").batch(&out).to_vec();
+    let ack = b
+        .on_batch(&syn, 1, &mut out)
+        .expect("s")
+        .batch(&out)
+        .to_vec();
+    let osyn = a
+        .on_batch(&ack, 2, &mut out)
+        .expect("a")
+        .batch(&out)
+        .to_vec();
+    let oack = b
+        .on_batch(&osyn, 3, &mut out)
+        .expect("o")
+        .batch(&out)
+        .to_vec();
+    a.on_batch(&oack, 4, &mut out).expect("oa");
+    let decl = b
+        .send_declare_subscriber(1, KEY, &mut out)
+        .expect("d")
+        .batch(&out)
+        .to_vec();
+    a.on_batch(&decl, 5, &mut out).expect("l");
+    b
 }
 
 #[test]
-fn fragments_count_from_the_default_lane_and_not_from_another() {
-    let (_, mut receiver) = heap_pair();
-    let mut cell = std::vec![0u8; 4096];
+fn a_run_that_outlives_the_timeout_is_refused_and_every_late_run_is_released() {
+    let mut receiver = long_lease_pair();
+    let mut cells = Cells::new();
     let mut out = [0u8; MAX_BATCH_BYTES];
-    let body = put_body(1);
-    // Move two other lanes, one at the lowest index and one next to the default, so the counters differ: both
-    // are at 101 and the default lane is at 100.
-    for priority in [0, 2, 7] {
-        let moved = lane_frame(true, priority, 100, &body);
-        receiver
-            .on_batch_with(&moved, 10, &mut out, &mut cell)
-            .expect("another lane");
+    for (priority, at) in [(2u8, 1000u64), (5, 2000)] {
+        let parts = fragments_on(priority, 100, 300);
+        fragment_in(&mut receiver, &mut cells, &parts[0], at).expect("first fragment");
     }
-    let moved_best_effort = lane_frame(false, 5, 100, &body);
-    receiver
-        .on_batch_with(&moved_best_effort, 10, &mut out, &mut cell)
-        .expect("best-effort");
+    assert!(receiver.reassembling());
+    // The timeout is 5000 ms from a run's first fragment: 6000 for the first run and 7000 for the second. At
+    // 6000 the first is on its deadline and the second is well inside it.
+    assert!(receiver.tick(6000, &mut out).is_ok());
+    assert!(receiver.reassembling());
+    // At 6001 the first run is late. It is refused and released, and the other stays open.
     assert_eq!(
-        receiver.lane_next(Lane {
-            priority: 0,
-            reliable: true
-        }),
-        101
+        receiver.tick(6001, &mut out).err(),
+        Some(SessionError::Fragment(FragmentError::ReassemblyTimeout))
+    );
+    let lane = |priority| Lane {
+        priority,
+        reliable: true,
+    };
+    assert_eq!(
+        receiver.run_slot(lane(2)),
+        Some(0),
+        "the late run's slot is free again"
     );
     assert_eq!(
-        receiver.lane_next(Lane {
-            priority: 5,
-            reliable: false
-        }),
-        101
+        receiver.run_slot(lane(5)),
+        Some(1),
+        "the other run is still open"
     );
-    assert_eq!(receiver.lane_next(Lane::DEFAULT), 100);
-    // A run that starts at 101 is not the default lane's next number, so its first fragment is refused.
-    let parts = fragments(101, 300);
+    assert!(receiver.reassembling());
+    // At 7001 the second is late too.
     assert_eq!(
-        receiver
-            .on_batch_with(&parts[0], 11, &mut out, &mut cell)
-            .err(),
-        Some(SessionError::SequenceMismatch)
+        receiver.tick(7001, &mut out).err(),
+        Some(SessionError::Fragment(FragmentError::ReassemblyTimeout))
     );
-    // One that starts at 100 is taken.
-    let parts = fragments(100, 300);
-    assert!(
-        receiver
-            .on_batch_with(&parts[0], 12, &mut out, &mut cell)
-            .is_ok()
+    assert!(!receiver.reassembling());
+    // Neither lane's counter moved, so a new message may start at the same number.
+    assert_eq!(receiver.lane_next(lane(2)), 100);
+    assert_eq!(receiver.lane_next(lane(5)), 100);
+}
+
+#[test]
+fn two_late_runs_are_refused_by_one_tick_and_both_released() {
+    let mut receiver = long_lease_pair();
+    let mut cells = Cells::new();
+    let mut out = [0u8; MAX_BATCH_BYTES];
+    for priority in [2u8, 5] {
+        let parts = fragments_on(priority, 100, 300);
+        fragment_in(&mut receiver, &mut cells, &parts[0], 1000).expect("first fragment");
+    }
+    assert_eq!(
+        receiver.tick(6001, &mut out).err(),
+        Some(SessionError::Fragment(FragmentError::ReassemblyTimeout))
     );
+    assert!(!receiver.reassembling());
+}
+
+#[test]
+fn closing_the_session_releases_every_run() {
+    let (_, mut receiver) = heap_pair();
+    let mut cells = Cells::new();
+    let mut out = [0u8; MAX_BATCH_BYTES];
+    for priority in [2u8, 5] {
+        let parts = fragments_on(priority, 100, 300);
+        fragment_in(&mut receiver, &mut cells, &parts[0], 10).expect("first fragment");
+    }
+    assert!(receiver.reassembling());
+    receiver.close(0, &mut out).expect("close");
+    assert!(!receiver.reassembling());
 }

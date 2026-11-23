@@ -16,13 +16,13 @@
 
 use super::encode::{self, EncodeError, FrameEncoder};
 use super::fragment::{
-    FragmentError, PutMessage, PutRules, Source, Splitter, decode_fragment, decode_put,
+    Fragment, FragmentError, PutMessage, PutRules, Source, Splitter, decode_fragment, decode_put,
     fits_one_frame, is_fragment,
 };
-use super::lane::{Lane, decode_lane_frame, is_frame};
+use super::lane::{Lane, decode_lane_fragment, decode_lane_frame, is_frame};
 use super::lane_limits::MAX_RUNS_LIMIT;
 use super::limits::{Limits, Mode};
-use super::reassembly::{Progress, Reassembly};
+use super::reassembly::{Progress, Run};
 use super::tables::{InsertError, Keys, SlotTable};
 use super::{
     Bounds, Frame, MAX_BATCH_BYTES, MAX_COOKIE_BYTES, MAX_KEY_BYTES, Mapping, Message, Network,
@@ -515,7 +515,9 @@ pub struct SessionOf<
     /// The next sequence number each lane takes, indexed by [`Lane::index`], and whether the peer's OPEN has
     /// set it. A lane the peer has not used counts from the number its OPEN announced.
     lane_sn: [u32; LANES],
-    reassembly: Reassembly,
+    /// One run for each of the `R` the session holds, and the lane each open run serves.
+    run_table: [Run; R],
+    run_lane: [Lane; R],
     /// The key aliases a stock peer declared with DeclareKeyExpr, and the keys they stand for.
     aliases: SlotTable<K, B>,
     /// Every subscription, this side's and the peer's, in the `S` slots the configuration declares. A
@@ -586,7 +588,10 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
         params: Params,
         runs: usize,
     ) -> Result<Self, SessionError> {
-        if runs > MAX_RUNS_LIMIT {
+        // The table is exactly what the type declares: fewer runs than `R` leaves slots the session does not
+        // admit to, and more has nowhere to go. A fixed link holds none, as the limits contract states, and a
+        // link that fragments needs at least one to join a message in.
+        if runs != R || R > MAX_RUNS_LIMIT || (params.fragments && R == 0) {
             return Err(SessionError::InvalidConfig);
         }
         // The storage is exactly what the configuration declares: the peer's aliases, our own subscriptions
@@ -640,7 +645,8 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
             runs,
             peer_qos: false,
             lane_sn: [0; LANES],
-            reassembly: Reassembly::new(params.timeout_ms, params.message_limit),
+            run_table: [Run::new(); R],
+            run_lane: [Lane::DEFAULT; R],
             aliases: SlotTable::new(),
             subs: SlotTable::new(),
             local_n: 0,
@@ -803,9 +809,29 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
             .min(self.peer_batch.saturating_sub(STREAM_LENGTH_BYTES))
     }
 
-    /// Whether a reassembly is in progress.
-    pub const fn reassembling(&self) -> bool {
-        self.reassembly.is_open()
+    /// Whether any run is open.
+    pub fn reassembling(&self) -> bool {
+        self.run_table.iter().any(Run::is_open)
+    }
+
+    /// The slot of the open run of `lane`, if it has one.
+    fn slot_of(&self, lane: Lane) -> Option<usize> {
+        self.run_table
+            .iter()
+            .zip(&self.run_lane)
+            .position(|(run, held)| run.is_open() && *held == lane)
+    }
+
+    fn free_slot(&self) -> Option<usize> {
+        self.run_table.iter().position(|run| !run.is_open())
+    }
+
+    /// The slot the next fragment of `lane` joins: the slot of its open run, or the first free one when it has
+    /// none, or `None` when every run is open. The caller lends the storage of that slot to
+    /// [`Self::on_lane_fragment`]. Nothing changes between the two calls, so the slot is the one the fragment
+    /// takes.
+    pub fn run_slot(&self, lane: Lane) -> Option<usize> {
+        self.slot_of(lane).or_else(|| self.free_slot())
     }
 
     /// The key aliases the peer declared.
@@ -881,7 +907,9 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
         self.local_n = 0;
         self.remote_n = 0;
         self.aliases.clear();
-        self.reassembly.release();
+        for run in &mut self.run_table {
+            run.release();
+        }
     }
 
     /// Stamps a batch this side sent, which restarts the keep-alive cadence.
@@ -947,6 +975,11 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
             return Err(SessionError::Closed);
         }
         if self.params.fragments && batch.first().copied().is_some_and(is_fragment) {
+            // A session that negotiated lanes takes its fragments through `on_lane_fragment`, which names the
+            // storage of the run. One lent cell cannot serve several runs.
+            if self.lanes() {
+                return Err(SessionError::UnexpectedMessage);
+            }
             let outcome = self.on_fragment(batch, now_ms, cell)?;
             self.last_rx_ms = now_ms;
             self.now_ms = now_ms;
@@ -1183,8 +1216,8 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
         if self.state != State::Open {
             return Err(SessionError::UnexpectedMessage);
         }
-        if self.reassembly.is_open() {
-            self.reassembly.release();
+        if let Some(slot) = self.slot_of(Lane::DEFAULT) {
+            self.run_table[slot].release();
             return Err(SessionError::UnexpectedMessage);
         }
         if frame.sn != self.lane_sn[DEFAULT_LANE] {
@@ -1238,10 +1271,10 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
         let lane = header.lane;
         let next = self.lane_sn[lane.index()];
         if lane.reliable {
-            // The session holds one run, on the default lane, so a reliable FRAME on another lane may
-            // arrive inside it. A reliable FRAME on the lane of the open run ends the run, as a plain FRAME does.
-            if lane == Lane::DEFAULT && self.reassembly.is_open() {
-                self.reassembly.release();
+            // Each lane has its own run, so a reliable FRAME on another lane may arrive inside it. A reliable
+            // FRAME on the lane of an open run ends that run, as a plain FRAME does.
+            if let Some(slot) = self.slot_of(lane) {
+                self.run_table[slot].release();
                 return Err(SessionError::UnexpectedMessage);
             }
             if header.sn != next {
@@ -1416,9 +1449,8 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
         Ok(())
     }
 
-    /// One FRAGMENT of a message: joined into `cell`, and when the last arrives the message is read as
-    /// a Put and held to what a whole-frame Put is held to. A refusal at any point frees the cell and
-    /// leaves the session's sequence number where it was.
+    /// One FRAGMENT of a session that holds no lanes: joined into `cell`, on the default lane. A refusal at any
+    /// point frees the cell and leaves the session's sequence number where it was.
     fn on_fragment<'a>(
         &mut self,
         batch: &[u8],
@@ -1431,17 +1463,73 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
         let fragment = match decode_fragment(batch, Some(usize::from(self.params.announced))) {
             Ok(fragment) => fragment,
             Err(error) => {
-                self.reassembly.release();
+                if let Some(slot) = self.slot_of(Lane::DEFAULT) {
+                    self.run_table[slot].release();
+                }
                 return Err(error.into());
             }
         };
+        self.take_fragment(Lane::DEFAULT, &fragment, now_ms, cell)
+    }
+
+    /// One FRAGMENT of a session that negotiated lanes, joined into `cell`, the storage of
+    /// [`Self::run_slot`] for the lane the header names. A reliable lane takes the next number of its own
+    /// counter and refuses anything else. A best-effort fragment is refused here: the next change takes it.
+    pub fn on_lane_fragment<'a>(
+        &mut self,
+        batch: &[u8],
+        now_ms: u64,
+        cell: &mut [u8],
+    ) -> Result<Outcome<'a, E>, SessionError> {
+        if self.state == State::Closed {
+            return Err(SessionError::Closed);
+        }
+        if self.state != State::Open || !self.params.fragments || !self.lanes() {
+            return Err(SessionError::UnexpectedMessage);
+        }
+        let header = decode_lane_fragment(batch, Some(usize::from(self.params.announced)))?;
+        if !header.lane.reliable {
+            return Err(SessionError::Decode(Refusal::UnsupportedMessage));
+        }
+        let fragment = Fragment {
+            more: header.more,
+            sn: header.sn,
+            data: header.data,
+        };
+        let outcome = self.take_fragment(header.lane, &fragment, now_ms, cell)?;
+        self.last_rx_ms = now_ms;
+        self.now_ms = now_ms;
+        Ok(outcome)
+    }
+
+    /// Joins one fragment into the run of `lane` and, when the last arrives, reads the message as a Put held to
+    /// what a whole-frame Put is held to. A refusal frees the run and leaves the lane's counter where it was.
+    fn take_fragment<'a>(
+        &mut self,
+        lane: Lane,
+        fragment: &Fragment<'_>,
+        now_ms: u64,
+        cell: &mut [u8],
+    ) -> Result<Outcome<'a, E>, SessionError> {
+        let expected = self.lane_sn[lane.index()];
+        let slot = match self.slot_of(lane) {
+            Some(slot) => slot,
+            None => {
+                // A first fragment is judged by its number before the room for it, as upstream judges it.
+                if fragment.sn != expected {
+                    return Err(SessionError::SequenceMismatch);
+                }
+                self.free_slot().ok_or(SessionError::LaneLimit)?
+            }
+        };
+        let (timeout, limit) = (self.params.timeout_ms, self.params.message_limit);
         let progress =
-            self.reassembly
-                .accept(&fragment, cell, self.lane_sn[DEFAULT_LANE], now_ms)?;
+            self.run_table[slot].accept(fragment, cell, expected, now_ms, timeout, limit)?;
+        self.run_lane[slot] = lane;
         if progress == Progress::Open {
             return Ok(Outcome::nothing());
         }
-        let (message, next) = self.reassembly.finish(cell)?;
+        let (message, next) = self.run_table[slot].finish(cell)?;
         let subs = &self.subs;
         let subscribed = |key: &[u8]| subscribed_to(subs, key);
         let rules = PutRules {
@@ -1458,7 +1546,7 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
             offset,
             len: view.payload.len(),
         };
-        self.lane_sn[DEFAULT_LANE] = next;
+        self.lane_sn[lane.index()] = next;
         Ok(Outcome::nothing().with(event))
     }
 
@@ -1503,8 +1591,15 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
     fn expire<'a>(&mut self, now_ms: u64, out: &mut [u8]) -> Result<Outcome<'a, E>, SessionError> {
         // A run whose last fragment never came is refused once its deadline has passed and its storage is
         // released; the session itself stays open.
-        if self.reassembly.expired(now_ms) {
-            self.reassembly.release();
+        let timeout = self.params.timeout_ms;
+        let mut late = false;
+        for run in &mut self.run_table {
+            if run.expired(now_ms, timeout) {
+                run.release();
+                late = true;
+            }
+        }
+        if late {
             return Err(FragmentError::ReassemblyTimeout.into());
         }
         match self.lease_deadline() {
