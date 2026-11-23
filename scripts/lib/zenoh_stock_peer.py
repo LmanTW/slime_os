@@ -85,7 +85,8 @@ def wrong_position_qos(position: str) -> str:
     attachment in a Put's extension chain. The extension flag is set on the header it follows,
     except for the Put, whose header already has it. The upstream 1.0.0 decoder reads all six, so each is a valid
     batch for a stock peer's codec; Profile 0 takes the extension only where it was observed and
-    must refuse these as `unsupported-extension`."""
+    must refuse these as `unsupported-extension`, except the PUSH: the extension belongs on a PUSH after its key,
+    which is where this builds it, so Profile 0 takes that batch (`qos-on-push-is-taken`)."""
     extension = bytes.fromhex("2108")
     if position in ("frame", "push"):
         body = bytearray.fromhex(dict(CONNECTS)["connects-05-push-1"])
@@ -241,6 +242,11 @@ OK_SCENARIOS = (
     # cadence restarts from it, and the link stays open. This is also the case where a keep-alive
     # and the link's single send slot would collide.
     "keep-alive-suppressed-by-traffic",
+    # The `refuse` group still holds refuse-qos-on-push, a captured PUSH with the network QoS extension
+    # `21 08` after its key. The extension is valid on a PUSH (eclipse-zenoh 1.0.0 writes it whenever the
+    # value is not the PUSH default), so a session takes the batch and delivers its sample. The row keeps
+    # its name and bytes because the fixtures contract fixes the group at 15 rows.
+    "qos-on-push-is-taken",
 )
 REFUSED_SCENARIOS = (
     ("refuse-client", "unsupported-whatami"),
@@ -292,7 +298,6 @@ REFUSED_SCENARIOS = (
     ("qos-extension-on-open", "unsupported-extension"),
     # The same valid extension where no capture has one; the batches are in REFUSE, built from captures.
     ("refuse-qos-on-frame", "unsupported-extension"),
-    ("refuse-qos-on-push", "unsupported-extension"),
     ("refuse-qos-on-put", "unsupported-extension"),
     ("refuse-qos-on-inner-subscriber-header", "unsupported-extension"),
     ("refuse-qos-on-declare-final", "unsupported-extension"),
