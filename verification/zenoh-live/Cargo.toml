@@ -1,0 +1,17 @@
+# A client-role Slime link against a live `rmw_zenohd`, run by `scripts/check/check-zenoh-profile0.py --slice rmw-live`
+# (`just zenoh_rmw_live_check`).
+#
+# Deliberately outside the root workspace (hence the empty `[workspace]`), like `verification/zenoh-xcheck`: the program
+# is a host binary built from the library, and it must not enter the product's `Cargo.lock`, `just deny`, the closures or
+# any component build. The target is an operator target in `specs/targets.toml` and in no aggregate or CI job, because
+# it needs a router and ROS nodes from packages `flake.nix` does not pin.
+[package]
+name = "zenoh-live"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+slime-components = { path = "../../components/lib", default-features = false }
