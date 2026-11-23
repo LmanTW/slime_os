@@ -34,9 +34,9 @@ const THREAD_STACK_BYTES: usize = 2 * 1024 * 1024;
 const GID: [u8; 16] = [0xe0; 16];
 const KEYS: [&str; 2] = ["0/slime_stack/telemetry", "0/slime_stack/command"];
 
-// The `Link` alias of the component: `LinkOf<Stream<Wire<'a, 'b>>, 514, 1, 5, 129, PAYLOAD, 8, 4>`.
+// The `Link` alias of the component: `LinkOf<Stream<Wire<'a, 'b>>, 514, 2, 5, 129, PAYLOAD, 8, 4>`.
 const FRAMED: usize = 514;
-const ALIASES: usize = 1;
+const ALIASES: usize = 2;
 const SUBSCRIBERS: usize = 5;
 const KEY_BYTES: usize = 129;
 const NOTICES: usize = 8;
