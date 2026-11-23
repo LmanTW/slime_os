@@ -43,6 +43,8 @@ mod lane_frames_tests;
 #[path = "lanes_handshake_tests.rs"]
 mod lanes_handshake_tests;
 
+/// The liveliness tokens a session holds at once: a node, a publisher and a subscription each, and one to spare.
+pub const MAX_TOKENS: usize = 4;
 /// Events one received batch can yield; this is the contract's outstanding-sample bound.
 pub const MAX_EVENTS: usize = 4;
 /// The batch size the first release advertises in INIT.
@@ -174,6 +176,10 @@ pub enum SessionError {
     /// A first fragment on a reliable lane while every run the session holds is open. A best-effort lane
     /// drops the fragment instead.
     LaneLimit,
+    /// A liveliness token with an id already declared, or one more than the session holds.
+    TokenLimit,
+    /// The withdrawal of a liveliness token that was never declared.
+    UnknownToken,
 }
 
 impl SessionError {
@@ -196,6 +202,8 @@ impl SessionError {
             Self::OutOfMemory => "out-of-memory",
             Self::NeedsFragments => "needs-fragments",
             Self::LaneLimit => "lane-limit",
+            Self::TokenLimit => "token-limit",
+            Self::UnknownToken => "unknown-token",
         }
     }
 }
@@ -547,6 +555,9 @@ pub struct SessionOf<
     remote_n: usize,
     /// This connector announces itself as a client and takes the INIT_ACK of a router.
     client: bool,
+    /// The ids of the liveliness tokens this side declared and has not withdrawn. A withdrawal names the id and no key.
+    tokens: [u32; MAX_TOKENS],
+    token_n: usize,
 }
 
 /// The lanes a session counts: a priority (0 to 7) and a reliability.
@@ -671,6 +682,8 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
             local_n: 0,
             remote_n: 0,
             client: false,
+            tokens: [0; MAX_TOKENS],
+            token_n: 0,
         })
     }
 
@@ -925,6 +938,7 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
         self.subs.clear();
         self.local_n = 0;
         self.remote_n = 0;
+        self.token_n = 0;
         self.aliases.clear();
         for run in &mut self.run_table {
             run.release();
@@ -1841,6 +1855,54 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
     }
 
     /// Writes a FRAME undeclaring this side's subscriber `id` on `key`.
+    /// The ids of the liveliness tokens this side holds, in the order it declared them.
+    pub fn tokens_held(&self) -> &[u32] {
+        &self.tokens[..self.token_n]
+    }
+
+    /// Writes a FRAME declaring the liveliness token `id` under `key`, with the key in full and the sender mapping. Only a
+    /// session with the client role writes a token: a router lists a node from the tokens its client declares.
+    pub fn send_declare_token<'a>(
+        &mut self,
+        id: u32,
+        key: &str,
+        out: &mut [u8],
+    ) -> Result<Outcome<'a, E>, SessionError> {
+        if !self.client {
+            return Err(SessionError::InvalidConfig);
+        }
+        if self.state == State::Open
+            && (self.token_n >= MAX_TOKENS || self.tokens_held().contains(&id))
+        {
+            return Err(SessionError::TokenLimit);
+        }
+        let outcome =
+            self.send_frame(out, |frame| frame.declare_token(id, Mapping::Sender, key))?;
+        self.tokens[self.token_n] = id;
+        self.token_n += 1;
+        Ok(outcome)
+    }
+
+    /// Writes a FRAME withdrawing the liveliness token `id`. The session keeps every other token declared.
+    pub fn send_undeclare_token<'a>(
+        &mut self,
+        id: u32,
+        out: &mut [u8],
+    ) -> Result<Outcome<'a, E>, SessionError> {
+        if !self.client {
+            return Err(SessionError::InvalidConfig);
+        }
+        let at = self
+            .tokens_held()
+            .iter()
+            .position(|&held| held == id)
+            .ok_or(SessionError::UnknownToken)?;
+        let outcome = self.send_frame(out, |frame| frame.undeclare_token(id))?;
+        self.tokens.copy_within(at + 1..self.token_n, at);
+        self.token_n -= 1;
+        Ok(outcome)
+    }
+
     pub fn send_undeclare_subscriber<'a>(
         &mut self,
         id: u32,

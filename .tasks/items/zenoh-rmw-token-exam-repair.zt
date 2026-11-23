@@ -5,6 +5,7 @@ item :: s.Item = (h.task "01a20871-083e-7525-bb70-543f121d8c42" "zenoh-rmw-token
   "Repair the token exam so it observes the tokens the link holds after a withdrawal and its QoS control changes the QoS substring"
   "The exam of `zenoh-rmw-token` landed with two gaps that its review found. No transcript line states the tokens the link holds after it withdraws the publisher token, so a link that dropped the node token too prints the same lines. One control, named a publisher token with the QoS substring dropped, changed the first `::` of the key, which lies in the type name, and so tested the type and not the QoS substring.")
   with {
+    intent = #active;
     depends = { "01a20852-64d5-76b3-acce-bb1e92bc4708"; };
     owns = {
       "scripts/lib/zenoh_rmw_token_exam.py";

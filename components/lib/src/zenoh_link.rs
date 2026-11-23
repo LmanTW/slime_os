@@ -29,6 +29,10 @@ mod router_tests;
 #[path = "zenoh_link/put_tests.rs"]
 mod put_tests;
 
+#[cfg(test)]
+#[path = "zenoh_link/token_tests.rs"]
+mod token_tests;
+
 /// Consecutive stalled sends tolerated before the link gives up; the demo contract's `maxRetries`.
 pub const MAX_RETRIES: u32 = 3;
 /// The framed size of the first release's batch.
@@ -463,6 +467,31 @@ impl<
         }
         let mut body = [0u8; FRAMED];
         let outcome = self.session.send_declare_subscriber(id, key, &mut body)?;
+        let batch = outcome.batch(&body);
+        self.queue(batch)
+    }
+
+    /// Queues the declaration of the liveliness token `id` under `key`, written in full. Only a link with the client role
+    /// writes one.
+    pub fn declare_token(&mut self, handle: LinkHandle, id: u32, key: &str) -> Result<(), Error> {
+        self.check(handle)?;
+        if self.send_len != 0 {
+            return Err(Error::SendBusy);
+        }
+        let mut body = [0u8; FRAMED];
+        let outcome = self.session.send_declare_token(id, key, &mut body)?;
+        let batch = outcome.batch(&body);
+        self.queue(batch)
+    }
+
+    /// Queues the withdrawal of the liveliness token `id`.
+    pub fn withdraw_token(&mut self, handle: LinkHandle, id: u32) -> Result<(), Error> {
+        self.check(handle)?;
+        if self.send_len != 0 {
+            return Err(Error::SendBusy);
+        }
+        let mut body = [0u8; FRAMED];
+        let outcome = self.session.send_undeclare_token(id, &mut body)?;
         let batch = outcome.batch(&body);
         self.queue(batch)
     }

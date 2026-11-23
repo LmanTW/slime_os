@@ -24,6 +24,11 @@ const GID_LEN_BYTE: u8 = GID_BYTES as u8;
 const DEFAULT_BATCH_SIZE: u16 = u16::MAX;
 /// The scope of every key expression the profile carries is the global one.
 const GLOBAL_SCOPE: u32 = 0;
+/// The declaration ids of a liveliness token and of its withdrawal, as `rmw_zenoh_cpp` writes them.
+const ID_D_TOKEN: u8 = 6;
+const ID_U_TOKEN: u8 = 7;
+/// The extension a captured withdrawal of a token carries: id 15, mandatory, a ZBuf of two zero bytes.
+const U_TOKEN_EXTENSION: [u8; 4] = [0x5F, 0x02, 0x00, 0x00];
 
 /// Why the encoder refuses an input or cannot finish a batch.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -357,6 +362,36 @@ fn declare_subscriber(
     writer.prefixed(key)
 }
 
+/// A liveliness token under `key`, written with its key in full: a DECLARE, then a named token with the sender or the
+/// receiver mapping, its id and the global scope.
+fn declare_token(
+    writer: &mut Writer<'_>,
+    id: u32,
+    mapping: Mapping,
+    key: &str,
+    bounds: Bounds,
+) -> Result<(), EncodeError> {
+    let key = check_key(key, bounds.key)?;
+    let mut header = ID_D_TOKEN | FLAG_BIT5;
+    if mapping == Mapping::Sender {
+        header |= FLAG_BIT6;
+    }
+    writer.byte(ID_DECLARE)?;
+    writer.byte(header)?;
+    writer.leb(id)?;
+    writer.leb(GLOBAL_SCOPE)?;
+    writer.prefixed(key)
+}
+
+/// The withdrawal of the token `id`: a DECLARE, an UNDECLARE_TOKEN with its extension flag, the id and the captured
+/// extension.
+fn undeclare_token(writer: &mut Writer<'_>, id: u32) -> Result<(), EncodeError> {
+    writer.byte(ID_DECLARE)?;
+    writer.byte(ID_U_TOKEN | FLAG_Z)?;
+    writer.leb(id)?;
+    writer.put(&U_TOKEN_EXTENSION)
+}
+
 fn undeclare_subscriber(
     writer: &mut Writer<'_>,
     id: u32,
@@ -489,6 +524,22 @@ impl<'a> FrameEncoder<'a> {
     ) -> Result<(), EncodeError> {
         let bounds = self.bounds;
         self.message(|writer| undeclare_subscriber(writer, id, mapping, key, bounds))
+    }
+
+    /// A liveliness token under `key`, written in full.
+    pub fn declare_token(
+        &mut self,
+        id: u32,
+        mapping: Mapping,
+        key: &str,
+    ) -> Result<(), EncodeError> {
+        let bounds = self.bounds;
+        self.message(|writer| declare_token(writer, id, mapping, key, bounds))
+    }
+
+    /// The withdrawal of the liveliness token `id`.
+    pub fn undeclare_token(&mut self, id: u32) -> Result<(), EncodeError> {
+        self.message(|writer| undeclare_token(writer, id))
     }
 
     /// A PUSH carrying a Put with the 33-byte attachment and a payload of at

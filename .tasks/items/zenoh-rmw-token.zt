@@ -5,6 +5,7 @@ item :: s.Item = (h.task "01a20852-64d5-76b3-acce-bb1e92bc4708" "zenoh-rmw-token
   "A Profile 0 link with the client role declares and withdraws the liveliness tokens of a node"
   "`ros2 node list` and `ros2 topic list` build their graph from liveliness tokens under `@ros2_lv`. A client-role link writes none, so a ROS node hears its Puts and no ROS tool sees it. A host probe declared a node token and a publisher token for a Slime node through `rmw_zenohd` with the Python wire library. `ros2` listed the node and the topic. A client that closed its session lost both, and a client that withdrew a token while it stayed connected lost that token's topic. The Rust encoder has no token declaration and no session call writes one.")
   with {
+    intent = #active;
     owns = {
       "components/lib/src/zenoh_profile0.rs";
       "components/lib/src/zenoh_profile0/**";
