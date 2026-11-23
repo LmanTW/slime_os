@@ -199,6 +199,9 @@ jobs:
       - run: just x86_portability_check
       - run: just framework_safety_check
       - run: just docs_check
+      # The role ceilings of slime-root's source. They live in the checker, so
+      # a pull request that exceeds one fails here, not after it merges.
+      - run: just root_size_check
       # The matrix check reads only the locked smoltcp archive, and refuses it
       # unless its SHA-256 matches Cargo.lock, so one download replaces a
       # toolchain and a workspace fetch.

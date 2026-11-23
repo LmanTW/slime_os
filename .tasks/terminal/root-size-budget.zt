@@ -1,0 +1,92 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.milestone "01a1e925-f21f-7c7b-8c45-b6b46bcefd1e" "root-size-budget" "planes-mechanism"
+  "The source of slime-root has a budget by role, and a ceiling changes only with an approval"
+  "slime-root holds 61664 lines in 73 Rust files, and 34294 of them are code lines outside tests. Nothing bounds that count, and nothing says which role a file has. The root also holds component policy and names three product components, although mechanism belongs in the root and policy in components. Two decisions are unrecorded: which roles stay in the root, and which target profiles may claim the verified kernel configuration. Without a count by role, a later milestone cannot state its exit condition as a number.")
+  with {
+    intent = #active;
+    owns = {
+      "docs/decisions/root-task-scope.md";
+      "docs/decisions/verified-kernel-profile.md";
+      ".github/workflows/ci.yml";
+    };
+    nonGoals = {
+      h.nonGoal "Moving, splitting or deleting root code. This item counts the source as it is." h.agentDefault;
+      h.nonGoal "Counting the crates the root links: boot-contracts, slime-proto, sel4, sel4-root-task and object. The gate pins their names." h.agentDefault;
+      h.nonGoal "Measuring a binary: the text size, the linked symbols, or the trusted computing base of one target profile." h.agentDefault;
+      h.nonGoal "A change to a kernel configuration, a pin or the pin checker. The verified-profile decision states a claim and changes no build." h.agentDefault;
+      h.nonGoal "Negative controls for the counting rule. The gate asserts a property of source text, not of Slime OS behavior or of a format." h.agentDefault;
+    };
+    requirements = {
+      h.req "every-file-has-one-role"
+        "The gate gives each Rust file under slime-root/ that Git tracks or does not ignore exactly one of 10 roles: core, boot, ioResource, sharedBuffer, dispatch, policy, timer, fixture, console and harness. It refuses a file that no role names and no tree holds, a file that two roles name, and a run that finds no file."
+        { "root_size_check"; };
+      h.req "counts-code-lines"
+        "A code line holds at least one character outside whitespace and comments. The lines of a top-level item behind the exact attribute #[cfg(test)], and of a file named tests.rs or *_tests.rs or under a tests/ directory, are test lines and belong to no role. Any other cfg, and a #[cfg(test)] inside an item, leaves the lines as code. A brace, a semicolon or // inside a string, raw string or character literal is text."
+        { "root_size_check"; };
+      h.req "roles-within-ceilings"
+        "Each role holds at most its ceiling of code lines: core 15050, boot 5900, ioResource 3050, sharedBuffer 3050, dispatch 2550, policy 2100, timer 1350, fixture 950, console 450 and harness 1750. The gate refuses a role above its ceiling."
+        { "root_size_check"; };
+      h.req "series-within-ceiling"
+        "The nine roles other than harness are the series. Together they hold at most 34400 code lines, and the gate reports the count as seriesCodeLines."
+        { "root_size_check"; };
+      h.req "dependencies-pinned"
+        "slime-root/Cargo.toml names exactly five crates across its dependency tables: boot-contracts, sel4, slime-proto, sel4-root-task and object. The gate refuses a sixth crate and a missing one."
+        { "root_size_check"; };
+      h.req "root-scope-decided"
+        "docs/decisions/root-task-scope.md states, for each of the nine series roles, whether the role stays in the root or leaves it, and states the series target of 23000 code lines."
+        { "decisions-and-ci-on-main"; };
+      h.req "verified-profile-decided"
+        "docs/decisions/verified-kernel-profile.md states which target profiles may claim the verified kernel configuration, which kernel options and source files the claim depends on, what the proofs cover, and what they do not cover."
+        { "decisions-and-ci-on-main"; };
+      h.req "gate-runs-before-merge"
+        "CI runs just root_size_check on every pull request that changes code."
+        { "decisions-and-ci-on-main"; };
+    };
+    acceptance = {
+      h.observedWhere "root_size_check" {
+        h.atMost "seriesCodeLines" 34400;
+        h.atLeast "filesObserved" 1;
+      };
+      h.human "decisions-and-ci-on-main"
+        "On main: do docs/decisions/root-task-scope.md and docs/decisions/verified-kernel-profile.md both carry the status Accepted and name the person who decided, does each state what its requirement in this item lists, and does a CI job that runs on every code pull request run just root_size_check?";
+    };
+    invariants = {
+      h.invariant "ceilings-change-with-approval"
+        "A role ceiling, the series ceiling, a role assignment and the pinned dependency names live in scripts/check/check-root-size.py, which is the grader set of root_size_check. They change only in a planning pull request with a V4 approval. A later item lowers a ceiling. An item that raises one records the reason as a decision."
+        h.agentDefault;
+      h.invariant "source-text-only"
+        "The gate reads Rust source text and slime-root/Cargo.toml. It builds nothing, runs no image and reads no evidence."
+        h.agentDefault;
+    };
+    decisions = {
+      h.decided "series-target-is-23000"
+        "The series of milestones that follows this item ends when the nine series roles hold at most 23000 code lines. This item enforces 34400."
+        "the ioResource and sharedBuffer roles hold about 6000 lines, and 23000 is the estimate after they, policy, console, timer and fixture leave the root; a lower count needs a simpler adaptive-memory model, which is a separate design decision"
+        (h.fromHuman "用唯讀 counter page，目標先定 23k，開始寫 M0" "Claude Code session session_01Udthew69PFkRyDtWmFtXKa, 2026-11-17")
+        { "series-within-ceiling"; "root-scope-decided"; };
+      h.decided "headroom"
+        "Each role ceiling is the role's count on the commit that lands the gate, rounded up to a multiple of 50. The series ceiling is 34400 against a count of 34294."
+        "a fix to the root must be able to land before the first milestone lowers a ceiling, and 106 lines bounds what lands without a planning change"
+        h.agentDefault
+        { "roles-within-ceilings"; "series-within-ceiling"; };
+      h.decided "harness-is-outside-the-series"
+        "build.rs and the two qualification.rs files form the harness role, with its own ceiling of 1750 and outside the series total."
+        "Cargo runs the build script on the host, and a slime_* cfg compiles each qualification scenario into its own root role image; object_allocator/qualification.rs also holds two methods the product image calls, and the role counts that file whole"
+        h.agentDefault
+        { "every-file-has-one-role"; "series-within-ceiling"; };
+      h.decided "role-names-a-file-before-it-exists"
+        "A role may name a file that does not exist, and the gate does not refuse the entry."
+        "an implementation pull request may not change the grader set (V3), so the planning pull request of a later item assigns a new file before the implementation creates it, and an entry stays after its file is deleted"
+        h.agentDefault
+        { "every-file-has-one-role"; };
+      h.decided "decisions-and-ci-are-process-changes"
+        "The two decision records and the CI step land in process pull requests, and a person answers one question about all three."
+        "docs/ and .github/ are process paths, which a planning or an implementation pull request may not carry (V1), and the gate cannot observe a workflow or a person's acceptance"
+        h.agentDefault
+        { "root-scope-decided"; "verified-profile-decided"; "gate-runs-before-merge"; "decisions-and-ci-on-main"; };
+    };
+  };
+
+item

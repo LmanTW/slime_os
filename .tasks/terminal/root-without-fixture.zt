@@ -1,0 +1,130 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.milestone "01a1f677-0511-752b-8231-8e9b491399de" "root-without-fixture" "planes-mechanism"
+  "A product root does not compile the fixture"
+  "Every root image compiles the root side of the fixture and embeds the fixture's child image. slime-root/src/main.rs holds 561 code lines, and about 440 of them build and settle the two fixture tasks. slime-root/src/fixture_runtime.rs holds 560 more. A product root runs them when its generation holds no loadable executable, with endpoint authority borrowed from declared instances. The cfg slime_root_fixture already selects the fixture root, and today it removes only the graph launch.")
+  with {
+    intent = #active;
+    depends = {
+      "01a1f287-45a5-7d08-9204-06ba2bad331f";
+    };
+    owns = {
+      "slime-root/src/**";
+      "just/quality.just";
+    };
+    nonGoals = {
+      h.nonGoal "A change to what the fixture root does or prints. The body moves from main to slime-root/src/fixture_runtime.rs, and it keeps its 335 code lines in one function. docs/decisions/root-task-scope.md states that only the fixture's place in the source changes." h.agentDefault;
+      h.nonGoal "A second binary target or a crate of its own for the fixture root. See the decision a-cfg-selects-the-fixture-root." h.agentDefault;
+      h.nonGoal "A change to scripts/build/build-sel4.py or to the closure sources. The builder still builds the child crate for every image and sets CHILD_ELF, and every closure still names components/root-child and the tree slime-root as inputs. An edit to the fixture therefore still changes the identity of a product closure." h.agentDefault;
+      h.nonGoal "A gate that boots a product root whose generation holds no loadable executable. No closure describes such an image. The implementation pull request reports whether it observed the stop record on one boot built by hand." h.agentDefault;
+      h.nonGoal "A lower ceiling of the boot role, of the series or of what only the binary compiles, and the removal of main from the checker's table of long functions. The planning pull request of the next root item lowers them to the counts this item leaves." h.agentDefault;
+      h.nonGoal "The pages under docs/ that describe the embedded child image. docs/ is a process path, and a process pull request follows the implementation." h.agentDefault;
+    };
+    requirements = {
+      h.req "product-root-compiles-no-fixture"
+        "root_size_check counts at most 150 code lines that only the binary of a product root compiles, and reports the count as productBinaryCodeLines. main holds 1121. slime-root/src/main.rs declares the fixture's module behind cfg(slime_root_fixture), and the checker leaves a file out of this count only when it stands behind exactly that attribute."
+        { "root_size_check"; };
+      h.req "series-without-the-fixture"
+        "root_size_check counts at most 33100 code lines in the series, and reports the count as seriesCodeLines. main holds 34076. The series leaves out the files that only the fixture root compiles, and the checker refuses such a file whose role is not fixture."
+        { "root_size_check"; };
+      h.req "host-tests-keep-their-count"
+        "test_sel4_root runs at least 383 host tests, and reports the count as hostTests. main runs 383. The library loses the child image from its boot sequence and no test."
+        { "test_sel4_root"; };
+      h.req "fixture-boots-on-aarch64"
+        "sel4_root_boot_check passes: the fixture root boots on qemu-arm-virt and reports both fixture tasks."
+        { "sel4_root_boot_check"; };
+      h.req "fixture-boots-on-riscv64"
+        "riscv64_sel4_root_boot_check passes: the fixture root boots on qemu-riscv-virt and reports both fixture tasks."
+        { "riscv64_sel4_root_boot_check"; };
+      h.req "fixture-boots-on-x86-64"
+        "x86_64_sel4_root_boot_check passes: the fixture root boots on qemu-pc99 and reports both fixture tasks."
+        { "x86_64_sel4_root_boot_check"; };
+      h.req "injected-fixture-root-boots"
+        "private_memory_check passes: on qemu-arm-virt it boots the fixture root of the role private-memory-fail-second-allocation, and both fixture tasks grow again after one injected failure."
+        { "private_memory_check"; };
+      h.req "product-graph-boots"
+        "sel4_boot_check passes: a product root, built without the fixture, launches its component graph and serves it."
+        { "sel4_boot_check"; };
+      h.req "console-install-stays-in-main"
+        "root_console_check passes: main installs the root's console UART once, before the first record, in the product root and in the fixture root."
+        { "root_console_check"; };
+    };
+    acceptance = {
+      h.observedWhere "root_size_check" {
+        h.atMost "productBinaryCodeLines" 150;
+        h.atMost "seriesCodeLines" 33100;
+      };
+      h.observedWhere "test_sel4_root" {
+        h.atLeast "hostTests" 383;
+      };
+      h.observed "sel4_root_boot_check";
+      h.observed "riscv64_sel4_root_boot_check";
+      h.advisory (h.observed "x86_64_sel4_root_boot_check");
+      h.advisory (h.observed "private_memory_check");
+      h.observed "sel4_boot_check";
+      h.observed "root_console_check";
+    };
+    invariants = {
+      h.invariant "fixture-root-keeps-its-transcript"
+        "The fixture root prints the same records in the same order and makes the same kernel calls. The parse of the child image moves behind the allocation of the two endpoints. The parse makes no kernel call, and it prints only when it refuses the image."
+        h.agentDefault;
+      h.invariant "product-root-keeps-its-transcript"
+        "A product root whose generation holds a loadable executable prints the same records in the same order and makes the same kernel calls."
+        h.agentDefault;
+      h.invariant "product-root-does-not-read-the-child-image"
+        "A product root builds without the environment variable CHILD_ELF, and slime_root::boot::run takes no child image. The implementation pull request reports a type check of the product root without that variable."
+        h.agentDefault;
+      h.invariant "main-keeps-the-first-two-phases"
+        "main initializes the object allocator and installs the root's console before the first phase of the library, in every root. The two console audits read slime-root/src/main.rs, and this item changes neither."
+        h.agentDefault;
+      h.invariant "the-fixture-root-stays-linted"
+        "just lint_all runs clippy on the fixture root, on AArch64 and on x86-64. The implementation pull request adds a second call with SLIME_ROOT_FIXTURE=1 to lint_sel4_root and to lint_sel4_root_x86_64, because the first call compiles nothing behind cfg(slime_root_fixture). The judge classes a change to those two recipes as implementation, so the item owns just/quality.just and changes no other recipe in it."
+        h.agentDefault;
+      h.invariant "every-configuration-still-builds"
+        "The thirteen configurations that the implementation of root-library built still build. The implementation pull request reports each build as observed or not observed."
+        h.agentDefault;
+      h.invariant "the-phases-item-closes-first"
+        "The implementation pull request makes this item active after the item root-boot-phases is terminal."
+        h.agentDefault;
+    };
+    decisions = {
+      h.decided "a-cfg-selects-the-fixture-root"
+        "slime-root/src/main.rs declares the fixture's module behind cfg(slime_root_fixture), and main calls the module's run in place of the graph launch. The package keeps one binary target."
+        "slime-root/build.rs already sets that cfg for the fixture root alone, and the library reads it in ten places. A second binary target needs a second main, and both console audits hold the one install call to slime-root/src/main.rs. A crate of its own does not receive the cfgs of the build script, so it would repeat the script. The qualification scenarios of the harness role are root role images selected by a cfg in the same way"
+        h.agentDefault
+        { "product-root-compiles-no-fixture"; "console-install-stays-in-main"; };
+      h.decided "the-series-is-what-a-product-root-compiles"
+        "The series total leaves out a file that only the fixture root compiles. The fixture role keeps its files, and its own ceiling bounds them."
+        "docs/decisions/root-task-scope.md takes the fixture role out of the series in stage one. The series measures the code that runs with the root's authority in a product image, and the harness role is outside it on the same grounds. The count follows the attribute on the declaration, so it is 34076 on main and falls only when the module stands behind the cfg"
+        h.agentDefault
+        { "series-without-the-fixture"; };
+      h.decided "a-product-root-without-an-executable-stops"
+        "A product root whose generation holds no loadable executable prints SLIME_ROOT FATAL generation has no loadable executable and stops."
+        "today that root runs the fixture with endpoint authority borrowed from declared instances, so test code runs in a product image on a path that no gate boots. No closure describes a product image without a loadable executable, and the builder gives every root a generation or the boot selector"
+        h.agentDefault
+        { "product-root-compiles-no-fixture"; };
+      h.decided "the-bounds-come-from-a-draft"
+        "The bound on productBinaryCodeLines is 150, and the bound on seriesCodeLines is 33100."
+        "a draft of the implementation, on a local branch, holds 124 code lines in slime-root/src/main.rs and 33073 in the series. The fixture role holds 1007 there, and the checker's ceiling for it is 1050. The bound on hostTests is the count of main"
+        h.agentDefault
+        { "product-root-compiles-no-fixture"; "series-without-the-fixture"; "host-tests-keep-their-count"; };
+      h.decided "two-advisory-targets"
+        "The acceptances on x86_64_sel4_root_boot_check and private_memory_check are advisory."
+        "the Evidence runner cannot build an x86-64 image: all five records of the first target failed. The evidence branch holds no record of the second, and the item root-child-crate could not close while it bound a target that the runner had never passed. The implementation pull request runs both"
+        h.agentDefault
+        { "fixture-boots-on-x86-64"; "injected-fixture-root-boots"; };
+      h.decided "mandatory-targets-have-passing-records"
+        "Every mandatory acceptance binds a target that the evidence branch records as passed."
+        "on the evidence branch at 452f93a3 the records are: root_size_check 7 of 7 passed, test_sel4_root 15 of 15, sel4_root_boot_check 5 of 5, riscv64_sel4_root_boot_check 5 of 5, root_console_check 9 of 9 and sel4_boot_check 6 of 7. The one failed record of sel4_boot_check is from 2026-11-19, and a record two hours later passed"
+        h.agentDefault
+        { "product-graph-boots"; "console-install-stays-in-main"; };
+      h.decided "graders-change-in-the-planning-pull-request"
+        "The planning pull request of this item changes the size checker. It reads which modules of the binary stand behind cfg(slime_root_fixture), leaves them out of the series, and reports productBinaryCodeLines and fixtureOnlyCodeLines. It raises the ceiling of the fixture role from 600 to 1050 and names the fixture's run in the table of long functions. It also lowers the ceiling on the library's fatal sites from 160 to 8 and removes two functions from that table, as the item root-boot-phases left them."
+        "the checker is the grader set of root_size_check, which promises bind, so it changes only in a pull request that adds an item (V4). The fixture's body is 335 code lines in the draft, and it moves as one function"
+        h.agentDefault
+        { "product-root-compiles-no-fixture"; "series-without-the-fixture"; };
+    };
+  };
+
+item

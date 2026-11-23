@@ -37,6 +37,7 @@ pub mod private_memory_policy;
 pub mod recording_policy;
 pub mod recovery;
 pub mod release;
+pub mod resource_reader;
 pub mod scheduling_class;
 pub mod sha256;
 pub mod shared_buffer_budget;

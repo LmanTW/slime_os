@@ -1,0 +1,165 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.milestone "01a1f8f6-a380-7910-990d-f83a461fb33e" "root-names-no-component" "planes-mechanism"
+  "The root names no product component"
+  "slime-root/src/ipc.rs decides who reads seven generation tables by a name it holds. Three gates compare the caller with the literal network-service. Two constants name the instances entropy-service and zenoh-service, and a third names the executable virtio-blk-driver. docs/decisions/root-task-scope.md decides that the root names no product component and reads composition from generation rows. Today a second block driver or a renamed reader needs an edit to the root.")
+  with {
+    intent = #active;
+    owns = {
+      "slime-root/src/**";
+      "boot-contracts/src/**";
+      "contracts/resource-reader/**";
+      "scripts/build/build-generation.py";
+      "scripts/build/generation_resources.py";
+      "scripts/build/resource_reader_contract.py";
+      "scripts/generate/generate-boot-bindings.py";
+    };
+    nonGoals = {
+      h.nonGoal "A change to who reads a table. The builder writes a row for exactly the instances that the six gates admit today. A composition cannot declare a reader of its own." h.agentDefault;
+      h.nonGoal "A change to the generation manifest contract, to the system spec contract or to a derived manifest. See the decision the-builder-derives-the-reader-table." h.agentDefault;
+      h.nonGoal "The removal of the readers from the root. docs/decisions/root-task-scope.md counts 409 lines for the readers in ipc.rs, and that count assumes they leave. This item removes the names and keeps the readers. A later design decides how a component reads its own rows without a reader in the root." h.agentDefault;
+      h.nonGoal "A lower ceiling on productComponentNames. The checker's ceiling stays at 6, the count of main, because CI runs the gate on every pull request. A later planning pull request lowers it to 0." h.agentDefault;
+      h.nonGoal "The removal of the first form of the two facts in scripts/lib/zenoh_grants_reader_exam.py. See the decision two-zenoh-facts-take-a-second-form." h.agentDefault;
+      h.nonGoal "A root that serves a table from a generation built before the reader table existed. Such a generation carries no reader table, so the root serves none of the seven tables from it. The generation format version does not change." h.agentDefault;
+      h.nonGoal "A new release input. scripts/build/resource_reader_contract.py holds the builder's layout of the object and stands outside every closure identity, as scripts/lib/boot_contracts.py does. The root's constants come from the same schema and stand inside, through the tree boot-contracts." h.agentDefault;
+      h.nonGoal "The pages under docs/ that say which instance reads a table. docs/ is a process path, and a process pull request follows the implementation." h.agentDefault;
+    };
+    requirements = {
+      h.req "root-holds-no-component-name"
+        "root_size_check counts no string literal that names a product component in slime-root, boot-contracts and components/proto, and reports the count as productComponentNames. main holds 6, all in slime-root/src/ipc.rs. A name is the directory name of a crate under components/system, components/services, components/applications or components/testkit. The count leaves out test items and test files."
+        { "root_size_check"; };
+      h.req "builder-writes-the-rule"
+        "resource_reader_builder_check passes with 26 cases and 10 refused controls. For each manifest the builder returns the bytes that the judge writes from the schema and the rule. The rule names the reader of each of the seven tables: three instance names and one executable name. The builder refuses a table above the row bound."
+        { "resource_reader_builder_check"; };
+      h.req "series-keeps-its-ceiling"
+        "root_size_check counts at most 33200 code lines in the series, and reports the count as seriesCodeLines. main holds 33073. The reader table adds a locator and an admission rule to the boot role. One paging helper replaces five loops in the dispatch role."
+        { "root_size_check"; };
+      h.req "reader-table-has-host-tests"
+        "test_sel4_root runs at least 386 host tests, and reports the count as hostTests. main runs 383. The new tests refuse a second reader table, a table that does not decode and a row that names no declared instance. They take each read verdict from a decoded reader table."
+        { "test_sel4_root"; };
+      h.req "zenoh-reader-stays-pinned"
+        "zenoh_service_grants_reader_check passes with 36 cases and 41 refused controls. The root takes the reader of the grants table from the reader table and hands the verdict to the copier. The two reader tests keep their names."
+        { "zenoh_service_grants_reader_check"; };
+      h.req "zenoh-service-reads-its-tables"
+        "zenoh_service_booted_check passes: the booted instance zenoh-service reads its grants rows and its limits record from the root."
+        { "zenoh_service_booted_check"; };
+      h.req "network-service-reads-its-tables"
+        "io_tcp_listener_check passes: the booted instance network-service reads the network tables of its generation from the root and serves a TCP listener."
+        { "io_tcp_listener_check"; };
+      h.req "product-graph-boots"
+        "sel4_boot_check passes: a product root launches its component graph and serves it."
+        { "sel4_boot_check"; };
+      h.req "entropy-service-reads-its-table"
+        "sel4_entropy_check passes: the booted instance entropy-service reads its authority rows from the root."
+        { "sel4_entropy_check"; };
+      h.req "block-drivers-read-their-rows"
+        "io_block_check passes: each booted instance of the executable virtio-blk-driver reads the ring authority rows of its own device from the root."
+        { "io_block_check"; };
+    };
+    acceptance = {
+      h.observedWhere "root_size_check" {
+        h.atMost "productComponentNames" 0;
+        h.atMost "seriesCodeLines" 33200;
+      };
+      h.observedWhere "resource_reader_builder_check" {
+        h.count "readerTableCases" 26;
+        h.count "negativeControlsRefused" 10;
+      };
+      h.observedWhere "test_sel4_root" {
+        h.atLeast "hostTests" 386;
+      };
+      h.observedWhere "zenoh_service_grants_reader_check" {
+        h.count "casesObserved" 36;
+        h.count "negativeControlsRefused" 41;
+      };
+      h.observed "zenoh_service_booted_check";
+      h.observed "io_tcp_listener_check";
+      h.observed "sel4_boot_check";
+      h.advisory (h.observed "sel4_entropy_check");
+      h.advisory (h.observed "io_block_check");
+    };
+    invariants = {
+      h.invariant "the-reader-set-is-unchanged"
+        "For every composition, the reader table names exactly the instances that the name gates of main admit. The implementation pull request reports that comparison over all compositions."
+        h.agentDefault;
+      h.invariant "the-builder-has-one-entry"
+        "scripts/build/build-generation.py exposes build_resource_readers(manifest, emitted). It returns the bytes of the object, or None when no row remains. The builder judge calls that entry and no other."
+        h.agentDefault;
+      h.invariant "no-table-means-no-reader"
+        "The root serves none of the seven tables to an instance that no row names. A generation without a reader table has no such row."
+        h.agentDefault;
+      h.invariant "admission-refuses-a-bad-reader-table"
+        "The root refuses a generation that carries two reader tables, a reader table that does not decode, or a row that names no declared instance."
+        h.agentDefault;
+      h.invariant "block-rows-stay-filtered-by-device"
+        "A row of the reader table grants the read and nothing else. The root still serves a block driver only the rows of the device in its ioResourceBudget row."
+        h.agentDefault;
+      h.invariant "the-format-has-one-source"
+        "contracts/resource-reader/v1/schema.zt is the only source of the object's layout. Its renderer writes the root's constants and the builder's layout, and scripts/generate/generate-boot-bindings.py holds both to the committed files. CI runs that comparison in contracts_source_check, which also compiles the schema."
+        h.agentDefault;
+      h.invariant "the-exam-lines-are-written-as-pinned"
+        "slime-root/src/ipc.rs holds the two lines that the second form of the facts root-instance and root-gate pins."
+        h.agentDefault;
+      h.invariant "the-closure-sources-stay"
+        "The implementation changes no closure source. It adds no release input, and a closure source records no digest of the two builder files it already names."
+        h.agentDefault;
+      h.invariant "the-backlog-bug-closes-first"
+        "The implementation pull request makes this item active after the backlog bug zenoh-lost-holder-denied is terminal (V7)."
+        h.agentDefault;
+    };
+    decisions = {
+      h.decided "readers-are-rows-of-a-generation-resource"
+        "A generation resource object, contracts/resource-reader/v1, pairs a table with an instance. The root serves a table to an instance exactly when a row names that pair."
+        "the root then holds no name, and the generation's object digest table authenticates the rows as it authenticates every resource. A service id in the instance record would not replace the declaration: admission recomputes the required services from generation rows, so a reader would still need a row. slime-root/src/ipc.rs already gates the fabric holder table by an identity inside a resource"
+        h.agentDefault
+        { "root-holds-no-component-name"; };
+      h.decided "a-row-names-an-instance"
+        "A row holds a table id and the SHA-256 identity of one instance name, under this contract's own domain tag. A table that every instance of one executable reads has one row for each instance."
+        "a reader is one running instance, and the root already knows its caller as an instance. The block gate of main compares an executable name; one row for each instance of that executable admits the same callers. The domain tag keeps an identity of another resource from naming a row here"
+        h.agentDefault
+        { "root-holds-no-component-name"; "block-drivers-read-their-rows"; };
+      h.decided "the-builder-derives-the-reader-table"
+        "scripts/build/generation_resources.py holds the four names and writes the rows. It writes a row only for a table the generation carries and an instance the manifest declares, and it emits the object only when a row exists. No manifest lists the object."
+        "the names are composition policy, and the builder already holds two of them for the same purpose. A declared object would change the system spec contract and every derived manifest, and scripts/lib/system_spec.py derives the object list and is a grader. The planning pull request cannot carry derived manifests, and the implementation pull request cannot change a grader"
+        h.agentDefault
+        { "root-holds-no-component-name"; "builder-writes-the-rule"; "zenoh-service-reads-its-tables"; "network-service-reads-its-tables"; "entropy-service-reads-its-table"; "block-drivers-read-their-rows"; };
+      h.decided "the-planning-pull-request-fixes-the-schema"
+        "The planning pull request adds contracts/resource-reader/v1/schema.zt, and the schema imports no renderer. The implementation adds gen_rust.zt, which imports the schema, and a row of scripts/generate/generate-boot-bindings.py that runs it."
+        "the judge classes an added schema as planning and a renderer as implementation (docs/decisions/planning-pr-schema-contracts.md). A row of scripts/lib/zutai_bindings.py would fail contracts_source_check on main until the renderer exists, and scripts/lib/boot_contracts.py is a grader, so the builder's layout is a module of its own under scripts/build/. contracts_source_check already runs the boot generator's comparison in CI"
+        h.agentDefault
+        { "root-holds-no-component-name"; };
+      h.decided "the-name-count-is-an-exact-match"
+        "root_size_check counts a string literal outside test items whose whole text equals a component directory name. It reads slime-root, boot-contracts and components/proto, the crates of the root's own source and of the formats it decodes."
+        "a count of literals that contain a name reports 17 literals for the word console alone. An exact match finds the six gates of main and nothing else. A name built from parts or held in a byte array escapes the count; the booted readers and the review cover that"
+        h.agentDefault
+        { "root-holds-no-component-name"; };
+      h.decided "two-zenoh-facts-take-a-second-form"
+        "The facts root-instance and root-gate of scripts/lib/zenoh_grants_reader_exam.py each accept two forms: the constant and its comparison, or the lookup in the reader table and the call that hands its verdict to the copier. The count of facts stays 35."
+        "the exam must pass on main before and after the implementation, and specs/zenoh-service-grants.zt promises 36 cases and 41 refused controls. That area also promises that the rows go only to the instance named zenoh-service. The second form no longer pins that name in the root, so resource_reader_builder_check pins it in the builder: it refuses a builder that writes a grants row for another instance. The synthetic controls exercise the second form; the first form is dead text once the implementation lands"
+        h.agentDefault
+        { "zenoh-reader-stays-pinned"; "builder-writes-the-rule"; };
+      h.decided "the-bounds-come-from-a-draft"
+        "The bound on hostTests is 386, and the bound on seriesCodeLines is the checker's ceiling of 33200."
+        "a draft of the implementation, on a local branch, runs 386 host tests and holds 33102 code lines in the series: 5642 in the boot role against a ceiling of 5650, and 2510 in the dispatch role against 2523 on main. The item root-system-timer adds 93 lines to the series when it lands, which gives 33195"
+        h.agentDefault
+        { "series-keeps-its-ceiling"; "reader-table-has-host-tests"; };
+      h.decided "two-advisory-targets"
+        "The acceptances on sel4_entropy_check and io_block_check are advisory."
+        "the evidence branch holds no record of either target, and an item cannot close on a target that the runner has never passed. The implementation pull request runs both"
+        h.agentDefault
+        { "entropy-service-reads-its-table"; "block-drivers-read-their-rows"; };
+      h.decided "mandatory-targets-have-passing-records"
+        "Every mandatory acceptance binds a target that the evidence branch records as passed, except resource_reader_builder_check."
+        "that target is new. It needs only Python and the Zutai binary, and it fails until the builder writes the table. On the evidence branch at 138096ad the records are: root_size_check 11 of 11 passed, test_sel4_root 18 of 18, zenoh_service_booted_check 28 of 28, io_tcp_listener_check 18 of 18 and sel4_boot_check 9 of 10. zenoh_service_grants_reader_check passed its last 6 records; the 22 before them are from before its implementation landed"
+        h.agentDefault
+        { "root-holds-no-component-name"; "builder-writes-the-rule"; "reader-table-has-host-tests"; "zenoh-reader-stays-pinned"; "zenoh-service-reads-its-tables"; "network-service-reads-its-tables"; "product-graph-boots"; };
+      h.decided "graders-change-in-the-planning-pull-request"
+        "The planning pull request of this item changes three grader files and adds one judge. scripts/lib/rust_source.py returns the string literals of a source. scripts/check/check-root-size.py counts the literals that name a component, with seven synthetic cases of its reader. scripts/lib/zenoh_grants_reader_exam.py takes the second form of two facts. scripts/check/check-resource-readers.py and the recipe resource_reader_builder_check judge the builder's reader table."
+        "each changed file is in the grader set of a target that a promise binds, so it changes only in a pull request that adds an item (V4). The new judge is the exam of a new contract, and the implementation may not touch it (V3)"
+        h.agentDefault
+        { "root-holds-no-component-name"; "builder-writes-the-rule"; "zenoh-reader-stays-pinned"; };
+    };
+  };
+
+item

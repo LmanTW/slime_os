@@ -14,6 +14,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=SLIME_PRODUCT_TEST_TERMINATOR");
     println!("cargo:rerun-if-env-changed=SLIME_DUO_EARLY_FAULT");
     println!("cargo:rerun-if-env-changed=SLIME_DUO_TIMEBASE_HZ");
+    println!("cargo:rerun-if-env-changed=SLIME_SYSTEM_TIMER");
     println!("cargo::rustc-check-cfg=cfg(slime_boot_selector)");
     println!("cargo::rustc-check-cfg=cfg(slime_b38_force_unwind)");
     println!("cargo::rustc-check-cfg=cfg(slime_private_fail_second_allocation)");
@@ -34,6 +35,7 @@ fn main() {
     println!("cargo::rustc-check-cfg=cfg(slime_b40_mutate_wrong_rights)");
     println!("cargo::rustc-check-cfg=cfg(slime_root_fixture)");
     println!("cargo::rustc-check-cfg=cfg(slime_qemu_keyboard)");
+    println!("cargo::rustc-check-cfg=cfg(slime_root_console_pl011)");
     println!("cargo::rustc-check-cfg=cfg(slime_pc99_com1)");
     println!("cargo::rustc-check-cfg=cfg(slime_product_uart)");
     println!("cargo::rustc-check-cfg=cfg(slime_product_test_terminator)");
@@ -41,9 +43,17 @@ fn main() {
     println!("cargo::rustc-check-cfg=cfg(slime_framework13_ai300)");
     println!("cargo::rustc-check-cfg=cfg(slime_duo_early_fault)");
     println!("cargo::rustc-check-cfg=cfg(slime_physical_target)");
+    println!("cargo::rustc-check-cfg=cfg(slime_arm_generic_timer)");
+    println!("cargo::rustc-check-cfg=cfg(slime_bcm2835_system_timer)");
+    println!("cargo::rustc-check-cfg=cfg(slime_timer_registers)");
     let target_profile = std::env::var("SLIME_TARGET_PROFILE")
         .unwrap_or_else(|_| "aarch64-sel4-qemu-virt".to_owned());
     println!("cargo:rustc-env=SLIME_TARGET_PROFILE={target_profile}");
+    // QEMU `virt` is the one target whose root owns its console UART: the
+    // root maps the machine's PL011 and writes its transcript through it.
+    if target_profile == "aarch64-sel4-qemu-virt" {
+        println!("cargo::rustc-cfg=slime_root_console_pl011");
+    }
     // A named physical board, as opposed to a QEMU machine: the root announces
     // its target profile at READY and resets the board through its own
     // registers after an autonomous proof, neither of which a QEMU gate wants.
@@ -60,6 +70,22 @@ fn main() {
             .expect("SLIME_DUO_TIMEBASE_HZ must be a positive integer");
         assert!(frequency > 0, "SLIME_DUO_TIMEBASE_HZ must be positive");
         println!("cargo:rustc-env=SLIME_DUO_TIMEBASE_HZ={frequency}");
+    }
+    // The root's monotonic source. An AArch64 root reads and programs the
+    // generic timer from EL0, which the kernel must export. The Raspberry Pi 5
+    // root can use the SoC's system timer instead, a device page that needs no
+    // export. Every other architecture has a device page already.
+    let architecture = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+    if std::env::var("SLIME_SYSTEM_TIMER").as_deref() == Ok("1") {
+        if target_profile != "aarch64-rpi5" {
+            panic!("SLIME_SYSTEM_TIMER is valid only for the aarch64-rpi5 profile");
+        }
+        println!("cargo::rustc-cfg=slime_bcm2835_system_timer");
+        println!("cargo::rustc-cfg=slime_timer_registers");
+    } else if architecture == "aarch64" {
+        println!("cargo::rustc-cfg=slime_arm_generic_timer");
+    } else {
+        println!("cargo::rustc-cfg=slime_timer_registers");
     }
     if target_profile == "x86_64-sel4-framework13-ai300" {
         println!("cargo::rustc-cfg=slime_framework13_ai300");

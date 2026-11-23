@@ -59,7 +59,7 @@ fn main(_: u32) {
             }
             yield_now();
         };
-        if reply.status != wire::STATUS_SUCCESS as i32 || reply.reached != 1 {
+        if reply.status != wire::STATUS_SUCCESS as i32 || reply.reached < 1 {
             fail(b"publication result");
         }
         wait(&clock, SPACING_MS);

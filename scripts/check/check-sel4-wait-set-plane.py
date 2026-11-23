@@ -17,7 +17,6 @@ from closure_image import ClosureImageError, build as build_closure_image  # noq
 
 from harness import GENERATION_COMPOSITIONS, sha256_file  # noqa: E402
 from sel4_boot import (  # noqa: E402
-    PLATFORMS,
     artifact_paths as platform_artifact_paths,
     boot_command,
     run as run_boot,
@@ -33,6 +32,13 @@ FIXTURE = GENERATION_COMPOSITIONS / "sel4-wait-set.zti"
 # The closure identity names the build's inputs and is re-resolved from repository
 # state before the build, so stale input is refused instead of silently changing the image.
 CLOSURE = "sel4-wait-set"
+# The closure names this platform, and a closure cannot describe a build for a
+# platform it does not name. Every other arm builds by plane flag: no RISC-V
+# closure exists for this plane, and pc99's Multiboot2 media has no loader
+# image for closure packaging. `--platform` admits these platforms only, so a
+# platform with no build route is refused before a boot.
+CLOSURE_PLATFORM = "qemu-arm-virt"
+FLAG_PLATFORMS = ("qemu-pc99", "qemu-riscv-virt")
 IMAGE: Path | None = None
 IMAGE_VARIANT = "wait-set"
 TIMEOUT = 240
@@ -129,9 +135,7 @@ def fail(message: str) -> NoReturn:
 
 def build_image(platform: str, image_path: Path) -> None:
     global IMAGE
-    if platform == "qemu-pc99":
-        # pc99's Multiboot2 media has no loader image, so it remains on the
-        # legacy builder until closure packaging supports that boot route.
+    if platform != CLOSURE_PLATFORM:
         command = [
             sys.executable,
             str(BUILD_SCRIPT),
@@ -316,14 +320,14 @@ def main() -> None:
     )
     parser.add_argument(
         "--platform",
-        choices=sorted(PLATFORMS),
-        default="qemu-arm-virt",
+        choices=sorted((CLOSURE_PLATFORM, *FLAG_PLATFORMS)),
+        default=CLOSURE_PLATFORM,
     )
     arguments = parser.parse_args()
     check_fixture_shape()
     image_path, manifest_path = artifact_paths(arguments.platform)
     build_image(arguments.platform, image_path)
-    if arguments.platform == "qemu-pc99":
+    if arguments.platform != CLOSURE_PLATFORM:
         manifest = verify_identity(
             manifest_path,
             platform=arguments.platform,

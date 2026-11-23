@@ -94,6 +94,12 @@ repeated id, an undeclaration of an id or key not held, a Put to a key not decla
 own limit and three configurations whose slots do not add up; and the demo's parameters still hold
 one. The links exam and the stock-peer exam run beside it, since both pin the subscriber limit.
 
+`--slice holder-fault` judges what the Zenoh service does with a holder that faults or never detaches. A reference
+model of the holder roster writes every line of eight scripted scenarios, with each publication's reach, peer flag and sample sequence, and the Rust test must print them. The
+service reclaims a holder whose task the root reports dead, expires a holder that has not detached when the wait ends,
+refuses a reclaimed holder every later request, and serves the other holder throughout. Eighteen wrong services are each
+refused. The server half's exam runs beside it.
+
 `--slice composition` judges the derived `sel4-zenoh` composition against the
 demo contract's authority and refuses 15 mutations of an honest one. It is the
 static half of the QEMU arm; the boot is `check-sel4-io-network-plane.py --arm zenoh`.
@@ -111,29 +117,56 @@ import hashlib
 import os as _os
 import re
 import shutil
+import signal as _signal
 import struct
 import subprocess
 import tempfile
+import time as _time
 from collections.abc import Callable
 from typing import NoReturn
 
 import devloop_observations
 import zenoh_exchange
+import zenoh_rmw_exam
+import zenoh_rmw_graph_exam
+import zenoh_rmw_arm
+import zenoh_rmw_component_exam
+import zenoh_rmw_peer_component_exam
+import zenoh_rmw_data_exam
+import zenoh_rmw_client_exam
+import zenoh_rmw_client_put_exam
+import zenoh_rmw_token_exam
+import zenoh_rmw_live_exam
+import zenoh_rmw_router
+import zenoh_rmw_router_data
+import zenoh_rmw_router_link_exam
+import zenoh_rmw_data_link_exam
+import zenoh_rmw_link_exam
+import zenoh_lanes_exam
 import zenoh_links_exam
 import zenoh_liveliness_exam
+import zenoh_link_v3_limits_exam
+import zenoh_link_v3_reader_exam
 import zenoh_grants_exam
 import zenoh_client_exam
 import zenoh_client_abort_exam
 import zenoh_client_io_exam
 import zenoh_client_wire_exam
 import zenoh_grants_reader_exam
+import zenoh_grading_exam
 import zenoh_server_exam
+import zenoh_holder_fault_exam
+import zenoh_lost_holder_exam
 import zenoh_service_arm
 import zenoh_service_component_exam
+import zenoh_service_four_exam
+import zenoh_service_peer_exam
 import zenoh_grants_table_exam
 import zenoh_limits_exam
 import zenoh_service_exam
 import zenoh_service_link_exam
+import zenoh_stack_exam
+import zenoh_qos_exam
 import zenoh_stock_peer
 import zenoh_subscribers_exam
 import zenoh_undeclare_exam
@@ -1254,12 +1287,12 @@ def stock_controls() -> int:
         ("the five-event frame admitted instead of refused", [line for line in good if not line.startswith("stock refused frame-five-events ")]),
         ("the five-event frame refused with the wrong class", swap("stock refused frame-five-events ", "stock refused frame-five-events invalid-keyexpr")),
         ("QoS on a FRAME header admitted instead of refused", [line for line in good if not line.startswith("stock refused refuse-qos-on-frame ")]),
-        ("QoS on a PUSH admitted instead of refused", [line for line in good if not line.startswith("stock refused refuse-qos-on-push ")]),
+        ("QoS on a PUSH reported as refused instead of taken", good + ["stock refused refuse-qos-on-push unsupported-extension"]),
         ("QoS on the inner header of a subscriber declaration admitted instead of refused", [line for line in good if not line.startswith("stock refused refuse-qos-on-inner-subscriber-header ")]),
         ("QoS on a Put admitted instead of refused", [line for line in good if not line.startswith("stock refused refuse-qos-on-put ")]),
         ("QoS on a DeclareFinal admitted instead of refused", [line for line in good if not line.startswith("stock refused refuse-qos-on-declare-final ")]),
         ("QoS on an UndeclareSubscriber admitted instead of refused", [line for line in good if not line.startswith("stock refused refuse-qos-on-undeclare-subscriber ")]),
-        ("QoS on a PUSH refused with the wrong class", swap("stock refused refuse-qos-on-push ", "stock refused refuse-qos-on-push invalid-keyexpr")),
+        ("QoS on a PUSH not reported as taken", [line for line in good if line != "stock ok qos-on-push-is-taken"]),
         ("a second subscriber refused with the wrong class", swap("stock refused second-subscriber-sent ", "stock refused second-subscriber-sent invalid-keyexpr")),
         ("a refusal with the wrong class", swap("stock refused refuse-wildcard", "stock refused refuse-wildcard unsupported-message")),
         ("a refusal with no class", swap("stock refused refuse-client", "stock refused refuse-client")),
@@ -1800,6 +1833,880 @@ def undeclare_main(controls_only: bool) -> int:
     return 0
 
 
+RMW_FILTER = "zenoh_rmw::"
+RMW_FIXTURES = ROOT / "build" / "zenoh-rmw" / "fixtures.zti"
+# The exam's own Rust tests, by name: a filter that matches nothing passes silently.
+RMW_TESTS = tuple(f"zenoh_rmw::{name}" for name in (
+    "the_constants_are_the_handed_off_record",
+    "the_rmw_peer_exam",
+))
+
+
+def run_rmw() -> list[str]:
+    # The pinned corpus, the stock-peer exam and the undeclare exam are judged on this path too: an
+    # implementation that accepts the graph by loosening the decoder could otherwise move a pinned
+    # refusal or a stock case while every rmw test passes.
+    if not STOCK_CORPUS.is_file():
+        fail(f"{STOCK_CORPUS.relative_to(ROOT)} is missing")
+    judge_stock_corpus(STOCK_CORPUS.read_text())
+    stock_fixtures()
+    STOCK_FIXTURES.parent.mkdir(parents=True, exist_ok=True)
+    STOCK_FIXTURES.write_text(zenoh_stock_peer.fixture_zti())
+    UNDECLARE_FIXTURES.parent.mkdir(parents=True, exist_ok=True)
+    UNDECLARE_FIXTURES.write_text(zenoh_undeclare_exam.fixture_zti())
+    RMW_FIXTURES.parent.mkdir(parents=True, exist_ok=True)
+    RMW_FIXTURES.write_text(zenoh_rmw_exam.fixture_zti())
+    try:
+        zenoh_rmw_exam.validate_handoff(RMW_FIXTURES.read_text())
+    except zenoh_rmw_exam.RmwError as error:
+        fail(str(error))
+    environment = {
+        **_os.environ,
+        "ZENOH_STOCK_FIXTURES": str(STOCK_FIXTURES),
+        "ZENOH_UNDECLARE_FIXTURES": str(UNDECLARE_FIXTURES),
+        "ZENOH_RMW_FIXTURES": str(RMW_FIXTURES),
+    }
+    _stdout, retained = cargo_tests(
+        (STOCK_DECODER_FILTER, STOCK_SESSION_FILTER, STOCK_ENCODE_FILTER, STOCK_LINK_FILTER), environment
+    )
+    passed = tests_passed(retained)
+    missing = [name for name in LINKS_RETAINED_TESTS if name not in passed]
+    if missing:
+        fail(f"rmw: retained tests did not run and pass ({len(missing)} of {len(LINKS_RETAINED_TESTS)}): {', '.join(missing[:4])}")
+    stock_stdout, stock_output = cargo_tests((STOCK_FILTER,), environment)
+    stock_passed = tests_passed(stock_output)
+    stock_missing = [name for name in LINKS_STOCK_TESTS if name not in stock_passed]
+    if stock_missing:
+        fail(f"rmw: the stock-peer exam's tests did not run and pass ({len(stock_missing)} of {len(LINKS_STOCK_TESTS)}): {', '.join(stock_missing[:4])}")
+    judge_stock(exam_lines(stock_stdout))
+    undeclare_stdout, undeclare_output = cargo_tests((UNDECLARE_FILTER,), environment)
+    undeclare_passed = tests_passed(undeclare_output)
+    undeclare_missing = [name for name in UNDECLARE_TESTS if name not in undeclare_passed]
+    if undeclare_missing:
+        fail(f"rmw: the undeclare exam's tests did not run and pass ({len(undeclare_missing)} of {len(UNDECLARE_TESTS)}): {', '.join(undeclare_missing[:4])}")
+    try:
+        zenoh_undeclare_exam.judge(exam_lines(undeclare_stdout))
+    except zenoh_undeclare_exam.UndeclareError as error:
+        fail(str(error))
+    rmw_stdout, rmw_output = cargo_tests((RMW_FILTER,), environment)
+    rmw_passed = tests_passed(rmw_output)
+    rmw_missing = [name for name in RMW_TESTS if name not in rmw_passed]
+    if rmw_missing:
+        fail(f"rmw: the exam's tests did not run and pass ({len(rmw_missing)} of {len(RMW_TESTS)}): {', '.join(rmw_missing[:4])}")
+    return exam_lines(rmw_stdout)
+
+
+def rmw_main(controls_only: bool) -> int:
+    # The neighbours' judges and their mutations run here as a precondition, as they do for
+    # `--slice undeclare`: this gate relies on them to keep the pinned refusals where they are, and their
+    # refusals belong to their own gates' counts, not to this one's.
+    stock_controls()
+    try:
+        zenoh_undeclare_exam.all_controls()
+    except zenoh_undeclare_exam.UndeclareError as error:
+        fail(str(error))
+    sample = "\n".join(f"test {name} ... ok" for name in RMW_TESTS[1:])
+    if all(name in tests_passed(sample) for name in RMW_TESTS):
+        fail("control: a run with an rmw exam test missing was read as complete")
+    try:
+        refused_controls = zenoh_rmw_exam.all_controls()
+        item_cases, item_controls = zenoh_rmw_exam.item_pins()
+        positive, refusals = zenoh_rmw_exam.judge(zenoh_rmw_exam.good_lines())
+    except zenoh_rmw_exam.RmwError as error:
+        fail(str(error))
+    if positive + refusals != zenoh_rmw_exam.PINNED_CASES:
+        fail(f"rmw: an honest transcript is {positive + refusals} cases, the checker pins {zenoh_rmw_exam.PINNED_CASES}")
+    if refused_controls != zenoh_rmw_exam.PINNED_CONTROLS:
+        fail(f"rmw: {refused_controls} controls, the checker pins {zenoh_rmw_exam.PINNED_CONTROLS}")
+    # While the item is open, its stored predicates must say the same. A retired item has no body here, so
+    # this comparison is skipped and the pins above are the whole guard.
+    if item_cases and item_cases != zenoh_rmw_exam.PINNED_CASES:
+        fail(f"rmw: the item fixes {item_cases} cases, the checker pins {zenoh_rmw_exam.PINNED_CASES}")
+    if item_controls and item_controls != zenoh_rmw_exam.PINNED_CONTROLS:
+        fail(f"rmw: the item requires {item_controls} controls, the checker pins {zenoh_rmw_exam.PINNED_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 rmw judge: refused {refused_controls} corrupted records")
+        return 0
+    try:
+        cases, refusals = zenoh_rmw_exam.judge(run_rmw())
+    except zenoh_rmw_exam.RmwError as error:
+        fail(str(error))
+    print(f"[zenoh-profile0] slice=rmw cases={cases} refusals={refusals} controls={refused_controls}")
+    devloop_observations.record(casesObserved=cases + refusals, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 rmw check: the session took the graph an rmw_zenoh peer declares and refused every variant of it the profile must")
+    return 0
+
+
+RMW_GRAPH_FILTER = "zenoh_rmw_graph::"
+RMW_GRAPH_FIXTURES = ROOT / "build" / "zenoh-rmw-graph" / "fixtures.zti"
+# The exam's own Rust tests, by name: a filter that matches nothing passes silently.
+RMW_GRAPH_TESTS = tuple(f"zenoh_rmw_graph::{name}" for name in (
+    "the_constants_are_the_handed_off_record",
+    "the_rmw_graph_exam",
+))
+
+
+def run_rmw_graph() -> list[str]:
+    # The session exam runs first and is judged on this path: a graph built on a session that no longer
+    # takes the peer's declarations proves nothing, and the session exam's own pins stay where they are.
+    session_lines = run_rmw()
+    try:
+        zenoh_rmw_exam.judge(session_lines)
+    except zenoh_rmw_exam.RmwError as error:
+        fail(str(error))
+    RMW_GRAPH_FIXTURES.parent.mkdir(parents=True, exist_ok=True)
+    RMW_GRAPH_FIXTURES.write_text(zenoh_rmw_graph_exam.fixture_zti())
+    try:
+        zenoh_rmw_graph_exam.validate_handoff(RMW_GRAPH_FIXTURES.read_text())
+    except zenoh_rmw_graph_exam.GraphExamError as error:
+        fail(str(error))
+    environment = {**_os.environ, "ZENOH_RMW_FIXTURES": str(RMW_FIXTURES), "ZENOH_RMW_GRAPH_FIXTURES": str(RMW_GRAPH_FIXTURES)}
+    graph_stdout, graph_output = cargo_tests((RMW_GRAPH_FILTER,), environment)
+    graph_passed = tests_passed(graph_output)
+    graph_missing = [name for name in RMW_GRAPH_TESTS if name not in graph_passed]
+    if graph_missing:
+        fail(f"rmw-graph: the exam's tests did not run and pass ({len(graph_missing)} of {len(RMW_GRAPH_TESTS)}): {', '.join(graph_missing[:4])}")
+    return exam_lines_graph(graph_stdout)
+
+
+def exam_lines_graph(output: str) -> list[str]:
+    """The `[zenoh-exam] graph ...` lines of a run, with the marker removed.
+
+    With `--nocapture`, libtest starts a test's output on the line that names the test, as in
+    `test zenoh_rmw_graph::the_rmw_graph_exam ... [zenoh-exam] graph entity ...`, so the marker is searched
+    for in each line and not matched at its start, as `exam_lines` does.
+    """
+    return [line for line in exam_lines(output) if line.startswith("graph ")]
+
+
+def rmw_graph_main(controls_only: bool) -> int:
+    # The session exam's judge and its mutations run here as a precondition; their refusals belong to
+    # the session gate's count, not to this one's.
+    try:
+        zenoh_rmw_exam.all_controls()
+    except zenoh_rmw_exam.RmwError as error:
+        fail(str(error))
+    sample = "\n".join(f"test {name} ... ok" for name in RMW_GRAPH_TESTS[1:])
+    if all(name in tests_passed(sample) for name in RMW_GRAPH_TESTS):
+        fail("control: a run with an rmw-graph exam test missing was read as complete")
+    try:
+        refused_controls = zenoh_rmw_graph_exam.all_controls()
+        item_cases, item_controls = zenoh_rmw_graph_exam.item_pins()
+        positive, refusals = zenoh_rmw_graph_exam.judge(zenoh_rmw_graph_exam.good_lines())
+    except zenoh_rmw_graph_exam.GraphExamError as error:
+        fail(str(error))
+    if positive + refusals != zenoh_rmw_graph_exam.PINNED_CASES:
+        fail(f"rmw-graph: an honest transcript is {positive + refusals} cases, the checker pins {zenoh_rmw_graph_exam.PINNED_CASES}")
+    if refused_controls != zenoh_rmw_graph_exam.PINNED_CONTROLS:
+        fail(f"rmw-graph: {refused_controls} controls, the checker pins {zenoh_rmw_graph_exam.PINNED_CONTROLS}")
+    if item_cases and item_cases != zenoh_rmw_graph_exam.PINNED_CASES:
+        fail(f"rmw-graph: the item fixes {item_cases} cases, the checker pins {zenoh_rmw_graph_exam.PINNED_CASES}")
+    if item_controls and item_controls != zenoh_rmw_graph_exam.PINNED_CONTROLS:
+        fail(f"rmw-graph: the item requires {item_controls} controls, the checker pins {zenoh_rmw_graph_exam.PINNED_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 rmw-graph judge: refused {refused_controls} corrupted records")
+        return 0
+    try:
+        cases, refusals = zenoh_rmw_graph_exam.judge(run_rmw_graph())
+    except zenoh_rmw_graph_exam.GraphExamError as error:
+        fail(str(error))
+    print(f"[zenoh-profile0] slice=rmw-graph cases={cases} refusals={refusals} controls={refused_controls}")
+    devloop_observations.record(casesObserved=cases + refusals, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 rmw-graph check: the graph held the entities an rmw_zenoh peer's tokens declare and refused every token it must")
+    return 0
+
+
+RMW_LINK_FILTER = "zenoh_rmw_link::"
+# The exam's own Rust tests, by name: a filter that matches nothing passes silently.
+RMW_LINK_TESTS = tuple(f"zenoh_rmw_link::{name}" for name in (
+    "the_graph_link_exam",
+))
+
+
+def exam_lines_link(output: str) -> list[str]:
+    """The `[zenoh-exam] link ...` lines of a run, with the marker removed."""
+    return [line for line in exam_lines(output) if line.startswith("link ")]
+
+
+def run_rmw_link() -> list[str]:
+    # The session exam and the graph exam run first and are judged on this path: a link built on a session
+    # or a graph that no longer takes the peer's declarations proves nothing.
+    graph_lines = run_rmw_graph()
+    try:
+        zenoh_rmw_graph_exam.judge(graph_lines)
+    except zenoh_rmw_graph_exam.GraphExamError as error:
+        fail(str(error))
+    environment = {**_os.environ, "ZENOH_RMW_FIXTURES": str(RMW_FIXTURES), "ZENOH_RMW_GRAPH_FIXTURES": str(RMW_GRAPH_FIXTURES)}
+    link_stdout, link_output = cargo_tests((RMW_LINK_FILTER,), environment)
+    link_passed = tests_passed(link_output)
+    link_missing = [name for name in RMW_LINK_TESTS if name not in link_passed]
+    if link_missing:
+        fail(f"rmw-link: the exam's tests did not run and pass ({len(link_missing)} of {len(RMW_LINK_TESTS)}): {', '.join(link_missing[:4])}")
+    return exam_lines_link(link_stdout)
+
+
+def rmw_link_main(controls_only: bool) -> int:
+    # The neighbours' judges and their mutations run here as a precondition; their refusals belong to their
+    # own gates' counts, not to this one's.
+    try:
+        zenoh_rmw_exam.all_controls()
+        zenoh_rmw_graph_exam.all_controls()
+    except (zenoh_rmw_exam.RmwError, zenoh_rmw_graph_exam.GraphExamError) as error:
+        fail(str(error))
+    sample = "\n".join(f"test {name} ... ok" for name in RMW_LINK_TESTS[1:])
+    if all(name in tests_passed(sample) for name in RMW_LINK_TESTS):
+        fail("control: a run with an rmw-link exam test missing was read as complete")
+    try:
+        refused_controls = zenoh_rmw_link_exam.all_controls()
+        item_cases, item_controls = zenoh_rmw_link_exam.item_pins()
+        positive, refusals = zenoh_rmw_link_exam.judge(zenoh_rmw_link_exam.good_lines())
+    except zenoh_rmw_link_exam.LinkExamError as error:
+        fail(str(error))
+    if positive + refusals != zenoh_rmw_link_exam.PINNED_CASES:
+        fail(f"rmw-link: an honest transcript is {positive + refusals} cases, the checker pins {zenoh_rmw_link_exam.PINNED_CASES}")
+    if refused_controls != zenoh_rmw_link_exam.PINNED_CONTROLS:
+        fail(f"rmw-link: {refused_controls} controls, the checker pins {zenoh_rmw_link_exam.PINNED_CONTROLS}")
+    if item_cases and item_cases != zenoh_rmw_link_exam.PINNED_CASES:
+        fail(f"rmw-link: the item fixes {item_cases} cases, the checker pins {zenoh_rmw_link_exam.PINNED_CASES}")
+    if item_controls and item_controls != zenoh_rmw_link_exam.PINNED_CONTROLS:
+        fail(f"rmw-link: the item requires {item_controls} controls, the checker pins {zenoh_rmw_link_exam.PINNED_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 rmw-link judge: refused {refused_controls} corrupted records")
+        return 0
+    try:
+        cases, refusals = zenoh_rmw_link_exam.judge(run_rmw_link())
+    except zenoh_rmw_link_exam.LinkExamError as error:
+        fail(str(error))
+    print(f"[zenoh-profile0] slice=rmw-link cases={cases} refusals={refusals} controls={refused_controls}")
+    devloop_observations.record(casesObserved=cases + refusals, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 rmw-link check: the graph link carried the sessions of an rmw_zenoh peer three ways and ended on every fault it must")
+    return 0
+
+
+RMW_DATA_FILTER = "zenoh_rmw_data::"
+RMW_DATA_FIXTURES = ROOT / "build" / "zenoh-rmw-data" / "fixtures.zti"
+# The exam's own Rust tests, by name: a filter that matches nothing passes silently.
+RMW_DATA_TESTS = tuple(f"zenoh_rmw_data::{name}" for name in (
+    "the_data_exam",
+))
+
+
+def exam_lines_data(output: str) -> list[str]:
+    """The `[zenoh-exam] data ...` lines of a run, with the marker removed."""
+    return [line for line in exam_lines(output) if line.startswith("data ")]
+
+
+def run_rmw_data() -> list[str]:
+    # The graph exam runs first and is judged on this path: a data session built on a graph session that no
+    # longer takes the peer's declarations proves nothing.
+    graph_lines = run_rmw_graph()
+    try:
+        zenoh_rmw_graph_exam.judge(graph_lines)
+    except zenoh_rmw_graph_exam.GraphExamError as error:
+        fail(str(error))
+    RMW_DATA_FIXTURES.parent.mkdir(parents=True, exist_ok=True)
+    RMW_DATA_FIXTURES.write_text(zenoh_rmw_data_exam.fixture_zti())
+    try:
+        zenoh_rmw_data_exam.validate_handoff(RMW_DATA_FIXTURES.read_text())
+    except zenoh_rmw_data_exam.DataExamError as error:
+        fail(str(error))
+    environment = {
+        **_os.environ,
+        "ZENOH_RMW_FIXTURES": str(RMW_FIXTURES),
+        "ZENOH_RMW_GRAPH_FIXTURES": str(RMW_GRAPH_FIXTURES),
+        "ZENOH_RMW_DATA_FIXTURES": str(RMW_DATA_FIXTURES),
+    }
+    data_stdout, data_output = cargo_tests((RMW_DATA_FILTER,), environment)
+    data_passed = tests_passed(data_output)
+    data_missing = [name for name in RMW_DATA_TESTS if name not in data_passed]
+    if data_missing:
+        fail(f"rmw-data: the exam's tests did not run and pass ({len(data_missing)} of {len(RMW_DATA_TESTS)}): {', '.join(data_missing[:4])}")
+    return exam_lines_data(data_stdout)
+
+
+def rmw_data_main(controls_only: bool) -> int:
+    try:
+        zenoh_rmw_exam.all_controls()
+        zenoh_rmw_graph_exam.all_controls()
+    except (zenoh_rmw_exam.RmwError, zenoh_rmw_graph_exam.GraphExamError) as error:
+        fail(str(error))
+    sample = "\n".join(f"test {name} ... ok" for name in RMW_DATA_TESTS[1:])
+    if all(name in tests_passed(sample) for name in RMW_DATA_TESTS):
+        fail("control: a run with an rmw-data exam test missing was read as complete")
+    try:
+        refused_controls = zenoh_rmw_data_exam.all_controls()
+        item_cases, item_controls = zenoh_rmw_data_exam.item_pins()
+        positive, refusals = zenoh_rmw_data_exam.judge(zenoh_rmw_data_exam.good_lines())
+    except zenoh_rmw_data_exam.DataExamError as error:
+        fail(str(error))
+    if positive + refusals != zenoh_rmw_data_exam.PINNED_CASES:
+        fail(f"rmw-data: an honest transcript is {positive + refusals} cases, the checker pins {zenoh_rmw_data_exam.PINNED_CASES}")
+    if refused_controls != zenoh_rmw_data_exam.PINNED_CONTROLS:
+        fail(f"rmw-data: {refused_controls} controls, the checker pins {zenoh_rmw_data_exam.PINNED_CONTROLS}")
+    if item_cases and item_cases != zenoh_rmw_data_exam.PINNED_CASES:
+        fail(f"rmw-data: the item fixes {item_cases} cases, the checker pins {zenoh_rmw_data_exam.PINNED_CASES}")
+    if item_controls and item_controls != zenoh_rmw_data_exam.PINNED_CONTROLS:
+        fail(f"rmw-data: the item requires {item_controls} controls, the checker pins {zenoh_rmw_data_exam.PINNED_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 rmw-data judge: refused {refused_controls} corrupted records")
+        return 0
+    try:
+        cases, refusals = zenoh_rmw_data_exam.judge(run_rmw_data())
+    except zenoh_rmw_data_exam.DataExamError as error:
+        fail(str(error))
+    print(f"[zenoh-profile0] slice=rmw-data cases={cases} refusals={refusals} controls={refused_controls}")
+    devloop_observations.record(casesObserved=cases + refusals, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 rmw-data check: the graph session delivered the samples of an rmw_zenoh talker and wrote the Puts a listener asked for")
+    return 0
+
+
+RMW_DATA_LINK_FILTER = "zenoh_rmw_data_link::"
+# The exam's own Rust tests, by name: a filter that matches nothing passes silently.
+RMW_DATA_LINK_TESTS = tuple(f"zenoh_rmw_data_link::{name}" for name in (
+    "the_data_link_exam",
+))
+
+
+def exam_lines_data_link(output: str) -> list[str]:
+    """The `[zenoh-exam] datalink ...` lines of a run, with the marker removed."""
+    return [line for line in exam_lines(output) if line.startswith("datalink ")]
+
+
+def run_rmw_data_link() -> list[str]:
+    # The data exam and the link exam run first and are judged on this path: a data link built on a session or a
+    # link whose own exam no longer passes proves nothing.
+    try:
+        zenoh_rmw_data_exam.judge(run_rmw_data())
+        zenoh_rmw_link_exam.judge(run_rmw_link())
+    except (zenoh_rmw_data_exam.DataExamError, zenoh_rmw_link_exam.LinkExamError) as error:
+        fail(str(error))
+    environment = {
+        **_os.environ,
+        "ZENOH_RMW_FIXTURES": str(RMW_FIXTURES),
+        "ZENOH_RMW_GRAPH_FIXTURES": str(RMW_GRAPH_FIXTURES),
+        "ZENOH_RMW_DATA_FIXTURES": str(RMW_DATA_FIXTURES),
+    }
+    stdout, output = cargo_tests((RMW_DATA_LINK_FILTER,), environment)
+    passed = tests_passed(output)
+    missing = [name for name in RMW_DATA_LINK_TESTS if name not in passed]
+    if missing:
+        fail(f"rmw-data-link: the exam's tests did not run and pass ({len(missing)} of {len(RMW_DATA_LINK_TESTS)}): {', '.join(missing[:4])}")
+    return exam_lines_data_link(stdout)
+
+
+RMW_CLIENT_FILTER = "zenoh_profile0::client_tests::"
+# The exam's own Rust tests, by name: a filter that matches nothing passes silently.
+RMW_CLIENT_TESTS = tuple(f"zenoh_profile0::client_tests::{name}" for name in (
+    "the_client_exam",
+))
+
+
+def exam_lines_client(output: str) -> list[str]:
+    """The `[zenoh-exam] client ...` lines of a run, with the marker removed."""
+    return [line for line in exam_lines(output) if line.startswith("client ")]
+
+
+def run_rmw_client() -> list[str]:
+    # The captures reach the Rust test only through this variable, one run to a line: name, INIT_SYN, INIT_ACK, OPEN_ACK.
+    environment = {**_os.environ, "ZENOH_RMW_ROUTER_RUNS": "\n".join(" ".join(run) for run in zenoh_rmw_router.RUNS)}
+    stdout, output = cargo_tests((RMW_CLIENT_FILTER,), environment)
+    passed = tests_passed(output)
+    missing = [name for name in RMW_CLIENT_TESTS if name not in passed]
+    if missing:
+        fail(f"rmw-client: the exam's tests did not run and pass ({len(missing)} of {len(RMW_CLIENT_TESTS)}): {', '.join(missing[:4])}")
+    return exam_lines_client(stdout)
+
+
+def rmw_client_main(controls_only: bool) -> int:
+    sample = "\n".join(f"test {name} ... ok" for name in RMW_CLIENT_TESTS[1:])
+    if all(name in tests_passed(sample) for name in RMW_CLIENT_TESTS):
+        fail("control: a run with an rmw-client exam test missing was read as complete")
+    exam = zenoh_rmw_client_exam
+    try:
+        refused_controls = exam.all_controls()
+        item_cases, item_controls = exam.item_pins()
+        positive, refusals = exam.judge(exam.good_lines())
+    except exam.ClientExamError as error:
+        fail(str(error))
+    if positive + refusals != exam.PINNED_CASES:
+        fail(f"rmw-client: an honest transcript is {positive + refusals} cases, the checker pins {exam.PINNED_CASES}")
+    if refused_controls != exam.PINNED_CONTROLS:
+        fail(f"rmw-client: {refused_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if item_cases and item_cases != exam.PINNED_CASES:
+        fail(f"rmw-client: the item fixes {item_cases} cases, the checker pins {exam.PINNED_CASES}")
+    if item_controls and item_controls != exam.PINNED_CONTROLS:
+        fail(f"rmw-client: the item requires {item_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 rmw-client judge: refused {refused_controls} corrupted records")
+        return 0
+    try:
+        cases, refusals = exam.judge(run_rmw_client())
+    except exam.ClientExamError as error:
+        fail(str(error))
+    print(f"[zenoh-profile0] slice=rmw-client cases={cases} refusals={refusals} controls={refused_controls}")
+    devloop_observations.record(casesObserved=cases + refusals, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 rmw-client check: a client-role connector opened a session with the captured handshakes of rmw_zenohd, and a session with no client role still refused them")
+    return 0
+
+
+RMW_ROUTER_LINK_FILTER = "zenoh_link::router_tests::"
+# The exam's own Rust tests, by name: a filter that matches nothing passes silently.
+RMW_ROUTER_LINK_TESTS = tuple(f"zenoh_link::router_tests::{name}" for name in (
+    "the_router_link_exam",
+))
+
+
+def exam_lines_router_link(output: str) -> list[str]:
+    """The `[zenoh-exam] routerlink ...` lines of a run, with the marker removed."""
+    return [line for line in exam_lines(output) if line.startswith("routerlink ")]
+
+
+def run_rmw_router_link() -> list[str]:
+    # The client exam runs first and is judged on this path: a link with the client role built on a session
+    # that no longer takes a router's INIT_ACK proves nothing.
+    try:
+        zenoh_rmw_client_exam.judge(run_rmw_client())
+    except zenoh_rmw_client_exam.ClientExamError as error:
+        fail(str(error))
+    # The captures reach the Rust test only through this variable, one run to a line: name, INIT_SYN, INIT_ACK,
+    # OPEN_ACK and the four forwarded FRAMEs.
+    rows = ("\n".join(" ".join((name, syn, ack, open_ack, *forwarded)) for name, syn, ack, open_ack, forwarded in zenoh_rmw_router_data.RUNS))
+    stdout, output = cargo_tests((RMW_ROUTER_LINK_FILTER,), {**_os.environ, "ZENOH_RMW_ROUTER_DATA_RUNS": rows})
+    passed = tests_passed(output)
+    missing = [name for name in RMW_ROUTER_LINK_TESTS if name not in passed]
+    if missing:
+        fail(f"rmw-router-link: the exam's tests did not run and pass ({len(missing)} of {len(RMW_ROUTER_LINK_TESTS)}): {', '.join(missing[:4])}")
+    return exam_lines_router_link(stdout)
+
+
+def rmw_router_link_main(controls_only: bool) -> int:
+    try:
+        zenoh_rmw_client_exam.all_controls()
+    except zenoh_rmw_client_exam.ClientExamError as error:
+        fail(str(error))
+    sample = "\n".join(f"test {name} ... ok" for name in RMW_ROUTER_LINK_TESTS[1:])
+    if all(name in tests_passed(sample) for name in RMW_ROUTER_LINK_TESTS):
+        fail("control: a run with an rmw-router-link exam test missing was read as complete")
+    exam = zenoh_rmw_router_link_exam
+    try:
+        refused_controls = exam.all_controls()
+        item_cases, item_controls = exam.item_pins()
+        positive, refusals = exam.judge(exam.good_lines())
+    except exam.RouterLinkExamError as error:
+        fail(str(error))
+    if positive + refusals != exam.PINNED_CASES:
+        fail(f"rmw-router-link: an honest transcript is {positive + refusals} cases, the checker pins {exam.PINNED_CASES}")
+    if refused_controls != exam.PINNED_CONTROLS:
+        fail(f"rmw-router-link: {refused_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if item_cases and item_cases != exam.PINNED_CASES:
+        fail(f"rmw-router-link: the item fixes {item_cases} cases, the checker pins {exam.PINNED_CASES}")
+    if item_controls and item_controls != exam.PINNED_CONTROLS:
+        fail(f"rmw-router-link: the item requires {item_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 rmw-router-link judge: refused {refused_controls} corrupted records")
+        return 0
+    try:
+        cases, refusals = exam.judge(run_rmw_router_link())
+    except exam.RouterLinkExamError as error:
+        fail(str(error))
+    print(f"[zenoh-profile0] slice=rmw-router-link cases={cases} refusals={refusals} controls={refused_controls}")
+    devloop_observations.record(casesObserved=cases + refusals, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 rmw-router-link check: a client-role link subscribed through the captured handshakes of rmw_zenohd and delivered the samples the router forwarded, and the plain decoder still refused its timestamp without the role")
+    return 0
+
+
+RMW_CLIENT_PUT_FILTER = "zenoh_link::put_tests::"
+# The exam's own Rust tests, by name: a filter that matches nothing passes silently.
+RMW_CLIENT_PUT_TESTS = tuple(f"zenoh_link::put_tests::{name}" for name in (
+    "the_client_put_exam",
+))
+
+
+def exam_lines_client_put(output: str) -> list[str]:
+    """The `[zenoh-exam] clientput ...` lines of a run, with the marker removed."""
+    return [line for line in exam_lines(output) if line.startswith("clientput ")]
+
+
+def run_rmw_client_put() -> list[str]:
+    # The router link exam runs first and is judged on this path: a Put path built on a link that no longer takes a
+    # router's handshake proves nothing.
+    try:
+        zenoh_rmw_router_link_exam.judge(run_rmw_router_link())
+    except zenoh_rmw_router_link_exam.RouterLinkExamError as error:
+        fail(str(error))
+    # The handshakes reach the Rust test only through this variable, one run to a line: name, INIT_SYN, INIT_ACK,
+    # OPEN_ACK and the four forwarded FRAMEs.
+    rows = ("\n".join(" ".join((name, syn, ack, open_ack, *forwarded)) for name, syn, ack, open_ack, forwarded in zenoh_rmw_router_data.RUNS))
+    stdout, output = cargo_tests((RMW_CLIENT_PUT_FILTER,), {**_os.environ, "ZENOH_RMW_ROUTER_DATA_RUNS": rows})
+    passed = tests_passed(output)
+    missing = [name for name in RMW_CLIENT_PUT_TESTS if name not in passed]
+    if missing:
+        fail(f"rmw-client-put: the exam's tests did not run and pass ({len(missing)} of {len(RMW_CLIENT_PUT_TESTS)}): {', '.join(missing[:4])}")
+    return exam_lines_client_put(stdout)
+
+
+def rmw_client_put_main(controls_only: bool) -> int:
+    try:
+        zenoh_rmw_client_exam.all_controls()
+        zenoh_rmw_router_link_exam.all_controls()
+    except (zenoh_rmw_client_exam.ClientExamError, zenoh_rmw_router_link_exam.RouterLinkExamError) as error:
+        fail(str(error))
+    sample = "\n".join(f"test {name} ... ok" for name in RMW_CLIENT_PUT_TESTS[1:])
+    if all(name in tests_passed(sample) for name in RMW_CLIENT_PUT_TESTS):
+        fail("control: a run with an rmw-client-put exam test missing was read as complete")
+    exam = zenoh_rmw_client_put_exam
+    try:
+        refused_controls = exam.all_controls()
+        item_cases, item_controls = exam.item_pins()
+        positive, refusals = exam.judge(exam.good_lines())
+    except exam.ClientPutExamError as error:
+        fail(str(error))
+    if positive + refusals != exam.PINNED_CASES:
+        fail(f"rmw-client-put: an honest transcript is {positive + refusals} cases, the checker pins {exam.PINNED_CASES}")
+    if refused_controls != exam.PINNED_CONTROLS:
+        fail(f"rmw-client-put: {refused_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if item_cases and item_cases != exam.PINNED_CASES:
+        fail(f"rmw-client-put: the item fixes {item_cases} cases, the checker pins {exam.PINNED_CASES}")
+    if item_controls and item_controls != exam.PINNED_CONTROLS:
+        fail(f"rmw-client-put: the item requires {item_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 rmw-client-put judge: refused {refused_controls} corrupted records")
+        return 0
+    try:
+        cases, refusals = exam.judge(run_rmw_client_put())
+    except exam.ClientPutExamError as error:
+        fail(str(error))
+    print(f"[zenoh-profile0] slice=rmw-client-put cases={cases} refusals={refusals} controls={refused_controls}")
+    devloop_observations.record(casesObserved=cases + refusals, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 rmw-client-put check: a client-role link wrote Puts on the chatter key with no declaration from its peer, and a link with no role still refused an undeclared key")
+    return 0
+
+
+LIVE_CRATE = ROOT / "verification" / "zenoh-live"
+# The ROS environment is read from the operator's shell, never from a path this checker invents: the pinned packages are
+# not in `flake.nix`, so the operator names them. A missing variable is a refusal, not a skipped run.
+LIVE_ENVIRONMENT = ("SLIME_ROS_ENV", "SLIME_RMW_ZENOHD", "SLIME_ROS_TALKER", "SLIME_ROS_LISTENER")
+LIVE_ROUTER_PORT = 7447
+LIVE_SETTLE_S = 3
+LIVE_PROGRAM_S = 60
+LISTENER_LINE = re.compile(r"I heard: \[(Hello Slime \d+)\]")
+
+
+def live_environment() -> dict[str, str]:
+    missing = [name for name in LIVE_ENVIRONMENT if not _os.environ.get(name)]
+    if missing:
+        fail(f"rmw-live: the operator's environment names no {', '.join(missing)}; a live run needs a router and two ROS nodes")
+    ros = _os.environ["SLIME_ROS_ENV"]
+    return {
+        **_os.environ,
+        "AMENT_PREFIX_PATH": ros,
+        "LD_LIBRARY_PATH": f"{ros}/lib",
+        "RMW_IMPLEMENTATION": "rmw_zenoh_cpp",
+        "ROS_DOMAIN_ID": "0",
+    }
+
+
+def live_start(command: list[str], environment: dict[str, str], pids: list[int], stdout, stderr=subprocess.DEVNULL) -> subprocess.Popen:
+    """Starts a process in its own session and records its PID, so every process this checker starts is killed by PID."""
+    process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr, env=environment, start_new_session=True)
+    pids.append(process.pid)
+    return process
+
+
+def live_stop(pids: list[int]) -> None:
+    for pid in pids:
+        try:
+            _os.killpg(pid, _signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    pids.clear()
+
+
+LIVE_PREFIX = "[zenoh-live] "
+
+
+def live_program_lines(stdout: str) -> list[str]:
+    """The lines the program printed, without their prefix. The program writes `live ...` lines and no other kind: the
+    `ros` lines are the checker's, read from the listener, so a program line of any other kind is refused."""
+    kept: list[str] = []
+    for line in stdout.splitlines():
+        if not line.startswith(LIVE_PREFIX):
+            continue
+        text = line.removeprefix(LIVE_PREFIX)
+        if not text.startswith("live "):
+            fail(f"rmw-live: the program printed a line that is not a `live` line: {text!r}")
+        kept.append(text)
+    return kept
+
+
+def run_rmw_live() -> list[str]:
+    environment = live_environment()
+    host = subprocess.run(["rustc", "-vV"], capture_output=True, text=True, check=True)
+    target = next(line.split(": ", 1)[1] for line in host.stdout.splitlines() if line.startswith("host: "))
+    program = ["cargo", "run", "--release", "--target", target, "--manifest-path", str(LIVE_CRATE / "Cargo.toml"), "--"]
+    lines: list[str] = []
+    pids: list[int] = []
+    try:
+        # Inbound: a router and a talker, and the program subscribes. The program prints every line of this direction.
+        live_start([environment["SLIME_RMW_ZENOHD"]], environment, pids, subprocess.DEVNULL)
+        _time.sleep(LIVE_SETTLE_S)
+        live_start([environment["SLIME_ROS_TALKER"]], environment, pids, subprocess.DEVNULL)
+        _time.sleep(LIVE_SETTLE_S)
+        inbound = subprocess.run([*program, "inbound"], cwd=ROOT, capture_output=True, text=True, env=environment, timeout=LIVE_PROGRAM_S)
+        if inbound.returncode != 0:
+            _sys.stderr.write((inbound.stdout + inbound.stderr)[-4000:])
+            fail(f"rmw-live: the live program exited {inbound.returncode} in the inbound direction")
+        lines += live_program_lines(inbound.stdout)
+        live_stop(pids)
+        # Outbound: a new router and a listener, and the program writes. The listener's output is read here, not by the
+        # program. `demo_nodes_cpp` logs through rcutils, which writes to stderr, so the log takes both streams.
+        listener_log = ROOT / "build" / "zenoh-live" / "listener.txt"
+        listener_log.parent.mkdir(parents=True, exist_ok=True)
+        live_start([environment["SLIME_RMW_ZENOHD"]], environment, pids, subprocess.DEVNULL)
+        _time.sleep(LIVE_SETTLE_S)
+        with listener_log.open("wb") as sink:
+            live_start([environment["SLIME_ROS_LISTENER"]], environment, pids, sink, subprocess.STDOUT)
+            _time.sleep(LIVE_SETTLE_S)
+            outbound = subprocess.run([*program, "outbound"], cwd=ROOT, capture_output=True, text=True, env=environment, timeout=LIVE_PROGRAM_S)
+            _time.sleep(LIVE_SETTLE_S)
+        if outbound.returncode != 0:
+            _sys.stderr.write((outbound.stdout + outbound.stderr)[-4000:])
+            fail(f"rmw-live: the live program exited {outbound.returncode} in the outbound direction")
+        lines += live_program_lines(outbound.stdout)
+        # The ROS lines are the listener's own, in the order it printed them. They are placed before the close line.
+        heard = [match.group(1) for line in listener_log.read_text(errors="replace").splitlines() if (match := LISTENER_LINE.search(line))]
+        closed = [line for line in lines if line.startswith("live closed ")]
+        lines = [line for line in lines if not line.startswith("live closed ")]
+        lines += [f"ros listener I_heard:_[{text.replace(' ', '_')}]" for text in heard]
+        lines += closed
+    except subprocess.TimeoutExpired:
+        fail(f"rmw-live: the live program did not finish in {LIVE_PROGRAM_S} s")
+    finally:
+        live_stop(pids)
+    return lines
+
+
+def rmw_live_main(controls_only: bool) -> int:
+    exam = zenoh_rmw_live_exam
+    try:
+        refused_controls = exam.all_controls()
+        item_cases, item_controls = exam.item_pins()
+    except exam.LiveExamError as error:
+        fail(str(error))
+    if refused_controls != exam.PINNED_CONTROLS:
+        fail(f"rmw-live: {refused_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if item_cases and item_cases != exam.MIN_CASES:
+        fail(f"rmw-live: the item fixes at least {item_cases} cases, the checker pins {exam.MIN_CASES}")
+    if item_controls and item_controls != exam.PINNED_CONTROLS:
+        fail(f"rmw-live: the item requires {item_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 rmw-live judge: refused {refused_controls} corrupted transcripts")
+        return 0
+    try:
+        cases, _ = exam.judge(run_rmw_live())
+    except exam.LiveExamError as error:
+        fail(str(error))
+    if cases < exam.MIN_CASES:
+        fail(f"rmw-live: {cases} cases, the item fixes at least {exam.MIN_CASES}")
+    print(f"[zenoh-profile0] slice=rmw-live cases={cases} controls={refused_controls}")
+    devloop_observations.record(casesObserved=cases, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 rmw-live check: a client-role link exchanged samples with a ROS talker and a ROS listener through rmw_zenohd")
+    return 0
+
+
+RMW_TOKEN_FILTER = "zenoh_link::token_tests::"
+# The exam's own Rust tests, by name: a filter that matches nothing passes silently.
+RMW_TOKEN_TESTS = tuple(f"zenoh_link::token_tests::{name}" for name in (
+    "the_client_token_exam",
+))
+
+
+def exam_lines_token(output: str) -> list[str]:
+    """The `[zenoh-exam] clienttoken ...` lines of a run, with the marker removed."""
+    return [line for line in exam_lines(output) if line.startswith("clienttoken ")]
+
+
+def run_rmw_token() -> list[str]:
+    # The Put exam runs first and is judged on this path: a token path built on a link that no longer writes a Put
+    # through a router's handshake proves nothing.
+    try:
+        zenoh_rmw_client_put_exam.judge(run_rmw_client_put())
+    except zenoh_rmw_client_put_exam.ClientPutExamError as error:
+        fail(str(error))
+    rows = ("\n".join(" ".join((name, syn, ack, open_ack, *forwarded)) for name, syn, ack, open_ack, forwarded in zenoh_rmw_router_data.RUNS))
+    stdout, output = cargo_tests((RMW_TOKEN_FILTER,), {**_os.environ, "ZENOH_RMW_ROUTER_DATA_RUNS": rows})
+    passed = tests_passed(output)
+    missing = [name for name in RMW_TOKEN_TESTS if name not in passed]
+    if missing:
+        fail(f"rmw-token: the exam's tests did not run and pass ({len(missing)} of {len(RMW_TOKEN_TESTS)}): {', '.join(missing[:4])}")
+    return exam_lines_token(stdout)
+
+
+def rmw_token_main(controls_only: bool) -> int:
+    try:
+        zenoh_rmw_client_put_exam.all_controls()
+    except zenoh_rmw_client_put_exam.ClientPutExamError as error:
+        fail(str(error))
+    sample = "\n".join(f"test {name} ... ok" for name in RMW_TOKEN_TESTS[1:])
+    if all(name in tests_passed(sample) for name in RMW_TOKEN_TESTS):
+        fail("control: a run with an rmw-token exam test missing was read as complete")
+    exam = zenoh_rmw_token_exam
+    try:
+        refused_controls = exam.all_controls()
+        item_cases, item_controls = exam.item_pins()
+        positive, refusals = exam.judge(exam.good_lines())
+    except exam.TokenExamError as error:
+        fail(str(error))
+    if positive + refusals != exam.PINNED_CASES:
+        fail(f"rmw-token: an honest transcript is {positive + refusals} cases, the checker pins {exam.PINNED_CASES}")
+    if refused_controls != exam.PINNED_CONTROLS:
+        fail(f"rmw-token: {refused_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if item_cases and item_cases != exam.PINNED_CASES:
+        fail(f"rmw-token: the item fixes {item_cases} cases, the checker pins {exam.PINNED_CASES}")
+    if item_controls and item_controls != exam.PINNED_CONTROLS:
+        fail(f"rmw-token: the item requires {item_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 rmw-token judge: refused {refused_controls} corrupted records")
+        return 0
+    try:
+        cases, refusals = exam.judge(run_rmw_token())
+    except exam.TokenExamError as error:
+        fail(str(error))
+    print(f"[zenoh-profile0] slice=rmw-token cases={cases} refusals={refusals} controls={refused_controls}")
+    devloop_observations.record(casesObserved=cases + refusals, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 rmw-token check: a client-role link declared the node and publisher tokens of a Slime node, withdrew one and closed, and a link with no role refused a token")
+    return 0
+
+
+def rmw_data_link_main(controls_only: bool) -> int:
+    try:
+        zenoh_rmw_exam.all_controls()
+        zenoh_rmw_graph_exam.all_controls()
+        zenoh_rmw_link_exam.all_controls()
+        zenoh_rmw_data_exam.all_controls()
+    except (zenoh_rmw_exam.RmwError, zenoh_rmw_graph_exam.GraphExamError, zenoh_rmw_link_exam.LinkExamError, zenoh_rmw_data_exam.DataExamError) as error:
+        fail(str(error))
+    sample = "\n".join(f"test {name} ... ok" for name in RMW_DATA_LINK_TESTS[1:])
+    if all(name in tests_passed(sample) for name in RMW_DATA_LINK_TESTS):
+        fail("control: a run with an rmw-data-link exam test missing was read as complete")
+    exam = zenoh_rmw_data_link_exam
+    try:
+        refused_controls = exam.all_controls()
+        item_cases, item_controls = exam.item_pins()
+        positive, refusals = exam.judge(exam.good_lines())
+    except exam.DataLinkExamError as error:
+        fail(str(error))
+    if positive + refusals != exam.PINNED_CASES:
+        fail(f"rmw-data-link: an honest transcript is {positive + refusals} cases, the checker pins {exam.PINNED_CASES}")
+    if refused_controls != exam.PINNED_CONTROLS:
+        fail(f"rmw-data-link: {refused_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if item_cases and item_cases != exam.PINNED_CASES:
+        fail(f"rmw-data-link: the item fixes {item_cases} cases, the checker pins {exam.PINNED_CASES}")
+    if item_controls and item_controls != exam.PINNED_CONTROLS:
+        fail(f"rmw-data-link: the item requires {item_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 rmw-data-link judge: refused {refused_controls} corrupted records")
+        return 0
+    try:
+        cases, refusals = exam.judge(run_rmw_data_link())
+    except exam.DataLinkExamError as error:
+        fail(str(error))
+    print(f"[zenoh-profile0] slice=rmw-data-link cases={cases} refusals={refusals} controls={refused_controls}")
+    devloop_observations.record(casesObserved=cases + refusals, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 rmw-data-link check: the graph link delivered the samples of an rmw_zenoh talker and wrote the subscription and Puts a listener asked for")
+    return 0
+
+
+def rmw_component_main(controls_only: bool) -> int:
+    """The crate that drives the graph link and its registration: declarations the files must hold. The controls run
+    on synthetic file sets."""
+    exam = zenoh_rmw_component_exam
+    try:
+        refusals = exam.component_controls()
+        item_cases, item_controls = exam.item_pins()
+        if refusals != exam.PINNED_CONTROLS:
+            fail(f"rmw-component: {refusals} controls, the checker pins {exam.PINNED_CONTROLS}")
+        if item_cases and item_cases != exam.PINNED_CASES:
+            fail(f"rmw-component: the item fixes {item_cases} cases, the checker pins {exam.PINNED_CASES}")
+        if item_controls and item_controls != exam.PINNED_CONTROLS:
+            fail(f"rmw-component: the item requires {item_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+        if controls_only:
+            print(f"zenoh profile 0 rmw-component judge: refused {refusals} corrupted file sets")
+            return 0
+        cases = exam.check_component()
+    except exam.ComponentExamError as error:
+        fail(f"rmw-component: {error}")
+    if cases != exam.PINNED_CASES:
+        fail(f"rmw-component: {cases} facts held, the checker pins {exam.PINNED_CASES}")
+    print(f"[zenoh-profile0] slice=rmw-component cases={cases} refusals={refusals} controls={refusals}")
+    devloop_observations.record(casesObserved=cases, negativeControlsRefused=refusals)
+    print("zenoh profile 0 rmw-component check: the crate, its registration and the library calls it stands on are in place")
+    return 0
+
+
+def rmw_peer_main(controls_only: bool) -> int:
+    """The native peer crate and its registration: declarations the files must hold. The controls run on synthetic
+    file sets."""
+    exam = zenoh_rmw_peer_component_exam
+    try:
+        refusals = exam.component_controls()
+        item_cases, item_controls = exam.item_pins()
+        if refusals != exam.PINNED_CONTROLS:
+            fail(f"rmw-peer: {refusals} controls, the checker pins {exam.PINNED_CONTROLS}")
+        if item_cases and item_cases != exam.PINNED_CASES:
+            fail(f"rmw-peer: the item fixes {item_cases} cases, the checker pins {exam.PINNED_CASES}")
+        if item_controls and item_controls != exam.PINNED_CONTROLS:
+            fail(f"rmw-peer: the item requires {item_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+        if controls_only:
+            print(f"zenoh profile 0 rmw-peer judge: refused {refusals} corrupted file sets")
+            return 0
+        cases = exam.check_component()
+    except exam.PeerExamError as error:
+        fail(f"rmw-peer: {error}")
+    if cases != exam.PINNED_CASES:
+        fail(f"rmw-peer: {cases} facts held, the checker pins {exam.PINNED_CASES}")
+    print(f"[zenoh-profile0] slice=rmw-peer cases={cases} refusals={refusals} controls={refusals}")
+    devloop_observations.record(casesObserved=cases, negativeControlsRefused=refusals)
+    print("zenoh profile 0 rmw-peer check: the crate, its registration and the library calls it stands on are in place")
+    return 0
+
+
+RMW_BOOTED_CONTROLS = 65
+
+
+def rmw_booted_main(controls_only: bool) -> int:
+    """The composition and the booted exchange. The facts are read first. The arm then boots the image under QEMU and
+    judges its marker chains and each component's lines, so a run that returns has seen the node and the peer each
+    publish and receive four samples and the session close."""
+    exam = zenoh_rmw_arm
+    try:
+        refusals = exam.composition_controls() + exam.controls()
+        if refusals != RMW_BOOTED_CONTROLS:
+            fail(f"rmw-booted: {refusals} controls, the checker pins {RMW_BOOTED_CONTROLS}")
+        item_cases, item_controls = exam.item_pins()
+        if item_controls and item_controls != RMW_BOOTED_CONTROLS:
+            fail(f"rmw-booted: the item requires {item_controls} controls, the checker pins {RMW_BOOTED_CONTROLS}")
+        if controls_only:
+            print(f"zenoh profile 0 rmw-booted judge: refused {refusals} corrupted inputs")
+            return 0
+        cases = exam.check_composition()
+    except exam.ArmError as error:
+        fail(f"rmw-booted: {error}")
+    if item_cases and item_cases != cases + 1:
+        fail(f"rmw-booted: the item fixes {item_cases} cases, the facts and the arm give {cases + 1}")
+    arm = subprocess.run(
+        [_sys.executable, str(ROOT / "scripts" / "check" / "check-sel4-io-network-plane.py"), "--arm", "zenoh-rmw"],
+        cwd=ROOT, capture_output=True, text=True, env={**_os.environ},
+    )
+    if arm.returncode != 0:
+        _sys.stderr.write((arm.stdout + arm.stderr)[-4000:])
+        fail(f"rmw-booted: the zenoh-rmw arm exited {arm.returncode}")
+    print(f"[zenoh-profile0] slice=rmw-booted cases={cases + 1} refusals={refusals} controls={refusals}")
+    devloop_observations.record(casesObserved=cases + 1, negativeControlsRefused=refusals)
+    print("zenoh profile 0 rmw-booted check: the node and its peer each published and received four samples and the session closed")
+    return 0
+
+
 def neighbour_controls(*, subscribers: bool) -> None:
     # A slice that runs a neighbour's tests and judges their transcript relies on that judge's
     # negative controls. They run here as a precondition and their refusals are not counted: they
@@ -1868,6 +2775,131 @@ def subscribers_main(controls_only: bool) -> int:
     print(f"[zenoh-profile0] slice=subscribers cases={cases} refusals={refusals} controls={refused_controls}")
     devloop_observations.record(casesObserved=cases + refusals, negativeControlsRefused=refused_controls)
     print("zenoh profile 0 subscribers check: a session holds as many subscriptions of its own as it is declared with and refuses one more")
+    return 0
+
+
+LANES_FILTER = "zenoh_lanes::"
+# The exam's own Rust test, by name: a filter that matches nothing passes silently.
+LANES_TESTS = ("zenoh_lanes::the_lanes_exam",)
+assert len(LANES_TESTS) == 1
+
+
+def run_lanes() -> list[str]:
+    # The links exam and the stock-peer exam pin the refusals this item turns into accepted behaviour for a link with
+    # two runs and keeps for a link with one, so both run and are judged here: a link with one run may not move any.
+    stock_fixtures()
+    STOCK_FIXTURES.parent.mkdir(parents=True, exist_ok=True)
+    STOCK_FIXTURES.write_text(zenoh_stock_peer.fixture_zti())
+    try:
+        zenoh_links_exam.judge(run_links())
+    except zenoh_links_exam.LinksError as error:
+        fail(str(error))
+    stdout, output = cargo_tests((LANES_FILTER,), {**_os.environ})
+    passed = tests_passed(output)
+    missing = [name for name in LANES_TESTS if name not in passed]
+    if missing:
+        fail(f"lanes: the exam's tests did not run and pass ({len(missing)} of {len(LANES_TESTS)}): {', '.join(missing[:4])}")
+    return [line for line in exam_lines(stdout) if line.startswith("lanes ")]
+
+
+def lanes_main(controls_only: bool) -> int:
+    neighbour_controls(subscribers=False)
+    if all(name in tests_passed("") for name in LANES_TESTS):
+        fail("control: a run with the lanes exam test missing was read as complete")
+    exam = zenoh_lanes_exam
+    try:
+        refused_controls = exam.all_controls()
+        item_cases, item_controls = exam.item_pins()
+        cases, refusals = exam.judge(exam.good_lines())
+    except exam.LanesError as error:
+        fail(str(error))
+    table = exam.contract_cases()
+    if cases + refusals + len(table) != exam.PINNED_CASES:
+        fail(f"lanes: an honest run is {cases + refusals + len(table)} cases, the checker pins {exam.PINNED_CASES}")
+    if refused_controls != exam.PINNED_CONTROLS:
+        fail(f"lanes: {refused_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if item_cases and item_cases != exam.PINNED_CASES:
+        fail(f"lanes: the item fixes {item_cases} cases, the checker pins {exam.PINNED_CASES}")
+    if item_controls and item_controls != exam.PINNED_CONTROLS:
+        fail(f"lanes: the item requires {item_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 lanes judge: refused {refused_controls} corrupted records")
+        return 0
+    try:
+        cases, refusals = exam.judge(run_lanes())
+        taken, refused_records = exam.judge_contract()
+    except exam.LanesError as error:
+        fail(str(error))
+    total = cases + refusals + taken + refused_records
+    if total != exam.PINNED_CASES:
+        fail(f"lanes: the run observed {total} cases, the checker pins {exam.PINNED_CASES}")
+    print(f"[zenoh-profile0] slice=lanes cases={total} refusals={refusals + refused_records} controls={refused_controls}")
+    devloop_observations.record(casesObserved=total, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 lanes check: a link with several runs took the priorities and best-effort traffic of a stock peer and kept every refusal of a link with one")
+    return 0
+
+
+def link_limits_v3_main(controls_only: bool) -> int:
+    exam = zenoh_link_v3_limits_exam
+    try:
+        refused_controls = exam.all_controls()
+        item_cases, item_controls = exam.item_pins()
+        cases = exam.judge_cases()
+    except exam.LinkV3Error as error:
+        fail(str(error))
+    if cases != exam.PINNED_CASES:
+        fail(f"link-limits-v3: the exam judges {cases} cases, the checker pins {exam.PINNED_CASES}")
+    if refused_controls != exam.PINNED_CONTROLS:
+        fail(f"link-limits-v3: {refused_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if item_cases and item_cases != exam.PINNED_CASES:
+        fail(f"link-limits-v3: the item fixes {item_cases} cases, the checker pins {exam.PINNED_CASES}")
+    if item_controls and item_controls != exam.PINNED_CONTROLS:
+        fail(f"link-limits-v3: the item requires {item_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 link-limits-v3 judge: refused {refused_controls} corrupted records")
+        return 0
+    # The generated constants are the implementation's, so the recipe fails until they land.
+    try:
+        exam.check_generated()
+    except exam.LinkV3Error as error:
+        fail(str(error))
+    print(f"[zenoh-profile0] slice=link-limits-v3 cases={cases} controls={refused_controls}")
+    devloop_observations.record(casesObserved=cases, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 link-limits-v3 check: the contract takes the records that declare local subscriptions and runs, refuses the ones it must, and its constants are the generated ones")
+QOS_FILTER = "zenoh_qos::"
+# The exam's own Rust test, by name: a filter that matches nothing passes silently.
+QOS_TESTS = ("zenoh_qos::the_qos_exam",)
+
+
+def run_qos() -> list[str]:
+    stdout, output = cargo_tests((QOS_FILTER,), {**_os.environ})
+    missing = [name for name in QOS_TESTS if name not in tests_passed(output)]
+    if missing:
+        fail(f"qos: the exam's tests did not run and pass ({len(missing)} of {len(QOS_TESTS)}): {', '.join(missing)}")
+    return exam_lines(stdout)
+
+
+def qos_main(controls_only: bool) -> int:
+    neighbour_controls(subscribers=False)
+    try:
+        refused_controls = zenoh_qos_exam.all_controls()
+        positive, refusals = zenoh_qos_exam.judge(zenoh_qos_exam.good_lines())
+    except zenoh_qos_exam.QosError as error:
+        fail(str(error))
+    if positive + refusals != zenoh_qos_exam.PINNED_CASES:
+        fail(f"qos: an honest transcript is {positive + refusals} cases, the checker pins {zenoh_qos_exam.PINNED_CASES}")
+    if refused_controls != zenoh_qos_exam.PINNED_CONTROLS:
+        fail(f"qos: {refused_controls} controls, the checker pins {zenoh_qos_exam.PINNED_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 qos judge: refused {refused_controls} corrupted records")
+        return 0
+    try:
+        cases, refusals = zenoh_qos_exam.judge(run_qos())
+    except zenoh_qos_exam.QosError as error:
+        fail(str(error))
+    print(f"[zenoh-profile0] slice=qos cases={cases} refusals={refusals} controls={refused_controls}")
+    devloop_observations.record(casesObserved=cases + refusals, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 qos check: a PUSH carries its priority, congestion control and express as upstream writes them")
     return 0
 
 
@@ -2217,7 +3249,7 @@ def grants_reader_main(controls_only: bool) -> int:
             print(f"zenoh profile 0 grants-reader judge: refused {refusals} corrupted inputs")
             return 0
         held = exam.check_facts(exam.read_file)
-        ran = exam.judge_run(exam.run_reader_tests())
+        ran = exam.judge_run(exam.run_reader_tests(), exam.source_total())
     except exam.ReaderExamError as error:
         fail(f"grants-reader: {error}")
     cases = held + (1 if ran == len(exam.TESTS) else 0)
@@ -2233,11 +3265,11 @@ SERVER_PINNED_CASES = 39
 SERVER_PINNED_CONTROLS = 104
 
 
-def server_run_is_scoped(output: str) -> bool:
-    """Whether the run was of the server test alone: it passed, and it is the only result cargo printed. The package
+def server_run_is_scoped(output: str, test: str = zenoh_server_exam.TEST) -> bool:
+    """Whether the run was of one library test alone: it passed, and it is the only result cargo printed. The package
     has an integration test as well, and a run that does not name the library prints a result for each binary."""
     results = re.findall(r"test result: (\w+)\. (\d+) passed; (\d+) failed", output)
-    return tests_passed(output) == {zenoh_server_exam.TEST} and results == [("ok", "1", "0")]
+    return tests_passed(output) == {test} and results == [("ok", "1", "0")]
 
 
 def run_server() -> list[str]:
@@ -2295,6 +3327,66 @@ def server_main(controls_only: bool) -> int:
     return 0
 
 
+GRADING_PINNED_CASES = 60
+GRADING_PINNED_CONTROLS = 169
+
+
+def run_grading() -> list[str]:
+    """The component library's test of three cases the booted run does not show, run alone with `--lib` and `--exact`.
+    It drives the server half over a link pair on the host and prints what each request answered and what it changed."""
+    host = subprocess.run(["rustc", "-vV"], capture_output=True, text=True, check=True)
+    target = next(line.split(": ", 1)[1] for line in host.stdout.splitlines() if line.startswith("host: "))
+    command = [
+        "cargo", "test", "--target", target, "-p", "slime-components", "--no-default-features", "--lib",
+        "--", "--exact", zenoh_grading_exam.TEST, "--nocapture", "--test-threads=1",
+    ]
+    result = subprocess.run(command, cwd=ROOT / "components", capture_output=True, text=True, env={**_os.environ})
+    output = result.stdout + result.stderr
+    if result.returncode != 0:
+        _sys.stderr.write(output[-4000:])
+        fail(f"{' '.join(command)} exited {result.returncode}")
+    if not server_run_is_scoped(output, zenoh_grading_exam.TEST):
+        fail(f"grading: the run was not of {zenoh_grading_exam.TEST} alone")
+    return zenoh_grading_exam.exam_lines(result.stdout)
+
+
+def grading_main(controls_only: bool) -> int:
+    """A second boot, a malformed request and a stalled link, judged on the host. The judge reuses the server exam's
+    restatement of the client's rules, so that exam's controls on those rules run first. The exam raises at the first
+    line that differs, so a run that returns has matched every line."""
+    exam = zenoh_grading_exam
+    test = exam.TEST
+    alone = f"test {test} ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored\n"
+    two_tests = f"test {test} ... ok\ntest other ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored\n"
+    server_test = f"test {zenoh_server_exam.TEST} ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored\n"
+    if not server_run_is_scoped(alone, test):
+        fail("control: a run of the grading test alone was read as not scoped")
+    for label, text in (("a run of two tests", two_tests), ("a run of the server exam", server_test), ("an empty run", "")):
+        if server_run_is_scoped(text, test):
+            fail(f"control: {label} was read as the grading run")
+    try:
+        zenoh_server_exam.acceptance_controls()
+        positive, refusals = exam.judge(exam.good_lines())
+        refused_controls = exam.all_controls()
+    except (exam.GradingExamError, zenoh_server_exam.ServerExamError, zenoh_client_wire_exam.WireError) as error:
+        fail(str(error))
+    if positive + refusals != GRADING_PINNED_CASES:
+        fail(f"grading: an honest transcript is {positive + refusals} cases, the checker pins {GRADING_PINNED_CASES}")
+    if refused_controls != GRADING_PINNED_CONTROLS:
+        fail(f"grading: {refused_controls} controls, the checker pins {GRADING_PINNED_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 grading judge: refused {refused_controls} corrupted records")
+        return 0
+    try:
+        positive, refusals = exam.judge(run_grading())
+    except (exam.GradingExamError, zenoh_server_exam.ServerExamError, zenoh_client_wire_exam.WireError) as error:
+        fail(str(error))
+    print(f"[zenoh-profile0] slice=grading cases={positive + refusals} refusals={refusals} controls={refused_controls}")
+    devloop_observations.record(casesObserved=positive + refusals, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 grading check: a second run repeats the first, a malformed request changes nothing and a stalled link is reported closed")
+    return 0
+
+
 LIMITS_PINNED_CASES = 36
 LIMITS_PINNED_CONTROLS = 113
 
@@ -2341,7 +3433,7 @@ def service_component_main(controls_only: bool) -> int:
     return 0
 
 
-SERVICE_BOOTED_CONTROLS = 63
+SERVICE_BOOTED_CONTROLS = 70
 
 
 def service_booted_main(controls_only: bool) -> int:
@@ -2368,6 +3460,82 @@ def service_booted_main(controls_only: bool) -> int:
     print(f"[zenoh-profile0] slice=service-booted cases={cases + 1} refusals={refusals} controls={refusals}")
     devloop_observations.record(casesObserved=cases + 1, negativeControlsRefused=refusals)
     print("zenoh profile 0 service-booted check: the holders exchanged through the service and an ungranted key was refused")
+    return 0
+
+
+SERVICE_PEER_CONTROLS = 36
+PEER_LINE = re.compile(r"^\[(?:zenoh-service|zenoh-peer)\] ")
+
+
+def service_peer_main(controls_only: bool) -> int:
+    """A peer that subscribes receives each publication of the publisher holder once. The facts are read first. The
+    arm then boots the image under QEMU, and the judge reads the lines of the service and of the peer."""
+    exam = zenoh_service_peer_exam
+    try:
+        refusals = exam.fact_controls() + exam.controls()
+        if refusals != SERVICE_PEER_CONTROLS:
+            fail(f"service-peer: {refusals} controls, the checker pins {SERVICE_PEER_CONTROLS}")
+        if controls_only:
+            print(f"zenoh profile 0 service-peer judge: refused {refusals} corrupted inputs")
+            return 0
+        cases = exam.check_facts()
+    except exam.PeerExamError as error:
+        fail(f"service-peer: {error}")
+    with tempfile.TemporaryDirectory() as scratch:
+        transcript = _Path(scratch) / "transcript.txt"
+        arm = subprocess.run(
+            [_sys.executable, str(ROOT / "scripts" / "check" / "check-sel4-io-network-plane.py"), "--arm", "zenoh-service", "--transcript", str(transcript)],
+            cwd=ROOT, capture_output=True, text=True, env={**_os.environ},
+        )
+        if arm.returncode != 0:
+            _sys.stderr.write((arm.stdout + arm.stderr)[-4000:])
+            fail(f"service-peer: the zenoh-service arm exited {arm.returncode}")
+        lines = [line.strip() for line in transcript.read_text(encoding="utf-8").splitlines() if PEER_LINE.match(line.strip())]
+    try:
+        declared, received = exam.judge(lines)
+    except exam.PeerExamError as error:
+        fail(f"service-peer: {error}")
+    print(f"[zenoh-profile0] slice=service-peer cases={cases + declared + received} refusals={refusals} controls={refusals}")
+    devloop_observations.record(casesObserved=cases + declared + received, negativeControlsRefused=refusals)
+    print("zenoh profile 0 service-peer check: the peer declared one subscriber and received each publication of alpha once")
+    return 0
+
+
+SERVICE_FOUR_CONTROLS = 68
+
+
+def service_four_main(controls_only: bool) -> int:
+    """The component and the composition for four holders and six rows. The facts are read first. The arm then boots
+    the image under QEMU, and the judge reads the lines of the service and of the peer against the grants."""
+    exam = zenoh_service_four_exam
+    try:
+        refusals = exam.fact_controls() + exam.controls()
+        if refusals != SERVICE_FOUR_CONTROLS:
+            fail(f"service-four: {refusals} controls, the checker pins {SERVICE_FOUR_CONTROLS}")
+        if controls_only:
+            print(f"zenoh profile 0 service-four judge: refused {refusals} corrupted inputs")
+            return 0
+        cases = exam.check_facts()
+    except exam.FourExamError as error:
+        fail(f"service-four: {error}")
+    with tempfile.TemporaryDirectory() as scratch:
+        transcript = _Path(scratch) / "transcript.txt"
+        arm = subprocess.run(
+            [_sys.executable, str(ROOT / "scripts" / "check" / "check-sel4-io-network-plane.py"), "--arm", "zenoh-service-four", "--transcript", str(transcript)],
+            cwd=ROOT, capture_output=True, text=True, env={**_os.environ},
+        )
+        if arm.returncode != 0:
+            _sys.stderr.write((arm.stdout + arm.stderr)[-4000:])
+            fail(f"service-four: the zenoh-service-four arm exited {arm.returncode}")
+        lines = [line.strip() for line in transcript.read_text(encoding="utf-8").splitlines() if PEER_LINE.match(line.strip())]
+    try:
+        published, denied, received = exam.judge(lines)
+    except exam.FourExamError as error:
+        fail(f"service-four: {error}")
+    observed = cases + published + denied + received
+    print(f"[zenoh-profile0] slice=service-four cases={observed} refusals={refusals} controls={refusals}")
+    devloop_observations.record(casesObserved=observed, negativeControlsRefused=refusals)
+    print("zenoh profile 0 service-four check: four holders exchanged through the service and the service refused the key beta lacks")
     return 0
 
 
@@ -2569,6 +3737,112 @@ def service_link_main(controls_only: bool) -> int:
     return 0
 
 
+SERVICE_STACK_CASES = 12
+SERVICE_STACK_CONTROLS = 147
+SERVICE_STACK_FILTER = "zenoh_service_stack::"
+# The exam's own Rust test, by name: a filter that matches nothing passes silently.
+SERVICE_STACK_TESTS = ("zenoh_service_stack::the_stack_exam",)
+assert len(SERVICE_STACK_TESTS) == 1
+
+
+def run_service_stack() -> list[str]:
+    stdout, output = cargo_tests((SERVICE_STACK_FILTER,), {**_os.environ})
+    passed = tests_passed(output)
+    missing = [name for name in SERVICE_STACK_TESTS if name not in passed]
+    if missing:
+        fail(f"service-stack: the exam's tests did not run and pass ({len(missing)} of {len(SERVICE_STACK_TESTS)}): {', '.join(missing[:4])}")
+    return [line for line in exam_lines(stdout) if line.startswith("stack ")]
+
+
+def service_stack_main(controls_only: bool) -> int:
+    if all(name in tests_passed("") for name in SERVICE_STACK_TESTS):
+        fail("control: a run with the service-stack exam test missing was read as complete")
+    # The stack exam reads the overheads and the stated record through the grants contract, so the contract's own
+    # controls run here as a precondition. Their refusals belong to the grants gate and are not counted.
+    try:
+        zenoh_grants_exam.all_controls()
+    except zenoh_grants_exam.GrantsError as error:
+        fail(str(error))
+    exam = zenoh_stack_exam
+    try:
+        refused_controls = exam.all_controls()
+        item_cases, item_controls = exam.item_pins()
+        cases = exam.judge(exam.good_lines()) + exam.contract_cases()
+    except (exam.StackError, zenoh_grants_exam.GrantsError) as error:
+        fail(str(error))
+    if cases != SERVICE_STACK_CASES:
+        fail(f"service-stack: an honest transcript is {cases} cases, the checker pins {SERVICE_STACK_CASES}")
+    if refused_controls != SERVICE_STACK_CONTROLS:
+        fail(f"service-stack: {refused_controls} controls, the checker pins {SERVICE_STACK_CONTROLS}")
+    if item_cases and item_cases != SERVICE_STACK_CASES:
+        fail(f"service-stack: the item fixes {item_cases} cases, the checker pins {SERVICE_STACK_CASES}")
+    if item_controls and item_controls != SERVICE_STACK_CONTROLS:
+        fail(f"service-stack: the item requires {item_controls} controls, the checker pins {SERVICE_STACK_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 service-stack judge: refused {refused_controls} corrupted records")
+        return 0
+    try:
+        cases = exam.judge(run_service_stack()) + exam.contract_cases()
+    except exam.StackError as error:
+        fail(str(error))
+    if cases != SERVICE_STACK_CASES:
+        fail(f"service-stack: the run observed {cases} cases, the checker pins {SERVICE_STACK_CASES}")
+    print(f"[zenoh-profile0] slice=service-stack cases={cases} controls={refused_controls}")
+    devloop_observations.record(casesObserved=cases, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 service-stack check: the declared stack covers the measured need of the built size and the stated size")
+    return 0
+
+
+LINK_V3_READER_CASES = 14
+LINK_V3_READER_CONTROLS = 41
+LINK_V3_READER_FILTER = "zenoh_link_limits_v3::"
+# The exam's own Rust test, by name: a filter that matches nothing passes silently.
+LINK_V3_READER_TESTS = ("zenoh_link_limits_v3::the_reader_exam",)
+assert len(LINK_V3_READER_TESTS) == 1
+
+
+def run_link_v3_reader() -> list[str]:
+    stdout, output = cargo_tests((LINK_V3_READER_FILTER,), {**_os.environ})
+    passed = tests_passed(output)
+    missing = [name for name in LINK_V3_READER_TESTS if name not in passed]
+    if missing:
+        fail(f"link-v3-reader: the exam's tests did not run and pass ({len(missing)} of {len(LINK_V3_READER_TESTS)}): {', '.join(missing[:4])}")
+    return [line[len("linkv3 "):] for line in exam_lines(stdout) if line.startswith("linkv3 ")]
+
+
+def link_v3_reader_main(controls_only: bool) -> int:
+    if all(name in tests_passed("") for name in LINK_V3_READER_TESTS):
+        fail("control: a run with the link-v3-reader exam test missing was read as complete")
+    exam = zenoh_link_v3_reader_exam
+    try:
+        refused_controls = exam.all_controls()
+        item_cases, item_controls = exam.item_pins()
+        honest = exam.judge(exam.good_lines())
+    except exam.ReaderError as error:
+        fail(f"link-v3-reader: {error}")
+    if honest + len(exam.FACTS) + len(exam.ABSENT) != LINK_V3_READER_CASES:
+        fail(f"link-v3-reader: an honest transcript and the facts are {honest + len(exam.FACTS) + len(exam.ABSENT)} cases, the checker pins {LINK_V3_READER_CASES}")
+    if refused_controls != LINK_V3_READER_CONTROLS:
+        fail(f"link-v3-reader: {refused_controls} controls, the checker pins {LINK_V3_READER_CONTROLS}")
+    if item_cases and item_cases != LINK_V3_READER_CASES:
+        fail(f"link-v3-reader: the item fixes {item_cases} cases, the checker pins {LINK_V3_READER_CASES}")
+    if item_controls and item_controls != LINK_V3_READER_CONTROLS:
+        fail(f"link-v3-reader: the item requires {item_controls} controls, the checker pins {LINK_V3_READER_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 link-v3-reader judge: refused {refused_controls} corrupted inputs")
+        return 0
+    try:
+        cases = exam.check_facts() + exam.judge(run_link_v3_reader())
+    except exam.ReaderError as error:
+        fail(f"link-v3-reader: {error}")
+    if cases != LINK_V3_READER_CASES:
+        fail(f"link-v3-reader: the run observed {cases} cases, the checker pins {LINK_V3_READER_CASES}")
+    print(f"[zenoh-profile0] slice=link-v3-reader cases={cases} controls={refused_controls}")
+    devloop_observations.record(casesObserved=cases, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 link-v3-reader check: the service builds its session parameters from a configuration the version 3 contract accepts")
+    return 0
+
+
 def composition_main(controls_only: bool) -> int:
     contract = zenoh_exchange.demo()
     try:
@@ -2590,9 +3864,111 @@ def composition_main(controls_only: bool) -> int:
     return 0
 
 
+HOLDER_FAULT_TEST = zenoh_holder_fault_exam.TEST
+
+
+def holder_fault_run_is_scoped(output: str) -> bool:
+    """Whether the run was of the holder fault test alone: it passed, and it is the only result cargo printed."""
+    results = re.findall(r"test result: (\w+)\. (\d+) passed; (\d+) failed", output)
+    return tests_passed(output) == {HOLDER_FAULT_TEST} and results == [("ok", "1", "0")]
+
+
+def run_holder_fault() -> list[str]:
+    """The component library's test of the holder roster, run alone with `--lib` and `--exact`. The roster and the
+    server half are plain Rust with no runtime call, so the test replays each scripted event and prints the states."""
+    host = subprocess.run(["rustc", "-vV"], capture_output=True, text=True, check=True)
+    target = next(line.split(": ", 1)[1] for line in host.stdout.splitlines() if line.startswith("host: "))
+    command = [
+        "cargo", "test", "--target", target, "-p", "slime-components", "--no-default-features", "--lib",
+        "--", "--exact", HOLDER_FAULT_TEST, "--nocapture", "--test-threads=1",
+    ]
+    result = subprocess.run(command, cwd=ROOT / "components", capture_output=True, text=True, env={**_os.environ})
+    output = result.stdout + result.stderr
+    if result.returncode != 0:
+        _sys.stderr.write(output[-4000:])
+        fail(f"{' '.join(command)} exited {result.returncode}")
+    if not holder_fault_run_is_scoped(output):
+        fail(f"holder-fault: the run was not of {HOLDER_FAULT_TEST} alone")
+    return zenoh_holder_fault_exam.exam_lines(result.stdout)
+
+
+def holder_fault_main(controls_only: bool) -> int:
+    """A holder that faults or never detaches: the roster reclaims it and the other holder is still served. The server
+    half's own exam runs beside it, because the roster adds a call to the server half and no answer may change."""
+    exam = zenoh_holder_fault_exam
+    alone = f"test {HOLDER_FAULT_TEST} ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored\n"
+    two_tests = f"test {HOLDER_FAULT_TEST} ... ok\ntest other ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored\n"
+    if not holder_fault_run_is_scoped(alone):
+        fail("control: a run of the holder fault test alone was read as not scoped")
+    for label, text in (("a run of two tests", two_tests), ("an empty run", "")):
+        if holder_fault_run_is_scoped(text):
+            fail(f"control: {label} was read as scoped")
+    try:
+        server_controls = zenoh_server_exam.all_controls()
+        refused_controls = exam.all_controls()
+        item_cases, item_controls = exam.item_pins()
+        positive = exam.judge(exam.good_lines())
+    except (exam.HolderFaultError, zenoh_server_exam.ServerExamError, zenoh_client_wire_exam.WireError) as error:
+        fail(str(error))
+    if server_controls != SERVER_PINNED_CONTROLS:
+        fail(f"holder-fault: the server judge refuses {server_controls} controls, the checker pins {SERVER_PINNED_CONTROLS}")
+    if positive + len(exam.FACTS) != exam.PINNED_CASES:
+        fail(f"holder-fault: an honest transcript is {positive + len(exam.FACTS)} cases, the checker pins {exam.PINNED_CASES}")
+    if refused_controls != exam.PINNED_CONTROLS:
+        fail(f"holder-fault: {refused_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if item_cases and item_cases != exam.PINNED_CASES:
+        fail(f"holder-fault: the item fixes {item_cases} cases, the checker pins {exam.PINNED_CASES}")
+    if item_controls and item_controls != exam.PINNED_CONTROLS:
+        fail(f"holder-fault: the item requires {item_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 holder-fault judge: refused {refused_controls} corrupted records")
+        return 0
+    try:
+        held = exam.check_facts()
+        server_positive, server_refusals = zenoh_server_exam.judge(run_server())
+        judged = exam.judge(run_holder_fault())
+    except (exam.HolderFaultError, zenoh_server_exam.ServerExamError, zenoh_client_wire_exam.WireError) as error:
+        fail(str(error))
+    if server_positive + server_refusals != SERVER_PINNED_CASES:
+        fail(f"holder-fault: the server exam is {server_positive + server_refusals} cases, the checker pins {SERVER_PINNED_CASES}")
+    print(f"[zenoh-profile0] slice=holder-fault cases={judged + held} refusals={refused_controls} controls={refused_controls}")
+    devloop_observations.record(casesObserved=judged + held, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 holder-fault check: a faulted holder and a holder that never detaches are reclaimed and the other holder is served")
+    return 0
+
+
+def lost_holder_main(controls_only: bool) -> int:
+    """The service keeps reading the control endpoint of a holder that settled, so the holder gets its denial. The judge
+    reads `holders.rs` for the two lines that stop the read. The server half already answers a settled holder, and the
+    holder-fault slice grades that answer."""
+    exam = zenoh_lost_holder_exam
+    try:
+        refused_controls = exam.controls()
+        item_cases, item_controls = exam.item_pins()
+    except exam.LostHolderError as error:
+        fail(str(error))
+    if refused_controls != exam.PINNED_CONTROLS:
+        fail(f"lost-holder: {refused_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if item_cases and item_cases != exam.PINNED_CASES:
+        fail(f"lost-holder: the item fixes {item_cases} cases, the checker pins {exam.PINNED_CASES}")
+    if item_controls and item_controls != exam.PINNED_CONTROLS:
+        fail(f"lost-holder: the item requires {item_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 lost-holder judge: refused {refused_controls} corrupted files")
+        return 0
+    try:
+        held = exam.check_files()
+    except exam.LostHolderError as error:
+        fail(f"lost-holder: {error}")
+    print(f"[zenoh-profile0] slice=lost-holder cases={held} refusals={refused_controls} controls={refused_controls}")
+    devloop_observations.record(casesObserved=held, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 lost-holder check: the service keeps reading the control endpoint of a holder that settled")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "subscribers", "liveliness", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "limits", "service-component", "service-booted", "service", "service-link"), required=True)
+    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "liveliness", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-client", "rmw-router-link", "rmw-client-put", "rmw-token", "rmw-live", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "qos", "lanes", "link-limits-v3", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service-peer", "service-four", "service", "service-link", "holder-fault", "service-stack", "link-v3-reader", "lost-holder"), required=True)
     parser.add_argument("--controls-only", action="store_true")
     arguments = parser.parse_args()
     if arguments.slice == "composition":
@@ -2605,10 +3981,42 @@ def main() -> int:
         return links_main(arguments.controls_only)
     if arguments.slice == "undeclare":
         return undeclare_main(arguments.controls_only)
+    if arguments.slice == "rmw":
+        return rmw_main(arguments.controls_only)
+    if arguments.slice == "rmw-booted":
+        return rmw_booted_main(arguments.controls_only)
+    if arguments.slice == "rmw-peer":
+        return rmw_peer_main(arguments.controls_only)
+    if arguments.slice == "rmw-component":
+        return rmw_component_main(arguments.controls_only)
+    if arguments.slice == "rmw-data-link":
+        return rmw_data_link_main(arguments.controls_only)
+    if arguments.slice == "rmw-client":
+        return rmw_client_main(arguments.controls_only)
+    if arguments.slice == "rmw-router-link":
+        return rmw_router_link_main(arguments.controls_only)
+    if arguments.slice == "rmw-client-put":
+        return rmw_client_put_main(arguments.controls_only)
+    if arguments.slice == "rmw-token":
+        return rmw_token_main(arguments.controls_only)
+    if arguments.slice == "rmw-live":
+        return rmw_live_main(arguments.controls_only)
+    if arguments.slice == "rmw-data":
+        return rmw_data_main(arguments.controls_only)
+    if arguments.slice == "rmw-graph":
+        return rmw_graph_main(arguments.controls_only)
+    if arguments.slice == "rmw-link":
+        return rmw_link_main(arguments.controls_only)
     if arguments.slice == "subscribers":
         return subscribers_main(arguments.controls_only)
     if arguments.slice == "liveliness":
         return liveliness_main(arguments.controls_only)
+    if arguments.slice == "lanes":
+        return lanes_main(arguments.controls_only)
+    if arguments.slice == "link-limits-v3":
+        return link_limits_v3_main(arguments.controls_only)
+    if arguments.slice == "qos":
+        return qos_main(arguments.controls_only)
     if arguments.slice == "grants":
         return grants_main(arguments.controls_only)
     if arguments.slice == "client":
@@ -2625,16 +4033,30 @@ def main() -> int:
         return grants_reader_main(arguments.controls_only)
     if arguments.slice == "server":
         return server_main(arguments.controls_only)
+    if arguments.slice == "grading":
+        return grading_main(arguments.controls_only)
     if arguments.slice == "limits":
         return limits_main(arguments.controls_only)
     if arguments.slice == "service-component":
         return service_component_main(arguments.controls_only)
     if arguments.slice == "service-booted":
         return service_booted_main(arguments.controls_only)
+    if arguments.slice == "service-four":
+        return service_four_main(arguments.controls_only)
+    if arguments.slice == "service-peer":
+        return service_peer_main(arguments.controls_only)
     if arguments.slice == "service":
         return service_main(arguments.controls_only)
     if arguments.slice == "service-link":
         return service_link_main(arguments.controls_only)
+    if arguments.slice == "link-v3-reader":
+        return link_v3_reader_main(arguments.controls_only)
+    if arguments.slice == "service-stack":
+        return service_stack_main(arguments.controls_only)
+    if arguments.slice == "holder-fault":
+        return holder_fault_main(arguments.controls_only)
+    if arguments.slice == "lost-holder":
+        return lost_holder_main(arguments.controls_only)
     refused_controls = controls(arguments.slice)
     if arguments.controls_only:
         print(f"zenoh profile 0 {arguments.slice} judge: refused {refused_controls} corrupted transcripts")

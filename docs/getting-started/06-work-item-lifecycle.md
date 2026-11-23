@@ -12,10 +12,11 @@ is [the devloop v1.5 decision](../decisions/work-item-devloop.md).
 |---|---|
 | The item file | Scope (`owns`), requirements, acceptances, `intent` |
 | Area files `specs/<area>.zt` | The frozen promises: what a subsystem guarantees today |
-| `scripts/spec/check`, from the base commit | Whether a PR is legal under V1 to V10 |
+| `scripts/spec/check`, from the base commit | Whether a PR is legal under V1 to V11 |
 | The `Evidence` workflow on `main` | Records, keyed by closure digest, and done witnesses |
 | The closeout bot | The PR that moves a witnessed or cancelled item to `.tasks/terminal/` |
-| `HUMAN_OWNERS` | V4 approvals, and answers to `#human` acceptances |
+| `HUMAN_OWNERS` | Approvals, and answers to `#human` acceptances |
+| `REVIEW_AGENTS` | The accounts whose approval is the review agent's verdict |
 
 Nobody runs a command that marks an item done.
 
@@ -108,7 +109,7 @@ Every PR has one class, judged from its paths (V1).
 | Planning | The item with `intent = #planned`, and its exam: the recipe and checkers its acceptances name | V1. V4 if it changes an existing grader or area invariant. |
 | Implementation | `intent = #active` and the product change, inside `owns` | V2: every implementation path is under `owns` of an item that is on base and `#active` on head. V3: no path in the grader set of a bound target. |
 | Closeout | The item file moved to `.tasks/terminal/` byte for byte | V6: a signed done witness, or `#cancelled`. |
-| Process | `docs/`, `.agents/`, `.github/`, `scripts/spec/`, top-level `*.md` | V4 for a change to `scripts/spec/`, `HUMAN_OWNERS`, `AGENT_ACCOUNTS` or `specs/allowed_signers`. |
+| Process | `docs/`, `.agents/`, `.github/`, `scripts/spec/`, top-level `*.md` | V4 for a change to `scripts/spec/`, `HUMAN_OWNERS`, `AGENT_ACCOUNTS`, `REVIEW_AGENTS` or `specs/allowed_signers`. |
 
 The planning PR merges first. An implementation PR that changes only an item's
 `intent` beside product paths is still one implementation PR. One item may
@@ -134,8 +135,9 @@ at that commit.
 
 A **bound target** is a `just` target that one of these binds: an open item
 that is not cancelled, a terminal item nobody superseded, or an area
-requirement. Its **grader set** is the recipe chain and the checker files that
-decide its result. `just spec_closure --explain` lists the composition of
+requirement. Its **grader set** is the recipe chain and the scripts that
+decide its result: the checkers, the `scripts/lib/` modules they import, and a
+generator that a recipe runs. `just spec_closure --explain` lists the composition of
 every bound target's closure digest.
 
 | Change | Rule |
@@ -152,7 +154,8 @@ an area requirement that is neither planned nor superseded, an `#active` item,
 or a terminal item nobody superseded.
 
 1. It runs each claimed target under `scripts/spec/record`, sharded by the
-   wall times in `specs/targets.toml`.
+   wall times in `specs/targets.toml`. A shard runs on an AArch64 runner,
+   unless `[host]` in that file lists its targets under another host class.
 2. It signs each record as `ci` and commits it to the `evidence` branch at
    `<target>/<closureDigest>.zt`.
 3. It signs a done witness at `done/<item id>/<digest>.zt` for each `#active`
@@ -171,6 +174,12 @@ Run the same steps locally:
 | `just spec_closure` | Prints the closure digest of every bound target. |
 | `just spec_status` | Prints each area requirement's state: enforced, failing, claimed, advisory or superseded. `--local` also reads `build/observations/`. |
 | `just spec_tasks_status` | Prints each item's state from the `evidence` branch. |
+
+A target under `[host]` in `specs/targets.toml` needs a host class other than
+AArch64. The x86-64 recipes that build a pc99 image are listed there, because
+`flake.nix` supplies the pinned OVMF and GRUB on `x86_64-linux` only. Add a new
+target of that kind to the list in the process PR that precedes its first
+record.
 
 A target under `operator` in `specs/targets.toml` needs hardware CI does not
 have. An operator in `specs/allowed_signers` runs it and signs the record:
@@ -191,8 +200,19 @@ python3 scripts/spec/human area <area> <requirement id> <acceptance id> yes --si
 The record binds to the item's requirements digest. Rewording a statement or
 an acceptance asks the question again. The principal must be in
 `specs/allowed_signers`. Record an answer only when the person gave it.
-Automation never infers one. `scripts/spec/publish` carries the record to the
-`evidence` branch.
+Automation never infers one.
+
+Three commands carry the record to the `evidence` branch:
+
+```sh
+git fetch origin +refs/heads/evidence:refs/remotes/origin/evidence
+python3 scripts/spec/publish
+git push origin refs/heads/evidence
+```
+
+`publish` refuses a local `evidence` branch that does not contain the fetched
+one, and prints the two commands that reset it. Never push `evidence` with
+`--force`: a forced push replaces every record the branch holds.
 
 ## Closeout PRs
 
@@ -214,27 +234,28 @@ deletion.
 
 `just spec_check` judges the store alone. `just spec_check --base origin/main`
 judges your branch as CI does. CI runs the base commit's copy of the judge, so
-a PR cannot change the judge, `HUMAN_OWNERS`, `AGENT_ACCOUNTS` or
-`specs/allowed_signers` that judge it.
+a PR cannot change the judge, `HUMAN_OWNERS`, `AGENT_ACCOUNTS`,
+`REVIEW_AGENTS` or `specs/allowed_signers` that judge it.
 
 | Rule | Refuses |
 |---|---|
 | V1 class | A PR with more than one class, or a path the class table does not list. |
 | V2 planning first | An implementation path under no `owns` of an item that is on base and `#active` on head. |
 | V3 no self-grading | An implementation PR that touches the grader set of any bound target. |
-| V4 grader approval | A grader change, area invariant change, existing contract schema change, or judge change without one approval on the head from `HUMAN_OWNERS` by someone other than the author. |
+| V4 grader approval | A grader change, area invariant change, existing contract schema change, or judge change without one approval on the head from `HUMAN_OWNERS` or `REVIEW_AGENTS` by someone other than the author. |
 | V5 legal intent | An `intent` change outside `EDGES`. Entering `#deferred` or `#cancelled` without a V4 approval. |
 | V6 closeout | A move to `terminal/` without a signed done witness, unless the item is `#cancelled`. Any later change to a terminal item. |
 | V7 backlog first | A milestone, or an item under one, entering `#active` while a backlog bug is `#planned` or `#active`, or while a promise fails. |
-| V8 R4 floor | A lowered `negativeControlsRefused` predicate without an approved R4 known limit. Milestone M5: the judge does not enforce it yet. |
+| V8 R4 floor | A bound target whose floor on `negativeControlsRefused` drops, or loses its predicate, unless the same PR adds an R4 known limit for that target. Adding a known limit needs a V4 approval. |
 | V9 provenance | A `#human` quote shorter than 8 characters, a blanket answer, or a PR number as source. Warning only. |
 | V10 frozen promises | An added, changed or removed area requirement. |
+| V11 independent review | Any PR but a closeout whose head has no approval from `HUMAN_OWNERS` or `REVIEW_AGENTS` by someone other than the author. A comment that starts with `@claude review` asks the review agent for one. |
 
 The `Spec judge` workflow runs on every PR push and after each review. The
-`main` ruleset requires its `Devloop v1.5 judge` check. A PR that touches
-`.github/` or `scripts/spec/` also needs a Code Owner approval from another
-owner, because such a PR could replace the check. `just spec_e2e` is the judge's own
-exam: it walks a fixture repository through every stage.
+`main` ruleset requires its `Devloop v1.5 judge` check and allows no bypass
+of it. A PR that touches `.github/` could replace the check. The review rules
+make that a blocking finding. `just spec_e2e` is the judge's own exam: it
+walks a fixture repository through every stage.
 
 ## No GitHub projection
 

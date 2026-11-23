@@ -1,0 +1,57 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a203e5-075e-7e73-a228-488c770a3f32" "root-test-impls" "planes-mechanism"
+  "The size gate counts the root's test-only functions as test lines"
+  "root_size_check reads the attribute #[cfg(test)] on a top-level item only. An item behind that attribute inside a product item counts as code. main holds 426 such code lines in slime-root/src. 301 of them are 37 whole functions inside impl blocks of product types, in nine files. No product root compiles them, and the series total of 33194 code lines includes them. docs/decisions/root-task-scope.md names this move as a step of stage one.")
+  with {
+    intent = #active;
+    owns = {
+      "slime-root/src/**";
+    };
+    nonGoals = {
+      h.nonGoal "The other 125 code lines behind a nested #[cfg(test)]. They are fields of product types, and statements and assertions inside product functions. A field or a statement cannot move out of its item, so they stay code lines." h.agentDefault;
+      h.nonGoal "An item behind any other cfg. An item behind #[cfg(not(test))] is product code. An item behind a cfg that names a slime_* flag beside test is compiled into a root role image." h.agentDefault;
+      h.nonGoal "A change to scripts/check/check-root-size.py. The reading rule of the gate stands, and so does every ceiling. A later planning pull request lowers the ceilings of the series and of the core role to the counts this item leaves." h.agentDefault;
+      h.nonGoal "A change to what a test function does, to its name or to its visibility. The item moves text." h.agentDefault;
+    };
+    requirements = {
+      h.req "test-functions-leave-product-impls"
+        "root_size_check counts at most 32893 code lines in the series and at most 14737 in the core role. It reports the counts as seriesCodeLines and coreCodeLines. main holds 33194 and 15038, and the 37 functions hold 301. Each of the 37 functions moves into a top-level impl block of its type, in the same file, behind #[cfg(test)]. The gate reads that block as a test item."
+        { "root_size_check"; };
+      h.req "the-host-tests-still-run"
+        "test_sel4_root runs at least 398 host tests, and reports the count as hostTests. main runs 398. The moved functions serve those tests, so every test still compiles and passes."
+        { "test_sel4_root"; };
+    };
+    acceptance = {
+      h.observedWhere "root_size_check" {
+        h.atMost "seriesCodeLines" 32893;
+        h.atMost "coreCodeLines" 14737;
+      };
+      h.observedWhere "test_sel4_root" {
+        h.atLeast "hostTests" 398;
+      };
+    };
+    invariants = {
+      h.invariant "no-product-line-moves"
+        "The implementation moves only functions that stand behind exactly #[cfg(test)]. It changes no line that a product root compiles, other than the position of that line in its file."
+        h.agentDefault;
+      h.invariant "a-function-stays-in-its-file"
+        "A moved function stays in the file and on the type that held it. Its doc comment and its other attributes move with it."
+        h.agentDefault;
+    };
+    decisions = {
+      h.decided "move-whole-functions-only"
+        "The item moves the 37 functions, and leaves the 125 lines of fields, statements and assertions."
+        "a function inside an impl block moves to a second impl block of the same type without a change to any caller. A field or a statement behind #[cfg(test)] leaves its item only when a product function calls a second, empty function in its place. That adds product lines"
+        h.agentDefault
+        { "test-functions-leave-product-impls"; };
+      h.decided "the-count-is-the-acceptance"
+        "The acceptance bounds seriesCodeLines by 32893 and coreCodeLines by 14737. Each bound is the count of main less the 301 lines of the 37 functions, with no line to spare."
+        "every moved file belongs to the core role, and the gate already reports both counts. The shortest of the 37 functions holds 4 code lines, so one function that stays in a product impl block breaks both bounds. A bound with room to spare would pass with a short function left behind"
+        h.agentDefault
+        { "test-functions-leave-product-impls"; };
+    };
+  };
+
+item

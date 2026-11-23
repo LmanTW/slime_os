@@ -20,6 +20,10 @@ the root answers `CLOCK MONOTONIC READ` and `CLOCK RATE READ` for every task
 through the `lifecycle` service. Generation right bit 26 is retired, and the
 decoder refuses a v1 table.
 
+A Raspberry Pi 5 image built with `--system-timer` is the exception on AArch64.
+Its root counts the BCM2835 system timer, and its components ask the root
+through the same two operations. See [the system-timer image](#the-system-timer-image).
+
 `slime-root/src/clock.rs` serves the logical clock operations and
 `slime-root/src/platform_timer.rs` owns the platform timer mechanism. The service
 grants semantics, not exclusive register access. On current AArch64 profiles the
@@ -27,6 +31,39 @@ kernel enables EL0 physical counter and timer registers globally because the roo
 programs that timer from EL0; hostile native code could disrupt the timer
 registers. Closing that wall requires a kernel/platform change, not a contract
 claim.
+
+### The system-timer image
+
+`scripts/build/build-sel4.py --platform bcm2712-rpi5 --system-timer` builds an
+image in which no EL0 program names a generic-timer register. That is the
+first two parts of the second prerequisite of the
+[verified kernel profile](../decisions/verified-kernel-profile.md). The third
+part is open: a component of this image asks the root for the time, and the
+prerequisite asks for a read-only mapping of the timer's counter page.
+
+| Part | What it does |
+|---|---|
+| Builder | Sets `SLIME_SYSTEM_TIMER=1` for every build of the image. Names the image and its identity with the suffix `-system-timer`. Refuses the flag for another platform, and refuses the variable from its own environment. |
+| Root | Maps the timer page at `0x10_7c00_3000`. Counts the 64-bit counter at 1 MHz. Takes compare channel 3, interrupt 99. |
+| Component | `slime_rt::monotonic_read` and `monotonic_frequency` call `CLOCK MONOTONIC READ` and `CLOCK RATE READ`. |
+
+The compare channel matches the low 32 bits of the counter, and its match bit
+is level-triggered. The root handles both facts:
+
+- A deadline more than one wrap ahead is installed one wrap ahead. One wrap is
+  71.6 minutes.
+- The channel has no enable bit. A disarmed channel is parked one wrap ahead.
+- The acknowledgement of a wake reads the match bit and the counter. A match
+  while the counter is short of the armed deadline installs that deadline
+  again, which clears the match. A match at or past the deadline stays, so the
+  root services it.
+
+No gate boots this backend: QEMU `virt` has no such device. `just
+rpi5_system_timer_image_check` reads the EL0 programs of two such images and
+finds no access. The host tests check what the backend writes to a page of host
+memory. Whether the timer works on the board is an operator's observation, and
+no record of one exists. The kernel of the image still exports the generic
+timer; only the verified profile removes it.
 
 Already-decided one-shot expiries must reach their declared badges even when a
 later platform step or IRQ acknowledgement fails; cancellation delivers nothing
@@ -60,6 +97,45 @@ component sources.
 A `Line` that overflows its capacity or is not UTF-8 is dropped whole rather
 than printed in part. The console relay component therefore no longer forwards
 a non-UTF-8 message to the root's refusal path.
+
+### Where the bytes go
+
+Every record of the root and of the console dispatcher leaves through
+`diagnostic::write` in `slime-root/src/diagnostic.rs`. The target profile
+decides where that function sends the bytes.
+
+| Target profile | Before the install | After the install |
+|---|---|---|
+| `aarch64-sel4-qemu-virt` | the kernel's debug console | the root's own PL011 |
+| every other profile | the kernel's debug console | there is no install |
+
+On QEMU `virt`, `main` maps the machine's PL011 at `0x09000000` right after the
+metadata bootstrap and calls `diagnostic::install`. From then on the root
+writes each byte of a record to the UART's data register, once the transmit
+FIFO has room. The kernel's debug console receives none of those bytes. The
+root sends a carriage return before each line feed, as the kernel's console
+does, so the bytes on the serial line do not depend on the route.
+
+The root can map a device page only after its allocator and its metadata
+exist. The records of that bring-up therefore still pass through
+`seL4_DebugPutChar`: one boot of the local composition prints 81 of them. A
+kernel that cannot print would lose them.
+
+The panic report of the root and of `sel4-root-task` does not pass through
+`diagnostic::write`. It still reaches the serial line through the kernel's
+debug console, before and after the install, and such a kernel would lose it
+too.
+
+The root retypes a device page once in a boot. The interactive product reads
+its keyboard through the mapping the console installed.
+
+The root changes no setting of the UART. The loader configured the line.
+
+`just root_console_check` holds the route. It compiles the actual
+`diagnostic.rs` on the host against a register page and a kernel sink that
+counts bytes. It audits the one install call in the root's sources. It judges
+the raw serial bytes of one boot. No boot can tell the two routes apart,
+because both put the same bytes on the same UART.
 
 ## Wait sets
 
@@ -152,6 +228,36 @@ A component reads its own lifetime through `LIFECYCLE LIFETIME READ`
 so a composition that shuts an instance down declares it bounded. The rationale
 is in [the decision record](../decisions/instance-lifetime.md).
 
+## Declared table readers
+
+The root serves seven generation tables to a declared reader, and it holds no
+component name for them. `contracts/resource-reader/v1/` pairs a table with an
+instance that may read it.
+
+| Table | Reader the builder declares |
+|---|---|
+| `entropy-authority/v1` | the instance named `entropy-service` |
+| `zenoh-service-grants-table/v1`, `zenoh-service-limits/v1` | the instance named `zenoh-service` |
+| `network-destination/v1`, `network-interface/v1`, `network-application/v4` | the instance named `network-service` |
+| `block-authority/v1` | every instance of the executable `virtio-blk-driver` |
+
+- **Builder.** `build_resource_readers` in `scripts/build/generation_resources.py`
+  holds the four names. It writes one row for each table the generation carries
+  and each instance that reads it. It writes no object when no row remains, and
+  no manifest lists the object.
+- **Admission.** The root refuses a second reader table, a table that does not
+  decode, and a row that names no declared instance.
+- **Read.** `ipc::is_declared_reader` answers each read from the table. A
+  generation without the table has no reader, so a generation that an older
+  builder wrote serves none of the seven tables.
+
+A row grants the read alone. The root still serves a block reader only the rows
+of the device in its `ioResourceBudget` row.
+
+`just resource_reader_builder_check` holds the builder to the table above, and
+`just root_size_check` counts the string literals that name a product component
+in the root and the crates it decodes with. The count is 0.
+
 ## Graph arrival ceiling
 
 The root's graph service loop counts component arrivals. In a finite plane it
@@ -216,6 +322,8 @@ admission, and has target-specific assurance consequences.
 ## Verification
 
 - `just clock_authority_check`
+- `just rpi5_system_timer_image_check`
+- `just resource_reader_builder_check`
 - `just wait_set_check`
 - `just scheduling_class_check`
 - `just lifecycle_restart_check`
@@ -223,3 +331,4 @@ admission, and has target-specific assurance consequences.
 - `just robot_withdrawn_check`
 - `just sel4_gate_control_check` for missing/reordered/failure controls
 - `just console_lines_check`
+- `just root_console_check`

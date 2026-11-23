@@ -44,8 +44,14 @@ Delivery chronology and historical verification results do not belong in a plan.
   external peers, services/actions, and the transport-security boundary.
 - [Existing workloads](existing-workload.md) — backend admission for each
   workload's exact target profile.
+- [Foreign workloads](foreign-workloads.md) — the X1 Linux userspace personality
+  and the X2 AMD-V guest.
+- [Native development](native-development.md) — D1–D7: in-system authoring,
+  hermetic build, ephemeral admission, live cutover, and on-device generations.
+- [M5 and M6 retained requirements](foundations-m5-m6.md) — M5.7 Framework NVMe
+  promotion, and M5 and M6 checks not confirmed against a gate.
+- [I/O substrate retained requirements](io-substrate-qualification.md) — IO2 and
+  IO3 evidence their gates do not establish.
 
-The [roadmap classification](../../roadmap/README.md) names every retained
-source and any detailed requirements not yet extracted. Those explicitly
-retained sections remain the owner of that detail; extracted subjects use the
-pages above. Historical investigations are preserved in the [archive](../history.md).
+The former `roadmap/` files are retired. The pages above own their open
+requirements. Historical investigations are preserved in the [archive](../history.md).

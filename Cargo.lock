@@ -1849,6 +1849,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "slime-component-zenoh-holder-delta"
+version = "0.1.0"
+dependencies = [
+ "slime-build-support",
+ "slime-components",
+ "slime-rt",
+]
+
+[[package]]
+name = "slime-component-zenoh-holder-gamma"
+version = "0.1.0"
+dependencies = [
+ "slime-build-support",
+ "slime-components",
+ "slime-rt",
+]
+
+[[package]]
 name = "slime-component-zenoh-holder-publisher"
 version = "0.1.0"
 dependencies = [
@@ -1870,6 +1888,26 @@ dependencies = [
 
 [[package]]
 name = "slime-component-zenoh-peer"
+version = "0.1.0"
+dependencies = [
+ "slime-build-support",
+ "slime-components",
+ "slime-proto",
+ "slime-rt",
+]
+
+[[package]]
+name = "slime-component-zenoh-rmw-node"
+version = "0.1.0"
+dependencies = [
+ "slime-build-support",
+ "slime-components",
+ "slime-proto",
+ "slime-rt",
+]
+
+[[package]]
+name = "slime-component-zenoh-rmw-peer"
 version = "0.1.0"
 dependencies = [
  "slime-build-support",

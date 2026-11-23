@@ -89,6 +89,16 @@ console_record_check: sel4_pin_check io_tcp_host_check
     python3 scripts/check/check-sel4-gate-controls.py --console-record
     python3 scripts/check/check-sel4-io-network-plane.py --arm local --local-runs 20 --raw-directory "build/console-record-$(date -u +%Y%m%dT%H%M%S)-$$"
 
+# The root's own console UART on QEMU virt: with a UART installed the actual
+# writer sends the kernel sink no byte, the root installs the PL011 once and
+# before main's first record, and in the raw bytes of one local boot only the
+# allocator's bring-up precedes the install marker. The record boundary's own
+# exam runs first.
+# Explicit, never part of `all`.
+[group('planes / mechanism')]
+root_console_check: sel4_pin_check console_record_check
+    python3 scripts/check/check-sel4-io-network-plane.py --arm root-console
+
 # Every component console write is one whole line, judged lexically over the
 # tracked sources, after the planes whose markers were observed split pass.
 # Explicit, never part of `all`.
@@ -156,6 +166,13 @@ sel4_channel_check: sel4_pin_check
 [group('planes / mechanism')]
 sel4_loan_check: sel4_pin_check
     python3 scripts/check/check-sel4-loan-plane.py
+
+# The loan plane with the export arm: the root refuses a sender that holds its
+# share of unimported exports, and a task's retirement releases every export
+# that names it. The arm's controls run in sel4_gate_control_check.
+[group('planes / mechanism')]
+sel4_export_share_check: sel4_pin_check
+    python3 scripts/check/check-sel4-loan-plane.py --export-share
 
 [group('planes / mechanism')]
 sel4_spawn_check: sel4_pin_check

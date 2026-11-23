@@ -10,9 +10,18 @@ travels with it. Refused: a machine record whose digest is not the
 target's closure in this checkout (a stale or dirty run), a record whose
 runner says `dirty`, a human record or witness without a verifying
 signature, and with `--require-signed` any record without one. The commit
-is made with git plumbing, no checkout; pushing is the caller's job:
+is made with git plumbing, no checkout; fetching and pushing are the
+caller's job:
 
+    git fetch origin +refs/heads/evidence:refs/remotes/origin/evidence
+    scripts/spec/publish
     git push origin refs/heads/evidence
+
+Also refused: a local evidence branch that does not contain the fetched
+one. Such a branch is behind it or has another history, and a commit on
+top of it could only reach the remote by a forced push, which would
+replace every record the remote holds. Never push the evidence branch
+with `--force`.
 """
 
 from __future__ import annotations
@@ -82,9 +91,32 @@ def collect(require_signed: bool) -> tuple[dict[str, bytes], list[str]]:
     return entries, errors
 
 
+FETCHED = "refs/remotes/origin/evidence"
+
+
+def refuse_stale(ref: str, current: str) -> None:
+    """Refuse a local `ref` that does not contain the fetched evidence ref."""
+    fetched = lib.git("rev-parse", "-q", "--verify", FETCHED + "^{commit}", check=False).strip()
+    if not fetched or fetched == current:
+        return
+    contains = subprocess.run(["git", "merge-base", "--is-ancestor", fetched, current], cwd=lib.ROOT, check=False).returncode == 0
+    if not contains:
+        raise lib.SpecError(
+            f"publish: {ref} ({current[:12]}) does not contain {FETCHED} ({fetched[:12]}): it is behind it or has another history.\n"
+            f"  Delete the local branch and publish again:\n"
+            f"    git fetch origin +refs/heads/evidence:{FETCHED}\n"
+            f"    git update-ref -d {ref}\n"
+            f"  The second command drops every commit that is only on the local branch. A record\n"
+            f"  of such a commit must still be under build/observations/, or it is lost.\n"
+            f"  Never push the evidence branch with --force."
+        )
+
+
 def commit(ref: str, entries: dict[str, bytes], message: str) -> str | None:
     """Commit on top of `ref`, or of the fetched evidence ref when `ref` does not exist yet."""
     current = lib.git("rev-parse", "-q", "--verify", ref + "^{commit}", check=False).strip() or None
+    if current is not None:
+        refuse_stale(ref, current)
     parent = current
     if parent is None and lib.evidence_ref():
         parent = lib.git("rev-parse", lib.evidence_ref()).strip()

@@ -192,13 +192,16 @@ fn network_summary(message: &Network<'_>) -> String {
 
 fn decoded_summary(batch: &[u8]) -> String {
     match decode_batch(batch).expect("decoder accepts the encoded batch") {
-        Message::InitSyn { zid, batch_size } => {
+        Message::InitSyn {
+            zid, batch_size, ..
+        } => {
             format!("INIT_SYN;v=9;zid={};batch={batch_size}", hex(zid))
         }
         Message::InitAck {
             zid,
             batch_size,
             cookie,
+            ..
         } => format!(
             "INIT_ACK;v=9;zid={};batch={batch_size};cookie={}",
             hex(zid),

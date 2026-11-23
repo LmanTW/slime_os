@@ -21,7 +21,11 @@ witness records each target's closure digest and `negativeControlsRefused`.
 Host-neutral: the workflow fetches the evidence ref before and pushes
 `refs/heads/evidence` after. `--plan` balances claimed targets over at
 most N shards by recorded wall time (`specs/targets.toml`, else 600 s
-each) and skips the operator targets listed there.
+each) and skips the operator targets listed there. Each shard names one
+host class: `aarch64`, or the class `[host]` in that file lists the target
+under. The workflow maps a class to a runner. Every class with a claimed
+target gets a shard, so a plan holds more than N shards only when N is
+less than the number of classes.
 """
 
 from __future__ import annotations
@@ -41,6 +45,7 @@ import lib  # noqa: E402
 HERE = Path(__file__).resolve().parent
 TARGETS = lib.SPECS / "targets.toml"
 DEFAULT_SECONDS = 600
+DEFAULT_HOST = "aarch64"
 
 
 def claimed(include_failing: bool = False) -> list[str]:
@@ -60,19 +65,53 @@ def claimed(include_failing: bool = False) -> list[str]:
     return sorted(t for t in candidates if evidence.record(t)[0] in wanted)
 
 
-def plan(targets: list[str], shards: int) -> list[dict[str, str]]:
-    """Greedy longest-first bin packing over at most `shards` bins."""
-    facts = tomllib.loads(TARGETS.read_text()) if TARGETS.is_file() else {}
+def host_classes(facts: dict) -> dict[str, str]:
+    """Each target `[host]` lists, mapped to its host class."""
+    classes: dict[str, str] = {}
+    for host, names in sorted(facts.get("host", {}).items()):
+        if host == DEFAULT_HOST:
+            raise lib.SpecError(f"specs/targets.toml [host] lists {DEFAULT_HOST!r}, which is the class of every unlisted target")
+        for name in names:
+            if name in classes:
+                raise lib.SpecError(f"specs/targets.toml [host] lists {name!r} under {classes[name]!r} and {host!r}")
+            classes[name] = host
+    return classes
+
+
+def plan(targets: list[str], shards: int, facts: dict | None = None) -> list[dict[str, str]]:
+    """Greedy longest-first bin packing over at most `shards` bins, per host class.
+
+    A bin holds targets of one host class. Each class with a target gets one
+    bin; each further bin goes to the class with the highest load per bin."""
+    if facts is None:
+        facts = tomllib.loads(TARGETS.read_text()) if TARGETS.is_file() else {}
     seconds = facts.get("wall_time", {})
     operator = set(facts.get("operator", []))
-    targets = [t for t in targets if t not in operator]
-    weighted = sorted(targets, key=lambda t: (-int(seconds.get(t, DEFAULT_SECONDS)), t))
-    bins: list[list] = [[0, []] for _ in range(max(1, min(shards, len(targets))))]
-    for target in weighted:
-        slot = min(bins, key=lambda b: b[0])
-        slot[1].append(target)
-        slot[0] += int(seconds.get(target, DEFAULT_SECONDS))
-    return [{"shard": str(i), "targets": " ".join(members)} for i, (_, members) in enumerate(bins) if members]
+    classes = host_classes(facts)
+
+    def weight(target: str) -> int:
+        return int(seconds.get(target, DEFAULT_SECONDS))
+
+    by_host: dict[str, list[str]] = {}
+    for target in targets:
+        if target not in operator:
+            by_host.setdefault(classes.get(target, DEFAULT_HOST), []).append(target)
+    load = {host: sum(weight(t) for t in members) for host, members in by_host.items()}
+    count = dict.fromkeys(by_host, 1)
+    while sum(count.values()) < shards:
+        open_hosts = [host for host in by_host if count[host] < len(by_host[host])]
+        if not open_hosts:
+            break
+        count[max(open_hosts, key=lambda host: (load[host] / count[host], host))] += 1
+    rows: list[dict[str, str]] = []
+    for host in sorted(by_host):
+        bins: list[list] = [[0, []] for _ in range(count[host])]
+        for target in sorted(by_host[host], key=lambda t: (-weight(t), t)):
+            slot = min(bins, key=lambda b: b[0])
+            slot[1].append(target)
+            slot[0] += weight(target)
+        rows += [{"shard": str(len(rows) + i), "host": host, "targets": " ".join(members)} for i, (_, members) in enumerate(b for b in bins if b[1])]
+    return rows
 
 
 def record(targets: list[str], runner: str, signer: str | None, key: str | None) -> dict[str, int]:

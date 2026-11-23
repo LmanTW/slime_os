@@ -1,0 +1,38 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a1d3d0-7566-743d-80dd-ff6e13f41056" "zenoh-rmw-exam-repair" "zenoh-transport"
+  "Repair the rmw exam's default-session push so the Profile 0 decoder passes it to the session"
+  "The exam of `zenoh-rmw-session` pins `refuse-rmw-default-push-undeclared` as refused with class `undeclared-key` by the default session. Its batch is the talker's push on `chatter`, whose Put header sets the timestamp flag. The decoder refuses a Put with a timestamp as `unsupported-message` before the session reads the key, and the pinned vector `put_timestamp_flag` keeps it that way, so no default session can return `undeclared-key` for that batch. Every push the three captured sessions hold carries a timestamp, so none of them reaches the subscriber check in a default session.")
+  with {
+    intent = #active;
+    depends = { "01a1cb73-ab5b-7711-8c1a-2a033f84b417"; };
+    owns = {
+      "scripts/lib/zenoh_rmw_exam.py";
+    };
+    nonGoals = {
+      h.nonGoal "Changing the decoder or the pinned `put_timestamp_flag` vector. The default session keeps refusing a Put with a timestamp." h.agentDefault;
+      h.nonGoal "Changing the case count, the control count or any other case of the `zenoh-rmw-session` exam. This item replaces one batch." h.agentDefault;
+      h.nonGoal "Moving the rmw exams out of `check-zenoh-profile0.py`. Every later edit of an rmw exam file is still a grader change for the Zenoh promises that checker runs." h.agentDefault;
+    };
+    requirements = {
+      h.req "default-push-reaches-the-session"
+        "The batch pinned as `refuse-rmw-default-push-undeclared` is a Put with no timestamp and the attachment as its only extension, on a 114-byte key no session subscribed to, so the default session refuses it as `undeclared-key`."
+        { "zenoh_rmw_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_rmw_check" {
+        h.count "casesObserved" 75;
+        h.count "negativeControlsRefused" 182;
+      };
+    };
+    decisions = {
+      h.decided "one-batch-replaced-and-nothing-else"
+        "The repair replaces the batch of one refusal and leaves the exam's 75 cases and 182 controls as they are."
+        "the counts are pinned in `zenoh-rmw-session` and a changed count would need that item revised too"
+        h.agentDefault
+        { "default-push-reaches-the-session"; };
+    };
+  };
+
+item

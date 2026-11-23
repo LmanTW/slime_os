@@ -5,7 +5,8 @@ and head, the recipes at base and head, the evidence commit, the pull
 request's author and its approvers. Rule ids follow
 `docs/decisions/work-item-devloop.md`: V1 class, V2 planning first, V3 no
 self-grading, V4 grader approval, V5 legal intent, V6 closeout, V7 backlog
-first, V9 provenance, V10 frozen promises.
+first, V8 R4 floor, V9 provenance, V10 frozen promises; and from
+`docs/decisions/independent-review.md`, V11 independent review.
 """
 
 from __future__ import annotations
@@ -15,6 +16,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import lib
+
+# Accounts whose approval is the review agent's verdict. Read from the judge's
+# own commit, like HUMAN_OWNERS; `scripts/spec/check` extracts it beside
+# `lib.JUDGE_PATHS`.
+REVIEW_AGENTS = "REVIEW_AGENTS"
 
 MILESTONE_LISTS = ("owns", "nonGoals", "requirements", "acceptance", "invariants", "decisions")
 # V9: a `#human` quote must be a concrete decision or example.
@@ -222,6 +228,72 @@ def check_backlog(base: list[lib.Item], head: list[lib.Item], failing_promises, 
             findings.error("V7", f"{item.where} enters #active while promise {promise} fails")
 
 
+CONTROLS = "negativeControlsRefused"
+
+
+def control_floor(predicates: list) -> int | None:
+    """The lower bound the predicates put on `negativeControlsRefused`, or None."""
+    floor = None
+    for predicate in predicates:
+        kind, body = lib.tag(predicate), lib.payload(predicate)
+        if body.get("key") != CONTROLS:
+            continue
+        bound = body.get("equals") if kind == "count" else body.get("min") if kind == "atLeast" else None
+        if bound is not None:
+            floor = bound if floor is None else max(floor, bound)
+    return floor
+
+
+def control_floors(items: list[lib.Item], areas: list[lib.Area]) -> dict[str, int | None]:
+    """Each bound target's floor on `negativeControlsRefused`: the highest
+    lower bound among the mandatory acceptances that bind it, or None when
+    none of them bounds the count. The items and areas are those
+    `lib.bound_targets` counts. An advisory acceptance sets no floor, because
+    `lib.item_done` never reads its predicates."""
+    gone = lib.superseded(items)
+    floors: dict[str, int | None] = {}
+
+    def note(target: str, predicates: list) -> None:
+        floor = control_floor(predicates)
+        known = floors.get(target)
+        floors[target] = floor if known is None else known if floor is None else max(known, floor)
+
+    for item in items:
+        if (item.terminal and item.id not in gone) or (not item.terminal and item.intent != "cancelled"):
+            for acceptance in item.value["acceptance"]:
+                if lib.tag(acceptance["check"]) == "observed":
+                    body = lib.payload(acceptance["check"])
+                    note(body["justTarget"], body["predicates"] if acceptance["mandatory"] else [])
+    for area in areas:
+        for requirement in area.requirements:
+            if requirement["id"] not in gone:
+                for kind, body in lib.area_acceptances(requirement):
+                    if kind == "observed":
+                        note(body["justTarget"], body["predicates"])
+    return floors
+
+
+def check_control_floor(base_items, base_areas, head_items, head_areas, findings: Findings) -> None:
+    """V8 (R4): a bound target's floor on `negativeControlsRefused` never
+    drops, unless this pull request adds an R4 known limit for that target.
+    A known limit covers the pull request that adds it and no later one, and
+    adding it needs an approval."""
+    known = {(item.id, limit["subject"]) for item in base_items for limit in item.value["knownLimits"]}
+    allowed: set[str] = set()
+    for item in head_items:
+        for limit in item.value["knownLimits"]:
+            if limit["ratchet"] == "R4" and (item.id, limit["subject"]) not in known:
+                allowed.add(limit["subject"])
+                findings.needs_approval("V8", f"{item.where} adds an R4 known limit for {limit['subject']}")
+    before, after = control_floors(base_items, base_areas), control_floors(head_items, head_areas)
+    for target, floor in sorted(before.items()):
+        if floor is None or target not in after or target in allowed:
+            continue
+        now = after[target]
+        if now is None or now < floor:
+            findings.error("V8", f"{target}: the floor on {CONTROLS} drops from {floor} to {'none' if now is None else now}; the item that lowers it must add an R4 known limit for {target}")
+
+
 def check_provenance_quality(items: list[lib.Item], findings: Findings) -> None:
     """V9: warnings, which become errors once V9_BLOCKS_AFTER real features closed."""
     closed = sum(1 for i in items if i.terminal and i.kind != "milestone")
@@ -262,21 +334,32 @@ def check_frozen_areas(base: list[lib.Area], head: list[lib.Area], findings: Fin
 # --- Approvals ---------------------------------------------------------------
 
 
-def judge_approvals(findings: Findings, author: str, approvers: set[str], head_owners: set[str]) -> None:
-    """V4/V5: one approval on the current head from HUMAN_OWNERS (as the
-    judge's base lists them) by someone who is not the author and is not
-    being added by this pull request."""
+def review_agents() -> set[str]:
+    return set(lib.names(lib.CODE / REVIEW_AGENTS))
+
+
+def judge_approvals(findings: Findings, author: str, approvers: set[str], head_owners: set[str], reviewable: bool) -> None:
+    """V4/V5 and V11: one independent review of the current head.
+
+    A review is an approval from a person in HUMAN_OWNERS or from an account
+    in REVIEW_AGENTS, as the judge's base lists them. It never counts from the
+    author, from an owner this pull request adds, or from an account in
+    AGENT_ACCOUNTS. V11 requires it of every `reviewable` pull request; V4 and
+    V5 require it for each change that asked for an approval."""
     owners = lib.human_owners()
     if len(owners) < 2:
         findings.error("V4", f"HUMAN_OWNERS lists {len(owners)} person(s); at least two are needed so an author never approves alone")
-    if not findings.approvals:
-        return
     added = head_owners - owners
-    valid = (approvers & owners) - {author} - added - lib.agent_accounts()
+    excluded = {author} | lib.agent_accounts()
+    valid = ((approvers & owners) - added - excluded) | ((approvers & review_agents()) - excluded)
     for reason in findings.approvals:
         print(f"approval: {reason}")
     if valid:
-        print(f"approval: satisfied by {sorted(valid)}")
+        print(f"review: satisfied by {sorted(valid)}")
         return
-    rejected = sorted(approvers - valid)
-    findings.error("V4", f"{len(findings.approvals)} change(s) need an approval from HUMAN_OWNERS other than the author {author or '(unknown)'}; approvals on this head: {rejected or 'none'}")
+    rejected = sorted(approvers) or "none"
+    who = f"other than the author {author or '(unknown)'}"
+    if findings.approvals:
+        findings.error("V4", f"{len(findings.approvals)} change(s) need an approval from HUMAN_OWNERS or REVIEW_AGENTS {who}; approvals on this head: {rejected}")
+    if reviewable:
+        findings.error("V11", f"this head has no independent review: an approval from HUMAN_OWNERS or REVIEW_AGENTS {who}; approvals on this head: {rejected}")

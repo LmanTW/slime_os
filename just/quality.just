@@ -53,12 +53,12 @@ sel4_gate_control_check:
 [group('quality')]
 fmt:
     cargo fmt --all
-    cargo fmt --manifest-path slime-root/child/Cargo.toml
+    cargo fmt --manifest-path components/root-child/Cargo.toml
 
 [group('quality')]
 fmt_check:
     cargo fmt --all --check
-    cargo fmt --manifest-path slime-root/child/Cargo.toml --check
+    cargo fmt --manifest-path components/root-child/Cargo.toml --check
 
 # Derive root-workspace component packages because `cargo fmt` supports neither
 # package globs nor `--exclude`; metadata also picks up newly added components.
@@ -87,12 +87,12 @@ fmt_check_boot_contracts:
 [group('quality')]
 fmt_sel4_root:
     cargo fmt -p slime-root
-    cargo fmt --manifest-path slime-root/child/Cargo.toml
+    cargo fmt --manifest-path components/root-child/Cargo.toml
 
 [group('quality')]
 fmt_check_sel4_root:
     cargo fmt -p slime-root -- --check
-    cargo fmt --manifest-path slime-root/child/Cargo.toml -- --check
+    cargo fmt --manifest-path components/root-child/Cargo.toml -- --check
 
 [group('quality')]
 fmt_check_all: fmt_check
@@ -100,6 +100,19 @@ fmt_check_all: fmt_check
 [group('quality')]
 docs_check:
     python3 scripts/check/check-docs.py
+
+# The source budget of slime-root: every Rust file under slime-root/ has exactly one role, and each role
+# and the nine series roles together hold at most their ceiling of code lines. The series leaves out a
+# file that only the fixture root compiles: a module of the binary behind cfg(slime_root_fixture), whose
+# role must be fixture. No function holds more than 150 code lines unless the script's table names it,
+# and a named function stays under its own ceiling. The library's fatal! invocations, the lines only the
+# binary compiles and the library's lines behind a cfg each have a ceiling. The tables, the ceilings and
+# the pinned dependency names are in scripts/check/check-root-size.py. Reads source text and
+# slime-root/Cargo.toml; builds nothing.
+[group('quality')]
+[metadata("inputs", "slime-root/**")]
+root_size_check:
+    python3 scripts/check/check-root-size.py
 
 # The smoltcp support matrix in docs/plans/network-data-plane.md against the
 # locked release, its checksum-verified crate archive (`cargo fetch --locked`)
@@ -200,7 +213,11 @@ lint_sel4_root clippy_flags='-D warnings':
     build_std=(-Z json-target-spec -Z build-std=core,alloc,compiler_builtins -Z build-std-features=compiler-builtins-mem)
     cargo clippy -p slime-root --target "$targets/aarch64-sel4-roottask-minimal.json" \
         --target-dir build/sel4-cargo/lint-root "${build_std[@]}" -- {{ clippy_flags }}
-    cargo clippy --manifest-path slime-root/child/Cargo.toml -p slime-root-child \
+    # The fixture root. slime-root/build.rs sets cfg(slime_root_fixture) from this variable, and the
+    # call above compiles nothing behind that cfg.
+    SLIME_ROOT_FIXTURE=1 cargo clippy -p slime-root --target "$targets/aarch64-sel4-roottask-minimal.json" \
+        --target-dir build/sel4-cargo/lint-root "${build_std[@]}" -- {{ clippy_flags }}
+    cargo clippy --manifest-path components/root-child/Cargo.toml -p slime-root-child \
         --target "$targets/aarch64-sel4-minimal.json" \
         --target-dir build/sel4-cargo/lint-child "${build_std[@]}" -- {{ clippy_flags }}
     cd components
@@ -268,7 +285,10 @@ lint_sel4_root_x86_64 clippy_flags='-D warnings':
     build_std=(-Z json-target-spec -Z build-std=core,alloc,compiler_builtins -Z build-std-features=compiler-builtins-mem)
     cargo clippy -p slime-root --target "$targets/x86_64-sel4-roottask-minimal.json" \
         --target-dir build/sel4-cargo/lint-root-x86_64 "${build_std[@]}" -- {{ clippy_flags }}
-    cargo clippy --manifest-path slime-root/child/Cargo.toml -p slime-root-child \
+    # The fixture root, as in lint_sel4_root.
+    SLIME_ROOT_FIXTURE=1 cargo clippy -p slime-root --target "$targets/x86_64-sel4-roottask-minimal.json" \
+        --target-dir build/sel4-cargo/lint-root-x86_64 "${build_std[@]}" -- {{ clippy_flags }}
+    cargo clippy --manifest-path components/root-child/Cargo.toml -p slime-root-child \
         --target "$targets/x86_64-sel4-minimal.json" \
         --target-dir build/sel4-cargo/lint-child-x86_64 "${build_std[@]}" -- {{ clippy_flags }}
     cd components
@@ -392,13 +412,14 @@ test_sel4_root:
         echo "test_sel4_root: no installed seL4 prefix at $prefix; run 'just sel4_qemu_image_check' first" >&2
         exit 1
     fi
-    # The count is pinned so a silently dropped or unregistered `#[test]` fails
-    # the gate rather than passing as a smaller run; raise it in the same change
-    # that adds a test. This run compiles for AArch64, so it counts only the
-    # modules that exist there: P6's `framebuffer` and `boot_record` are gated
-    # to x86-64 because the boot framebuffer is reached through an x86 extra-
-    # BootInfo record, and their tests are covered by the x86-64 planes instead.
-    expected=369
+    # The expected count comes from the source: the `#[test]` attributes in the
+    # library files this run compiles. A test that the source holds and the run
+    # misses fails the gate, and a change that adds a test changes no recipe.
+    # This run compiles for AArch64, so the count leaves out the modules behind
+    # another `cfg`: P6's `framebuffer` and `boot_record` are gated to x86-64
+    # because the boot framebuffer is reached through an x86 extra-BootInfo
+    # record, and their tests are covered by the x86-64 planes instead.
+    expected="$(python3 scripts/check/check-root-host-tests.py)"
     # Use the toolchain pinned to the installed seL4 prefix, not the ambient one.
     toolchain="$(python3 -c "import pathlib,tomllib; print(tomllib.loads(pathlib.Path('sel4/pins.toml').read_text())['rust_sel4']['toolchain'])")"
     host="$(rustc -vV | sed -n 's/^host: //p')"
@@ -451,7 +472,7 @@ test_sel4_root:
         echo "test_sel4_root: the run did not report $expected passed and 0 failed" >&2
         exit 1
     fi
-    echo "slime-root host tests: $actual/$expected across 25 modules"
+    echo "slime-root host tests: $actual/$expected"
 
 # The frame-level peer the network planes talk to, exercised without QEMU.
 [group('quality')]

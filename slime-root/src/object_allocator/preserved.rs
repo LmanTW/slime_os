@@ -133,7 +133,10 @@ impl PreservedStore {
             len: live,
         }
     }
-    #[cfg(test)]
+}
+
+#[cfg(test)]
+impl PreservedStore {
     pub fn provision_host(&mut self, entries: usize) {
         self.records.provision_host(entries, PreservedRecord::EMPTY);
     }

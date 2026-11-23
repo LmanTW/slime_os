@@ -2,10 +2,10 @@
 
 """Validate maintained documentation without fetching or reading a history corpus.
 
-Local links and canonical work-item references are checked in every docs page,
-retained roadmap page and PR template. Literal Just invocations are checked in
+Local links and canonical work-item references are checked in every docs page
+and PR template. Literal Just invocations are checked in
 current documentation, live task requirements, scripts and CI execution fields;
-historical task outcomes and roadmap chronology do not promise recipe presence.
+historical task outcomes do not promise recipe presence.
 History URLs pin a full commit but are never opened. Just metadata is local.
 
 `--smoltcp-matrix` checks the network plan's smoltcp support matrix against the
@@ -42,7 +42,6 @@ REQUIRED_ACTIVE_DOCUMENTS = (
     "CONTRIBUTING.md",
     "HUMAN.md",
     "docs/README.md",
-    "roadmap/README.md",
     ".github/PULL_REQUEST_TEMPLATE/change.md",
     ".github/PULL_REQUEST_TEMPLATE/system-change.md",
 )
@@ -67,7 +66,6 @@ def active_documents(root: _Path = ROOT) -> tuple[_Path, ...]:
             (
                 *(root / relative for relative in REQUIRED_ACTIVE_DOCUMENTS),
                 *sorted((root / "docs").rglob("*.md")),
-                *sorted((root / "roadmap").rglob("*.md")),
                 *sorted((root / "contracts").rglob("*.md")),
                 *sorted((root / ".tasks" / "items").glob("*.md")),
                 *sorted((root / ".github" / "PULL_REQUEST_TEMPLATE").rglob("*.md")),
@@ -83,7 +81,6 @@ def checks_commands(path: _Path, root: _Path = ROOT) -> bool:
     relative = path.relative_to(root)
     return (
         relative.parts[:2] != (".tasks", "items")
-        and (relative.parts[0] != "roadmap" or relative.parts[1:] == ("README.md",))
         and relative.parts[:4] != ("contracts", "generation-manifest", "v1", "compositions")
     )
 
@@ -472,8 +469,6 @@ def controls() -> list[str]:
                 f"[`just retired_check`]({HISTORY_BASE}src/commit/{'a' * 40}/old.md) `just removed_check`",
                 True,
             ),
-            (root / "roadmap" / "history.md", "`just retired_check`", False),
-            (root / "roadmap" / "README.md", "`just removed_check`", True),
             (item_root / f"{present}.md", "`just retired_check`", False),
         )
         for path, document, expected in command_cases:

@@ -207,3 +207,11 @@ data_fabric_trace_check: contracts_check sel4_trace_check
 
 [group('contracts')]
 sample_descriptor_check: contracts_check sel4_sample_check
+
+# Judges the reader table of contracts/resource-reader/v1 that the generation builder writes. For each of 26
+# manifests the builder must return the bytes that scripts/check/check-resource-readers.py writes from the
+# schema and its rule, and it must refuse a table above the row bound. The judge first refuses ten builders
+# with one defect each. Boots nothing. Explicit, in no aggregate. Fails until the builder writes the table.
+[group('contracts')]
+resource_reader_builder_check:
+    python3 scripts/check/check-resource-readers.py

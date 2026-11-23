@@ -194,4 +194,4 @@ Everything else the profile refuses stays refused with its class.
 - [`../../contracts/zenoh-stock-fixtures/README.md`](../../contracts/zenoh-stock-fixtures/README.md)
 - [`../architecture/zenoh-transport.md`](../architecture/zenoh-transport.md)
 - [`../plans/ros2-wire-compatibility.md`](../plans/ros2-wire-compatibility.md)
-- [`../../roadmap/03-ros2-compatibility.md`](../../roadmap/03-ros2-compatibility.md#r1-broader-ros-2-topic-wire-profile)
+- [`../plans/ros2-wire-compatibility.md`](../plans/ros2-wire-compatibility.md#r1-broader-ros-2-topic-wire-profile)

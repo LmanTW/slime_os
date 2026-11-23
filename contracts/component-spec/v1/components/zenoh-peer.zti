@@ -4,7 +4,7 @@
   componentType = "application";
   version = "1.0.0";
   owner = "root";
-  purpose = "Listens on 127.0.0.1:7447, accepts the service's connection, completes a Zenoh session that declares no subscriber, and closes when the service closes.";
+  purpose = "Listens on 127.0.0.1:7447, accepts the service's connection, subscribes to the exchange key, prints each sample it receives, and closes when the service closes.";
   implementation = {
     provider = "workspace";
     binary = "zenoh-peer";
@@ -43,7 +43,7 @@
   };
   test = {
     testCondition = "the zenoh_service_booted_check gate boots the sel4-zenoh-service composition";
-    expectedResult = "the peer accepts the service's connection, completes a Zenoh session with no declared subscriber, and closes when the service closes";
+    expectedResult = "the peer accepts the service's connection, declares a subscriber on the exchange key, receives each publication of the publisher holder once, and closes when the service closes";
     passFailCriteria = "zenoh profile 0 service-booted check";
     requiredTestEnvironment = "zenoh_service_booted_check";
   };

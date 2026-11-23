@@ -185,3 +185,42 @@ fn generation_above_bound_refused() {
         Err(DecodeError::BadBounds)
     ));
 }
+
+/// Admission reaches the reader table: a row for an instance the generation
+/// declares is admitted, and the same row for an undeclared name is refused.
+#[test]
+fn a_reader_row_for_an_undeclared_instance_is_refused() {
+    use boot_contracts::resource_reader::{HEADER_BYTES, MAGIC, reader_identity};
+    let mut bytes = include_bytes!("../../fixtures/admission-readers-v5.bin").to_vec();
+    admit(&bytes, "aarch64-sel4-qemu-virt").expect("the builder's reader table");
+
+    let objects = read_offset(&bytes, wire::OFF_HEADER_OBJECT_OFFSET);
+    let count = u32::from_le_bytes(
+        bytes[wire::OFF_HEADER_OBJECT_COUNT..wire::OFF_HEADER_OBJECT_COUNT + 4]
+            .try_into()
+            .unwrap(),
+    ) as usize;
+    let (object, payload) = (0..count)
+        .map(|index| objects + index * wire::OBJECT_LEN)
+        .map(|object| {
+            (
+                object,
+                read_offset(&bytes, object + wire::OFF_OBJECT_PAYLOAD_OFFSET),
+            )
+        })
+        .find(|(_, payload)| bytes[*payload..].starts_with(&MAGIC))
+        .expect("the fixture carries a reader table");
+    // The first row's identity follows its 4-byte table id.
+    let identity = payload + HEADER_BYTES + 4;
+    assert_eq!(
+        bytes[identity..identity + 32],
+        reader_identity("entropy-service")
+    );
+    bytes[identity..identity + 32].copy_from_slice(&reader_identity("no-such-instance"));
+    authenticate_object(&mut bytes, object);
+    authenticate(&mut bytes);
+    assert_eq!(
+        admit(&bytes, "aarch64-sel4-qemu-virt").err(),
+        Some(GenerationError::UnsatisfiableResourceReaders)
+    );
+}

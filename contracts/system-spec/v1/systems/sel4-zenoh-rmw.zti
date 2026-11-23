@@ -1,0 +1,103 @@
+{
+  formatVersion = 1;
+  name = "sel4-zenoh-rmw";
+  generation = 173;
+  targetRequirement = "aarch64-sel4-qemu-virt";
+  bootAction = "wait-set";
+  bootstrapInstance = "init";
+  bootAttempts = 3;
+  components = [ "init"; "network-service"; "zenoh-rmw-node"; "zenoh-rmw-peer"; ];
+  placements = [
+    { component = "init"; spawnBudget = 0; };
+    { component = "network-service"; dependencies = []; };
+    { component = "zenoh-rmw-peer"; dependencies = []; };
+    { component = "zenoh-rmw-node"; dependencies = []; };
+  ];
+  instances = [
+    { name = "init"; executable = "init"; };
+    { name = "network-service"; executable = "network-service"; dependencies = []; bufferBytePages = 4; bufferCount = 4; mappingCount = 4; loanCount = 4; };
+    { name = "zenoh-rmw-peer"; executable = "zenoh-rmw-peer"; dependencies = []; mappingCount = 2; loanCount = 2; };
+    { name = "zenoh-rmw-node"; executable = "zenoh-rmw-node"; dependencies = []; mappingCount = 2; loanCount = 2; };
+  ];
+  grants = [
+    { name = "zenoh-rmw-peer-control"; capabilityKind = "endpoint"; source = "zenoh-rmw-peer"; target = "network-service"; rights = [ "send"; "recv"; ]; transferable = false; };
+    { name = "zenoh-rmw-peer-provision"; capabilityKind = "endpoint"; source = "network-service"; target = "zenoh-rmw-peer"; rights = [ "send"; "recv"; ]; transferable = true; };
+    { name = "zenoh-rmw-node-control"; capabilityKind = "endpoint"; source = "zenoh-rmw-node"; target = "network-service"; rights = [ "send"; "recv"; ]; transferable = false; };
+    { name = "zenoh-rmw-node-provision"; capabilityKind = "endpoint"; source = "network-service"; target = "zenoh-rmw-node"; rights = [ "send"; "recv"; ]; transferable = true; };
+    { name = "network-service-buffer-factory"; capabilityKind = "sharedBufferFactory"; source = "init"; target = "network-service"; rights = [ "bufferCreate"; ]; transferable = false; };
+  ];
+  slotPins = [
+    { holder = "network-service"; grant = "zenoh-rmw-peer-control"; slot = 2; reason = "encodedLayout"; };
+    { holder = "network-service"; grant = "zenoh-rmw-node-control"; slot = 3; reason = "encodedLayout"; };
+    { holder = "network-service"; grant = "network-service-buffer-factory"; slot = 1; reason = "encodedLayout"; };
+    { holder = "network-service"; grant = "zenoh-rmw-peer-provision"; slot = 29; reason = "encodedLayout"; };
+    { holder = "network-service"; grant = "zenoh-rmw-node-provision"; slot = 30; reason = "encodedLayout"; };
+  ];
+  extraBindings = [];
+  mintedBindings = [];
+  commandBindings = [];
+  defaultImageBytes = 65536;
+  imageSizes = [ { component = "network-service"; bytes = 262144; }; ];
+  sharedBufferBudgetObject = true;
+  bootLayoutObject = true;
+  interfaceSchemas = [];
+  state = [];
+  notifications = [
+    { name = "zenoh-network-request"; source = "zenoh-rmw-peer"; target = "network-service"; };
+    { name = "zenoh-rmw-peer-done"; source = "network-service"; target = "zenoh-rmw-peer"; };
+    { name = "zenoh-rmw-node-done"; source = "network-service"; target = "zenoh-rmw-node"; };
+  ];
+  notificationBindings = [
+    { grant = "zenoh-network-request"; holder = "zenoh-rmw-peer"; role = "signal"; slot = 0; };
+    { grant = "zenoh-network-request"; holder = "zenoh-rmw-node"; role = "signal"; slot = 1; };
+    { grant = "zenoh-network-request"; holder = "network-service"; role = "wait"; slot = 0; };
+    { grant = "zenoh-rmw-peer-done"; holder = "network-service"; role = "signal"; slot = 1; };
+    { grant = "zenoh-rmw-peer-done"; holder = "zenoh-rmw-peer"; role = "wait"; slot = 1; };
+    { grant = "zenoh-rmw-node-done"; holder = "network-service"; role = "signal"; slot = 2; };
+    { grant = "zenoh-rmw-node-done"; holder = "zenoh-rmw-node"; role = "wait"; slot = 0; };
+  ];
+  bootProfiles = [];
+  clockAuthority = [
+    { holder = "network-service"; simulatedAdvance = false; simulatedRead = false; timerQuota = 1; timerUse = true; timerNotification = "zenoh-network-request"; timerBadgeBit = 2; };
+    { holder = "zenoh-rmw-peer"; simulatedAdvance = false; simulatedRead = false; timerQuota = 1; timerUse = true; timerNotification = "zenoh-rmw-peer-done"; timerBadgeBit = 3; };
+    { holder = "zenoh-rmw-node"; simulatedAdvance = false; simulatedRead = false; timerQuota = 1; timerUse = true; timerNotification = "zenoh-rmw-node-done"; timerBadgeBit = 3; };
+  ];
+  clockAuthorityObject = true;
+  ioResourceBudget = [];
+  ioResourceBudgetObject = false;
+  networkDestinations = [
+    { holder = "zenoh-rmw-peer"; transport = "tcp"; addressKind = "ipv4"; address = "127.0.0.1"; port = 7447; rights = [ "connect"; "send"; "recv"; ]; queueDepth = 4; byteBudget = 4096; timerBudget = 1; retryLimit = 2; reconnectLimit = 0; socketLimit = 1; listenerLimit = 0; dnsRecordLimit = 0; };
+  ];
+  networkDestinationsObject = true;
+  networkApplications = [
+    { holder = "zenoh-rmw-peer"; controlBinding = "zenoh-rmw-peer-control"; provisionBinding = "zenoh-rmw-peer-provision"; supervisionBinding = ""; requestNotification = "zenoh-network-request"; completionNotification = "zenoh-rmw-peer-done"; role = "client"; backend = "loopback"; localAddress = "0.0.0.0"; localPort = 0; admittedPeer = ""; admittedPeerAddress = ""; rights = []; backlog = 0; acceptedSocketLimit = 0; byteBudget = 0; timerBudget = 0; queueDepth = 0; retryLimit = 0; reconnectLimit = 0; keepaliveMs = 0; idleTimeoutMs = 10000; hopLimit = 64; nagle = true; rxBufferBytes = 2048; txBufferBytes = 2048; };
+    { holder = "zenoh-rmw-node"; controlBinding = "zenoh-rmw-node-control"; provisionBinding = "zenoh-rmw-node-provision"; supervisionBinding = ""; requestNotification = "zenoh-network-request"; completionNotification = "zenoh-rmw-node-done"; role = "listener"; backend = "loopback"; localAddress = "127.0.0.1"; localPort = 7447; admittedPeer = "zenoh-rmw-peer"; admittedPeerAddress = ""; rights = [ "listen"; "send"; "recv"; ]; backlog = 1; acceptedSocketLimit = 1; byteBudget = 8192; timerBudget = 2; queueDepth = 4; retryLimit = 2; reconnectLimit = 0; keepaliveMs = 0; idleTimeoutMs = 10000; hopLimit = 64; nagle = true; rxBufferBytes = 2048; txBufferBytes = 2048; };
+  ];
+  networkApplicationsObject = true;
+  networkInterfaces = [];
+  networkInterfacesObject = false;
+  blockRingAuthority = [];
+  blockRingAuthorityObject = false;
+  waitSet = [
+    { waiter = "network-service"; notification = "zenoh-network-request"; badgeBit = 0; kind = "stream"; drainSlot = 2; };
+    { waiter = "network-service"; notification = "zenoh-network-request"; badgeBit = 1; kind = "stream"; drainSlot = 3; };
+    { waiter = "network-service"; notification = "zenoh-network-request"; badgeBit = 2; kind = "timer"; };
+    { waiter = "zenoh-rmw-peer"; notification = "zenoh-rmw-peer-done"; badgeBit = 1; kind = "stream"; drainSlot = 0; };
+    { waiter = "zenoh-rmw-peer"; notification = "zenoh-rmw-peer-done"; badgeBit = 3; kind = "timer"; };
+    { waiter = "zenoh-rmw-node"; notification = "zenoh-rmw-node-done"; badgeBit = 2; kind = "stream"; drainSlot = 0; };
+    { waiter = "zenoh-rmw-node"; notification = "zenoh-rmw-node-done"; badgeBit = 3; kind = "timer"; };
+  ];
+  waitSetObject = true;
+  lifecyclePolicy = {
+    initialState = "Initialize";
+    terminalState = "Error";
+    transitions = [ { from = "Initialize"; to = "Running"; }; { from = "Running"; to = "Error"; }; ];
+    restarts = [];
+    dependencies = [];
+    parameters = [ { holder = "network-service"; subject = "network-service"; read = true; write = true; }; ];
+  };
+  recording = [];
+  recordingObject = false;
+  deploymentConstraint = "AArch64 seL4 QEMU Zenoh Profile 0 over loopback TCP without a NIC: an rmw_zenoh node on a graph link and a native peer on a plain link. No router, scouting, liveliness token or physical device claim.";
+  acceptanceCriteria = "The rmw_zenoh node and its native peer each publish four std_msgs/String samples on the chatter key and are each delivered the other's four over one session on 127.0.0.1:7447, and both end with the session closed.";
+}

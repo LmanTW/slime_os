@@ -3,7 +3,7 @@
 | | |
 | --- | --- |
 | Route | hardware |
-| Depends on | [Hardware H track](../../roadmap/04-platform-hardware.md) daily-driver quality goals; the capability-matrix horizon questions whether accounting is authority or read-only telemetry (EnergyAccount row) |
+| Depends on | [Hardware H track](../plans/framework-hardware.md#slice-acceptance) daily-driver quality goals; the capability-matrix horizon questions whether accounting is authority or read-only telemetry (EnergyAccount row) |
 | Enables | background power budgets carried as grants; battery-policy as manifest data |
 
 ## Motivation

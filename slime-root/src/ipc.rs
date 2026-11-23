@@ -608,6 +608,7 @@ pub const MAX_BINDING_NAME: usize = MAX_MESSAGE_BYTES;
 /// component learns its own layout, which it already knew at compile time, and
 /// nothing else.
 use boot_contracts::boot_layout;
+use boot_contracts::resource_reader::{Resource, ResourceReaders, reader_identity};
 
 pub fn resolve_binding_slot(
     generation: &boot_contracts::generation::Generation<'_>,
@@ -1258,6 +1259,54 @@ pub fn read_graph_participants(
     Some(written / GRAPH_ROW_BYTES)
 }
 
+/// Whether this generation declares `instance` a reader of `resource`.
+///
+/// The whole authority test for the tables the root serves to a declared
+/// reader. The generation carries the readers in its `resource-reader/v1`
+/// object, which the builder writes and admission checks, so the root holds no
+/// component name: a generation without a row for the caller answers no.
+pub fn is_declared_reader(
+    generation: &boot_contracts::generation::Generation<'_>,
+    instance: usize,
+    resource: Resource,
+) -> bool {
+    let readers = crate::generation::resource_readers_object(generation);
+    generation
+        .instance(instance)
+        .is_ok_and(|caller| names_reader(readers.as_ref(), resource, caller.name))
+}
+
+/// The lookup of `is_declared_reader`, separated from the generation so it can
+/// be exercised against a decoded table.
+pub fn names_reader(
+    readers: Option<&ResourceReaders<'_>>,
+    resource: Resource,
+    caller: &str,
+) -> bool {
+    readers.is_some_and(|readers| readers.names(resource, &reader_identity(caller)))
+}
+
+/// Copy the `row_bytes`-wide rows `rows` yields into `out`, stopping at the
+/// end of `out` or at the staged bound, and return how many were written.
+fn copy_rows<'a>(
+    rows: core::ops::Range<usize>,
+    row_bytes: usize,
+    out: &mut [u8],
+    row: impl Fn(usize) -> Option<&'a [u8]>,
+) -> Option<usize> {
+    let per_call = crate::transfer_window::MAX_STAGED_ARRAY_BYTES / row_bytes;
+    let mut written = 0;
+    for index in rows {
+        let end = written + row_bytes;
+        if end > out.len() || written / row_bytes >= per_call {
+            break;
+        }
+        out[written..end].copy_from_slice(row(index)?);
+        written = end;
+    }
+    Some(written / row_bytes)
+}
+
 pub const NETWORK_DESTINATION_ROW_BYTES: usize = boot_contracts::network_destination::ENTRY_BYTES;
 pub const NETWORK_DESTINATION_ROWS_PER_CALL: usize =
     crate::transfer_window::MAX_STAGED_ARRAY_BYTES / NETWORK_DESTINATION_ROW_BYTES;
@@ -1267,8 +1316,8 @@ pub const NETWORK_INTERFACE_ROWS_PER_CALL: usize =
     crate::transfer_window::MAX_STAGED_ARRAY_BYTES / NETWORK_INTERFACE_ROW_BYTES;
 
 /// Copy authenticated IO11 interface rows only to the generation's declared
-/// `network-service`, on `read_network_destinations`' exact shape. Which row
-/// is the caller's own is decided by the caller from its holder identity.
+/// reader, on `read_network_destinations`' exact shape. Which row is the
+/// caller's own is decided by the caller from its holder identity.
 pub fn read_network_interface(
     generation: &boot_contracts::generation::Generation<'_>,
     instance: usize,
@@ -1278,33 +1327,21 @@ pub fn read_network_interface(
     let Some(Ok(interfaces)) = crate::generation::network_interface_object(generation) else {
         return None;
     };
-    let caller = generation.instance(instance).ok()?;
-    if caller.name != "network-service" {
+    if !is_declared_reader(generation, instance, Resource::NetworkInterfaces) {
         return None;
     }
-    let mut written = 0;
-    for index in cursor..interfaces.interface_count() {
-        let end = written + NETWORK_INTERFACE_ROW_BYTES;
-        if end > out.len()
-            || written / NETWORK_INTERFACE_ROW_BYTES >= NETWORK_INTERFACE_ROWS_PER_CALL
-        {
-            break;
-        }
-        out[written..end].copy_from_slice(interfaces.entry_bytes(index)?);
-        written = end;
-    }
-    Some(written / NETWORK_INTERFACE_ROW_BYTES)
+    let rows = cursor..interfaces.interface_count();
+    let row = |index| interfaces.entry_bytes(index);
+    copy_rows(rows, NETWORK_INTERFACE_ROW_BYTES, out, row)
 }
 
 pub const ENTROPY_AUTHORITY_ROW_BYTES: usize = boot_contracts::entropy_authority::ENTRY_BYTES;
 pub const ENTROPY_AUTHORITY_ROWS_PER_CALL: usize =
     crate::transfer_window::MAX_STAGED_ARRAY_BYTES / ENTROPY_AUTHORITY_ROW_BYTES;
-/// The one instance the entropy table is served to.
-pub const ENTROPY_SERVICE_INSTANCE: &str = "entropy-service";
 
-/// Copy authenticated entropy-authority rows only to the instance named
-/// `entropy-service`, on `read_network_interface`'s exact shape. The root
-/// draws no entropy and charges no budget.
+/// Copy authenticated entropy-authority rows only to the generation's declared
+/// reader, on `read_network_interface`'s exact shape. The root draws no
+/// entropy and charges no budget.
 pub fn read_entropy_authority(
     generation: &boot_contracts::generation::Generation<'_>,
     instance: usize,
@@ -1314,46 +1351,35 @@ pub fn read_entropy_authority(
     let Some(Ok(authority)) = crate::generation::entropy_authority_object(generation) else {
         return None;
     };
-    let caller = generation.instance(instance).ok()?;
-    copy_entropy_authority_rows(&authority, caller.name, cursor, out)
+    let reader = is_declared_reader(generation, instance, Resource::EntropyAuthority);
+    copy_entropy_authority_rows(&authority, reader, cursor, out)
 }
 
 /// The caller gate and paging of `read_entropy_authority`, separated from the
 /// generation lookup so both can be exercised against a decoded table.
 pub fn copy_entropy_authority_rows(
     authority: &boot_contracts::entropy_authority::EntropyAuthority<'_>,
-    caller: &str,
+    reader: bool,
     cursor: usize,
     out: &mut [u8],
 ) -> Option<usize> {
-    if caller != ENTROPY_SERVICE_INSTANCE {
+    if !reader {
         return None;
     }
-    let mut written = 0;
-    for index in cursor..authority.holder_count() {
-        let end = written + ENTROPY_AUTHORITY_ROW_BYTES;
-        if end > out.len()
-            || written / ENTROPY_AUTHORITY_ROW_BYTES >= ENTROPY_AUTHORITY_ROWS_PER_CALL
-        {
-            break;
-        }
-        out[written..end].copy_from_slice(authority.entry_bytes(index)?);
-        written = end;
-    }
-    Some(written / ENTROPY_AUTHORITY_ROW_BYTES)
+    let rows = cursor..authority.holder_count();
+    let row = |index| authority.entry_bytes(index);
+    copy_rows(rows, ENTROPY_AUTHORITY_ROW_BYTES, out, row)
 }
 
 pub const ZENOH_GRANTS_ROW_BYTES: usize = slime_proto::zenoh_service_grants_table_wire::ENTRY_BYTES;
 pub const ZENOH_GRANTS_ROWS_PER_CALL: usize =
     crate::transfer_window::MAX_STAGED_ARRAY_BYTES / ZENOH_GRANTS_ROW_BYTES;
-/// The one instance the grants table is served to.
-pub const ZENOH_GRANTS_READER_INSTANCE: &str = "zenoh-service";
 /// The cursor that asks for the limits record instead of rows. A row index is below `maxRows` of the table contract, so no
 /// row has this cursor.
 pub const ZENOH_LIMITS_CURSOR: usize = slime_proto::zenoh_service_limits_wire::LIMITS_CURSOR;
 pub const ZENOH_LIMITS_BYTES: usize = slime_proto::zenoh_service_limits_wire::RECORD_LEN;
 
-/// Copy authenticated Zenoh grants rows only to the instance named `zenoh-service`, on
+/// Copy authenticated Zenoh grants rows only to the generation's declared reader, on
 /// `read_entropy_authority`'s exact shape. The root decides no grant and opens no session.
 pub fn read_zenoh_grants(
     generation: &boot_contracts::generation::Generation<'_>,
@@ -1364,11 +1390,11 @@ pub fn read_zenoh_grants(
     let Some(Ok(table)) = crate::generation::zenoh_grants_object(generation) else {
         return None;
     };
-    let caller = generation.instance(instance).ok()?;
-    copy_zenoh_grants_rows(&table, caller.name, cursor, out)
+    let reader = is_declared_reader(generation, instance, Resource::ZenohGrants);
+    copy_zenoh_grants_rows(&table, reader, cursor, out)
 }
 
-/// Copy the authenticated Zenoh limits record, to the instance named `zenoh-service` only. It returns the record's byte
+/// Copy the authenticated Zenoh limits record, to the generation's declared reader only. It returns the record's byte
 /// length, which is not a row count.
 pub fn read_zenoh_limits(
     generation: &boot_contracts::generation::Generation<'_>,
@@ -1376,14 +1402,14 @@ pub fn read_zenoh_limits(
     out: &mut [u8],
 ) -> Option<usize> {
     let object = crate::generation::zenoh_limits_object(generation)?;
-    let caller = generation.instance(instance).ok()?;
-    copy_zenoh_limits(object, caller.name, out)
+    let reader = is_declared_reader(generation, instance, Resource::ZenohLimits);
+    copy_zenoh_limits(object, reader, out)
 }
 
 /// The caller gate of `read_zenoh_limits`, separated from the generation lookup so it can be exercised on bytes. A record
 /// that does not decode is not served.
-pub fn copy_zenoh_limits(record: &[u8], caller: &str, out: &mut [u8]) -> Option<usize> {
-    if caller != ZENOH_GRANTS_READER_INSTANCE
+pub fn copy_zenoh_limits(record: &[u8], reader: bool, out: &mut [u8]) -> Option<usize> {
+    if !reader
         || out.len() < ZENOH_LIMITS_BYTES
         || slime_proto::zenoh_service_limits::Limits::decode(record).is_err()
     {
@@ -1397,30 +1423,23 @@ pub fn copy_zenoh_limits(record: &[u8], caller: &str, out: &mut [u8]) -> Option<
 /// can be exercised against a decoded table.
 pub fn copy_zenoh_grants_rows(
     table: &slime_proto::zenoh_service_grants_table::Table<'_>,
-    caller: &str,
+    reader: bool,
     cursor: usize,
     out: &mut [u8],
 ) -> Option<usize> {
-    if caller != ZENOH_GRANTS_READER_INSTANCE {
+    if !reader {
         return None;
     }
-    let mut written = 0;
-    for index in cursor..table.row_count() {
-        let end = written + ZENOH_GRANTS_ROW_BYTES;
-        if end > out.len() || written / ZENOH_GRANTS_ROW_BYTES >= ZENOH_GRANTS_ROWS_PER_CALL {
-            break;
-        }
-        out[written..end].copy_from_slice(table.row_bytes(index)?);
-        written = end;
-    }
-    Some(written / ZENOH_GRANTS_ROW_BYTES)
+    let rows = cursor..table.row_count();
+    let row = |index| table.row_bytes(index);
+    copy_rows(rows, ZENOH_GRANTS_ROW_BYTES, out, row)
 }
 
 pub const NETWORK_APPLICATION_ROW_BYTES: usize = boot_contracts::network_application::ENTRY_BYTES;
 pub const NETWORK_APPLICATION_ROWS_PER_CALL: usize =
     crate::transfer_window::MAX_STAGED_ARRAY_BYTES / NETWORK_APPLICATION_ROW_BYTES;
 
-/// Copy authenticated application rows only to the badge-derived network service.
+/// Copy authenticated application rows only to the generation's declared reader.
 /// Binding resolution and application policy belong to that userspace service.
 pub fn read_network_application(
     generation: &boot_contracts::generation::Generation<'_>,
@@ -1429,12 +1448,12 @@ pub fn read_network_application(
     out: &mut [u8],
 ) -> Option<usize> {
     let applications = crate::generation::network_application_object(generation)?;
-    let caller = generation.instance(instance).ok()?;
-    page_network_application(caller.name, applications, cursor, out)
+    let reader = is_declared_reader(generation, instance, Resource::NetworkApplications);
+    page_network_application(reader, applications, cursor, out)
 }
 
 fn page_network_application(
-    reader: &str,
+    reader: bool,
     applications: Result<
         boot_contracts::network_application::NetworkApplications<'_>,
         boot_contracts::network_application::DecodeError,
@@ -1442,26 +1461,17 @@ fn page_network_application(
     cursor: usize,
     out: &mut [u8],
 ) -> Option<usize> {
-    if reader != "network-service" {
+    if !reader {
         return None;
     }
     let applications = applications.ok()?;
-    let mut written = 0;
-    for index in cursor..applications.application_count() {
-        let end = written + NETWORK_APPLICATION_ROW_BYTES;
-        if end > out.len()
-            || written / NETWORK_APPLICATION_ROW_BYTES >= NETWORK_APPLICATION_ROWS_PER_CALL
-        {
-            break;
-        }
-        out[written..end].copy_from_slice(applications.entry_bytes(index)?);
-        written = end;
-    }
-    Some(written / NETWORK_APPLICATION_ROW_BYTES)
+    let rows = cursor..applications.application_count();
+    let row = |index| applications.entry_bytes(index);
+    copy_rows(rows, NETWORK_APPLICATION_ROW_BYTES, out, row)
 }
 
-/// Copy authenticated IO4 entries only to the generation's declared
-/// `network-service`. This is identity gating, not destination policy.
+/// Copy authenticated IO4 entries only to the generation's declared reader.
+/// This is identity gating, not destination policy.
 pub fn read_network_destinations(
     generation: &boot_contracts::generation::Generation<'_>,
     instance: usize,
@@ -1471,47 +1481,27 @@ pub fn read_network_destinations(
     let Some(Ok(destinations)) = crate::generation::network_destinations_object(generation) else {
         return None;
     };
-    let caller = generation.instance(instance).ok()?;
-    if caller.name != "network-service" {
+    if !is_declared_reader(generation, instance, Resource::NetworkDestinations) {
         return None;
     }
-    let mut written = 0;
-    for index in cursor..destinations.destination_count() {
-        let end = written + NETWORK_DESTINATION_ROW_BYTES;
-        if end > out.len()
-            || written / NETWORK_DESTINATION_ROW_BYTES >= NETWORK_DESTINATION_ROWS_PER_CALL
-        {
-            break;
-        }
-        out[written..end].copy_from_slice(destinations.entry_bytes(index)?);
-        written = end;
-    }
-    Some(written / NETWORK_DESTINATION_ROW_BYTES)
+    let rows = cursor..destinations.destination_count();
+    let row = |index| destinations.entry_bytes(index);
+    copy_rows(rows, NETWORK_DESTINATION_ROW_BYTES, out, row)
 }
 
 pub const BLOCK_RING_AUTHORITY_ROW_BYTES: usize = boot_contracts::block_authority::ENTRY_BYTES;
 pub const BLOCK_RING_AUTHORITY_ROWS_PER_CALL: usize =
     crate::transfer_window::MAX_STAGED_ARRAY_BYTES / BLOCK_RING_AUTHORITY_ROW_BYTES;
 
-/// The one *executable* authorized to read the B83 authority table.
-///
-/// The executable rather than the instance name (B84): a plane with two disks
-/// declares this same audited binary twice, under two composition-chosen
-/// instance names, and both instances enforce the table. Gating on an instance
-/// name would mean every such composition had to spell one blessed name or
-/// patch this constant, and the property being checked is "is this the driver
-/// that enforces these rows", which is a property of the code, not of the name
-/// a composition happened to give one copy of it.
-///
-/// Still a literal rather than a manifest field, matching IO4's
-/// `network-service` gate: a second, different block driver would need its own
-/// declared name here, which is the review this literal forces.
-pub const BLOCK_DRIVER_EXECUTABLE: &str = "virtio-blk-driver";
-
-/// Copy authenticated B83 entries only to the generation's declared block
-/// driver, and only the rows for the device that driver instance was installed
+/// Copy authenticated B83 entries only to the generation's declared readers,
+/// and only the rows for the device that driver instance was installed
 /// against. This is identity gating, not block policy: the root reads no right
 /// here, because refusing a write on a read-only ring is a device decision.
+///
+/// A plane with two disks declares one audited driver binary twice, under two
+/// composition-chosen instance names (B84). The builder writes one reader row
+/// per instance of that executable, so both read and neither name is spelled
+/// here.
 ///
 /// Filtering by device is least authority, not convenience. Two driver
 /// instances serve two disks; each enforces only its own, so handing either the
@@ -1528,11 +1518,10 @@ pub fn read_block_ring_authority(
     let Some(Ok(authority)) = crate::generation::block_ring_authority_object(generation) else {
         return None;
     };
-    let caller = generation.instance(instance).ok()?;
-    let executable = generation.executable(caller.executable).ok()?;
-    if executable.name != BLOCK_DRIVER_EXECUTABLE {
+    if !is_declared_reader(generation, instance, Resource::BlockRingAuthority) {
         return None;
     }
+    let caller = generation.instance(instance).ok()?;
     // Which device this instance drives, from the budget that installed it. A
     // driver with no declared budget holds no device authority at all, so it
     // reads nothing rather than everything.
@@ -1840,42 +1829,37 @@ mod tests {
         let table = NetworkApplications::decode(&bytes).unwrap();
         let mut out = [0xa5; MAX_APPLICATIONS * ENTRY_BYTES];
         assert_eq!(
-            page_network_application("network-service", Ok(table), 0, &mut out),
+            page_network_application(true, Ok(table), 0, &mut out),
             Some(NETWORK_APPLICATION_ROWS_PER_CALL)
         );
         let copied = NETWORK_APPLICATION_ROWS_PER_CALL * ENTRY_BYTES;
         assert_eq!(&out[..copied], &bytes[HEADER_BYTES..HEADER_BYTES + copied]);
         assert!(out[copied..].iter().all(|byte| *byte == 0xa5));
         assert_eq!(
-            page_network_application("network-service", Ok(table), 3, &mut out),
+            page_network_application(true, Ok(table), 3, &mut out),
             Some(1)
         );
         assert_eq!(&out[..ENTRY_BYTES], table.entry_bytes(3).unwrap());
         for cursor in [MAX_APPLICATIONS, usize::MAX] {
             assert_eq!(
-                page_network_application("network-service", Ok(table), cursor, &mut out),
+                page_network_application(true, Ok(table), cursor, &mut out),
                 Some(0)
             );
         }
         let before = out;
         assert_eq!(
-            page_network_application("ungranted-reader", Ok(table), 0, &mut out),
+            page_network_application(false, Ok(table), 0, &mut out),
             None
         );
         assert_eq!(out, before);
         assert_eq!(
-            page_network_application("network-service", Ok(table), 0, &mut out[..ENTRY_BYTES - 1]),
+            page_network_application(true, Ok(table), 0, &mut out[..ENTRY_BYTES - 1]),
             Some(0)
         );
         assert_eq!(out, before);
         bytes[OFF_HEADER_REQUIRED_FLAGS] = 1;
         assert_eq!(
-            page_network_application(
-                "network-service",
-                NetworkApplications::decode(&bytes),
-                0,
-                &mut out
-            ),
+            page_network_application(true, NetworkApplications::decode(&bytes), 0, &mut out),
             None
         );
         assert_eq!(out, before);
@@ -2416,9 +2400,67 @@ mod tests {
         ea::HEADER_BYTES + count * ea::ENTRY_BYTES
     }
 
+    /// The reader table the builder writes for a generation that carries every
+    /// table and declares each reader once, plus a second block driver.
+    fn declared_readers() -> alloc::vec::Vec<u8> {
+        let mut rows = [
+            (Resource::EntropyAuthority, "entropy-service"),
+            (Resource::ZenohGrants, "zenoh-service"),
+            (Resource::ZenohLimits, "zenoh-service"),
+            (Resource::NetworkDestinations, "network-service"),
+            (Resource::NetworkInterfaces, "network-service"),
+            (Resource::NetworkApplications, "network-service"),
+            (Resource::BlockRingAuthority, "block-driver-a"),
+            (Resource::BlockRingAuthority, "block-driver-b"),
+        ]
+        .map(|(resource, name)| (resource.id(), reader_identity(name)));
+        rows.sort_unstable();
+        crate::generation::resource_readers_bytes(&rows)
+    }
+
+    /// Whether the builder's table declares `caller` a reader of `resource`.
+    fn reads(resource: Resource, caller: &str) -> bool {
+        let bytes = declared_readers();
+        let readers = ResourceReaders::decode(&bytes).unwrap();
+        names_reader(Some(&readers), resource, caller)
+    }
+
+    #[test]
+    fn a_table_is_served_only_to_the_readers_its_rows_name() {
+        const NAMES: [&str; 7] = [
+            "entropy-service",
+            "zenoh-service",
+            "network-service",
+            "block-driver-a",
+            "block-driver-b",
+            "virtio-blk-driver",
+            "",
+        ];
+        for resource in Resource::ALL {
+            let expected: &[&str] = match resource {
+                Resource::EntropyAuthority => &["entropy-service"],
+                Resource::ZenohGrants | Resource::ZenohLimits => &["zenoh-service"],
+                Resource::BlockRingAuthority => &["block-driver-a", "block-driver-b"],
+                _ => &["network-service"],
+            };
+            for name in NAMES {
+                assert_eq!(
+                    reads(resource, name),
+                    expected.contains(&name),
+                    "{resource:?} {name:?}"
+                );
+            }
+            assert!(
+                !names_reader(None, resource, expected[0]),
+                "a generation without the object has no reader"
+            );
+        }
+    }
+
     #[test]
     fn entropy_authority_rows_are_served_only_to_the_entropy_service() {
         use boot_contracts::entropy_authority::EntropyAuthority;
+        let reads = |caller: &str| reads(Resource::EntropyAuthority, caller);
         let mut bytes = [0u8; boot_contracts::entropy_authority::MAX_BYTES];
         let len = entropy_table(3, &mut bytes);
         let table = EntropyAuthority::decode(&bytes[..len]).unwrap();
@@ -2431,7 +2473,7 @@ mod tests {
             "",
         ] {
             assert_eq!(
-                copy_entropy_authority_rows(&table, caller, 0, &mut out),
+                copy_entropy_authority_rows(&table, reads(caller), 0, &mut out),
                 None,
                 "{caller}"
             );
@@ -2441,7 +2483,7 @@ mod tests {
             "a refused caller receives no byte"
         );
         assert_eq!(
-            copy_entropy_authority_rows(&table, "entropy-service", 0, &mut out),
+            copy_entropy_authority_rows(&table, reads("entropy-service"), 0, &mut out),
             Some(3)
         );
         for index in 0..3 {
@@ -2461,7 +2503,7 @@ mod tests {
         let len = entropy_table(10, &mut bytes);
         let table = EntropyAuthority::decode(&bytes[..len]).unwrap();
         let mut out = [0u8; 2 * ENTROPY_AUTHORITY_ROWS_PER_CALL * ENTROPY_AUTHORITY_ROW_BYTES];
-        let service = ENTROPY_SERVICE_INSTANCE;
+        let service = true;
         assert_eq!(
             copy_entropy_authority_rows(&table, service, 0, &mut out),
             Some(9)
@@ -2564,11 +2606,12 @@ mod tests {
 
     #[test]
     fn the_limits_cursor_returns_the_record_to_the_zenoh_service_only() {
+        let reads = |caller: &str| reads(Resource::ZenohLimits, caller);
         let record = limits_record(2);
         let mut out = [0u8; ZENOH_GRANTS_ROWS_PER_CALL * ZENOH_GRANTS_ROW_BYTES];
         for caller in ["ros2-demo-publisher", "zenoh-service2", "zenoh", ""] {
             assert_eq!(
-                copy_zenoh_limits(&record, caller, &mut out),
+                copy_zenoh_limits(&record, reads(caller), &mut out),
                 None,
                 "{caller}"
             );
@@ -2578,7 +2621,7 @@ mod tests {
             "a refused caller receives no byte"
         );
         assert_eq!(
-            copy_zenoh_limits(&record, ZENOH_GRANTS_READER_INSTANCE, &mut out),
+            copy_zenoh_limits(&record, reads("zenoh-service"), &mut out),
             Some(ZENOH_LIMITS_BYTES),
             "the count is the record's length and not a count of rows"
         );
@@ -2590,7 +2633,7 @@ mod tests {
 
     #[test]
     fn a_limits_record_that_does_not_decode_is_not_served() {
-        let service = ZENOH_GRANTS_READER_INSTANCE;
+        let service = true;
         let mut out = [0u8; ZENOH_LIMITS_BYTES];
         let mut corrupt = limits_record(2);
         corrupt[0] = b'X';
@@ -2617,6 +2660,7 @@ mod tests {
     #[test]
     fn zenoh_grants_rows_are_served_only_to_the_zenoh_service() {
         use slime_proto::zenoh_service_grants_table::Table;
+        let reads = |caller: &str| reads(Resource::ZenohGrants, caller);
         let mut bytes = [0u8; 4 * 1024];
         let len = zenoh_grants_table(3, &mut bytes);
         let table = Table::decode(&bytes[..len]).unwrap();
@@ -2629,7 +2673,7 @@ mod tests {
             "",
         ] {
             assert_eq!(
-                copy_zenoh_grants_rows(&table, caller, 0, &mut out),
+                copy_zenoh_grants_rows(&table, reads(caller), 0, &mut out),
                 None,
                 "{caller}"
             );
@@ -2639,7 +2683,7 @@ mod tests {
             "a refused caller receives no byte"
         );
         assert_eq!(
-            copy_zenoh_grants_rows(&table, ZENOH_GRANTS_READER_INSTANCE, 0, &mut out),
+            copy_zenoh_grants_rows(&table, reads("zenoh-service"), 0, &mut out),
             Some(3)
         );
         for index in 0..3 {
@@ -2660,7 +2704,7 @@ mod tests {
         let len = zenoh_grants_table(7, &mut bytes);
         let table = Table::decode(&bytes[..len]).unwrap();
         let mut out = [0u8; 2 * ZENOH_GRANTS_ROWS_PER_CALL * ZENOH_GRANTS_ROW_BYTES];
-        let service = ZENOH_GRANTS_READER_INSTANCE;
+        let service = true;
         assert_eq!(
             copy_zenoh_grants_rows(&table, service, 0, &mut out),
             Some(6)

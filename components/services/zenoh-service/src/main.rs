@@ -19,8 +19,9 @@ use slime_components::network_io::{
 };
 use slime_components::tick_clock::TickClock;
 use slime_components::zenoh_link::LinkOf;
+use slime_components::zenoh_link_limits_v3::SERVICE;
 use slime_components::zenoh_node::{self as node, Connection, Stream};
-use slime_components::zenoh_profile0::session::{Config, Params, Role};
+use slime_components::zenoh_profile0::session::{Config, Role};
 use slime_components::zenoh_service::Core;
 use slime_components::zenoh_service::{OverLink, Row};
 use slime_components::zenoh_service_server::Server;
@@ -39,8 +40,8 @@ slime_rt::entry!(main);
 /// What the service was built to hold. `Core` is sized by them, so the generation's grants may hold at most `ROWS` rows
 /// for at most `HOLDERS` holders. The generation declares its own limits. A declaration above any of these is refused at
 /// start, and so is one below `SLOTS` or `PAYLOAD`, which the core cannot enforce.
-pub const HOLDERS: usize = 2;
-pub const ROWS: usize = 2;
+pub const HOLDERS: usize = 4;
+pub const ROWS: usize = 6;
 pub const SLOTS: usize = 4;
 pub const PAYLOAD: usize = 12;
 const STACK_BYTES: u32 = 32768;
@@ -63,7 +64,7 @@ const DEADLINE_MS: i64 = 20_000;
 const CLOSE_PUMPS: usize = 64;
 
 type Holders<'k> = Core<'k, HOLDERS, SLOTS, PAYLOAD, ROWS>;
-pub type Link<'a, 'b> = LinkOf<Stream<Wire<'a, 'b>>, 514, 1, 5, 129, PAYLOAD, 8, 4>;
+pub type Link<'a, 'b> = LinkOf<Stream<Wire<'a, 'b>>, 514, 2, 5, 129, PAYLOAD, 8, 4>;
 
 /// One connection of the network service, driven without blocking.
 pub struct Wire<'a, 'b> {
@@ -165,12 +166,7 @@ fn main(_startup_arg: u32) {
     let rate = monotonic_frequency().unwrap_or_else(|_| fail(b"clock rate"));
     let base = monotonic_read().unwrap_or_else(|_| fail(b"clock read"));
     let clock = TickClock::new(rate, base).unwrap_or_else(|_| fail(b"clock rate too slow"));
-    let params = Params {
-        local: 3,
-        per_side: 2,
-        events: 4,
-        ..Params::DEMO
-    };
+    let params = SERVICE.params();
     let mut core = Holders::new(live, [0xe0; 16], &params).unwrap_or_else(|_| fail(b"grants core"));
     let mut over = OverLink::<PAYLOAD>::new();
     let mut server = Server::<HOLDERS>::new();

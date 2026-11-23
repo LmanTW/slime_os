@@ -7,22 +7,28 @@
 //! refused here with the matching class. Nothing allocates.
 
 use super::{
-    ATTACHMENT_GID_LEN_AT, Bounds, EXT_ATTACHMENT, EXT_WIRE_EXPR, FLAG_BIT5, FLAG_BIT6, FLAG_Z,
-    GID_BYTES, ID_CLOSE, ID_D_SUBSCRIBER, ID_DECLARE, ID_FRAME, ID_INIT, ID_KEEP_ALIVE, ID_OPEN,
-    ID_PUSH, ID_PUT, MAX_ATTACHMENT_BYTES, MAX_BATCH_BYTES, MAX_COOKIE_BYTES, Mapping, Refusal,
-    STREAM_LENGTH_BYTES, U_SUBSCRIBER_HEADER, WIRE_EXPR_FLAG_NAMED, WIRE_EXPR_FLAG_SENDER,
-    key_expression,
+    ATTACHMENT_GID_LEN_AT, Bounds, EXT_ATTACHMENT, EXT_QOS_UNIT, EXT_WIRE_EXPR, FLAG_BIT5,
+    FLAG_BIT6, FLAG_Z, GID_BYTES, ID_CLOSE, ID_D_SUBSCRIBER, ID_DECLARE, ID_FRAME, ID_INIT,
+    ID_KEEP_ALIVE, ID_OPEN, ID_PUSH, ID_PUT, MAX_ATTACHMENT_BYTES, MAX_BATCH_BYTES,
+    MAX_COOKIE_BYTES, Mapping, Refusal, STREAM_LENGTH_BYTES, U_SUBSCRIBER_HEADER,
+    WIRE_EXPR_FLAG_NAMED, WIRE_EXPR_FLAG_SENDER, key_expression,
 };
 use slime_proto::zenoh_profile as p;
 
 const RESOLUTION: u8 = p::DEFAULT_RESOLUTION as u8;
 const VERSION: u8 = p::PROTOCOL_VERSION as u8;
 const WHATAMI_PEER: u8 = p::WHATAMI_PEER as u8;
+const WHATAMI_CLIENT: u8 = p::WHATAMI_CLIENT as u8;
 const GID_LEN_BYTE: u8 = GID_BYTES as u8;
 /// Batch size an INIT states by omitting its size parameters.
 const DEFAULT_BATCH_SIZE: u16 = u16::MAX;
 /// The scope of every key expression the profile carries is the global one.
 const GLOBAL_SCOPE: u32 = 0;
+/// The declaration ids of a liveliness token and of its withdrawal, as `rmw_zenoh_cpp` writes them.
+const ID_D_TOKEN: u8 = 6;
+const ID_U_TOKEN: u8 = 7;
+/// The extension a captured withdrawal of a token carries: id 15, mandatory, a ZBuf of two zero bytes.
+const U_TOKEN_EXTENSION: [u8; 4] = [0x5F, 0x02, 0x00, 0x00];
 
 /// Why the encoder refuses an input or cannot finish a batch.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -163,6 +169,8 @@ fn init(
     zid: &[u8],
     batch_size: u16,
     cookie: Option<&[u8]>,
+    qos: bool,
+    whatami: u8,
 ) -> Result<usize, EncodeError> {
     let zid_code = check_zid(zid)?;
     if batch_size == 0 {
@@ -179,10 +187,13 @@ fn init(
     if sized {
         header |= FLAG_BIT6;
     }
+    if qos {
+        header |= FLAG_Z;
+    }
     let mut writer = Writer::new(out);
     writer.byte(header)?;
     writer.byte(VERSION)?;
-    writer.byte((zid_code << 4) | WHATAMI_PEER)?;
+    writer.byte((zid_code << 4) | whatami)?;
     writer.put(zid)?;
     if sized {
         writer.byte(RESOLUTION)?;
@@ -191,13 +202,35 @@ fn init(
     if let Some(cookie) = cookie {
         writer.prefixed(cookie)?;
     }
+    if qos {
+        writer.byte(EXT_QOS_UNIT)?;
+    }
     Ok(writer.len)
 }
 
 /// INIT_SYN as a peer. A `batch_size` of `u16::MAX` is the default and is sent
 /// by omitting the size parameters.
 pub fn init_syn(out: &mut [u8], zid: &[u8], batch_size: u16) -> Result<usize, EncodeError> {
-    init(out, zid, batch_size, None)
+    init(out, zid, batch_size, None, false, WHATAMI_PEER)
+}
+
+/// INIT_SYN as a client: the peer form with `whatami` 2 and no other byte different.
+pub fn init_syn_client(out: &mut [u8], zid: &[u8], batch_size: u16) -> Result<usize, EncodeError> {
+    init(out, zid, batch_size, None, false, WHATAMI_CLIENT)
+}
+
+/// INIT_SYN as a client that offers the QoS unit extension.
+pub fn init_syn_client_qos(
+    out: &mut [u8],
+    zid: &[u8],
+    batch_size: u16,
+) -> Result<usize, EncodeError> {
+    init(out, zid, batch_size, None, true, WHATAMI_CLIENT)
+}
+
+/// INIT_SYN that offers the QoS unit extension, one byte after the rest of the message.
+pub fn init_syn_qos(out: &mut [u8], zid: &[u8], batch_size: u16) -> Result<usize, EncodeError> {
+    init(out, zid, batch_size, None, true, WHATAMI_PEER)
 }
 
 /// INIT_ACK as a peer, carrying the 1..=64 byte cookie.
@@ -207,7 +240,17 @@ pub fn init_ack(
     batch_size: u16,
     cookie: &[u8],
 ) -> Result<usize, EncodeError> {
-    init(out, zid, batch_size, Some(cookie))
+    init(out, zid, batch_size, Some(cookie), false, WHATAMI_PEER)
+}
+
+/// INIT_ACK that accepts the peer's QoS offer, one byte after the rest of the message.
+pub fn init_ack_qos(
+    out: &mut [u8],
+    zid: &[u8],
+    batch_size: u16,
+    cookie: &[u8],
+) -> Result<usize, EncodeError> {
+    init(out, zid, batch_size, Some(cookie), true, WHATAMI_PEER)
 }
 
 fn open(
@@ -317,6 +360,36 @@ fn declare_subscriber(
     writer.leb(id)?;
     writer.leb(GLOBAL_SCOPE)?;
     writer.prefixed(key)
+}
+
+/// A liveliness token under `key`, written with its key in full: a DECLARE, then a named token with the sender or the
+/// receiver mapping, its id and the global scope.
+fn declare_token(
+    writer: &mut Writer<'_>,
+    id: u32,
+    mapping: Mapping,
+    key: &str,
+    bounds: Bounds,
+) -> Result<(), EncodeError> {
+    let key = check_key(key, bounds.key)?;
+    let mut header = ID_D_TOKEN | FLAG_BIT5;
+    if mapping == Mapping::Sender {
+        header |= FLAG_BIT6;
+    }
+    writer.byte(ID_DECLARE)?;
+    writer.byte(header)?;
+    writer.leb(id)?;
+    writer.leb(GLOBAL_SCOPE)?;
+    writer.prefixed(key)
+}
+
+/// The withdrawal of the token `id`: a DECLARE, an UNDECLARE_TOKEN with its extension flag, the id and the captured
+/// extension.
+fn undeclare_token(writer: &mut Writer<'_>, id: u32) -> Result<(), EncodeError> {
+    writer.byte(ID_DECLARE)?;
+    writer.byte(ID_U_TOKEN | FLAG_Z)?;
+    writer.leb(id)?;
+    writer.put(&U_TOKEN_EXTENSION)
 }
 
 fn undeclare_subscriber(
@@ -451,6 +524,22 @@ impl<'a> FrameEncoder<'a> {
     ) -> Result<(), EncodeError> {
         let bounds = self.bounds;
         self.message(|writer| undeclare_subscriber(writer, id, mapping, key, bounds))
+    }
+
+    /// A liveliness token under `key`, written in full.
+    pub fn declare_token(
+        &mut self,
+        id: u32,
+        mapping: Mapping,
+        key: &str,
+    ) -> Result<(), EncodeError> {
+        let bounds = self.bounds;
+        self.message(|writer| declare_token(writer, id, mapping, key, bounds))
+    }
+
+    /// The withdrawal of the liveliness token `id`.
+    pub fn undeclare_token(&mut self, id: u32) -> Result<(), EncodeError> {
+        self.message(|writer| undeclare_token(writer, id))
     }
 
     /// A PUSH carrying a Put with the 33-byte attachment and a payload of at

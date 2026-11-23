@@ -56,7 +56,7 @@ pub(super) fn clock_served(task: u32, label: u64) -> bool {
 }
 
 /// Whether to print `SLIME_CLOCK refused` for this request; a repeat is counted.
-/// `class` is the refusal's index in `policy::clock_error_index`.
+/// `class` is the refusal's index in `clock_requests::clock_error_index`.
 pub(super) fn clock_refused(task: u32, label: u64, class: u8) -> bool {
     let key = (u64::from(task) << 32) | ((label & 0xff_ffff) << 8) | u64::from(class);
     let print = first(&REFUSED, key);
@@ -83,7 +83,7 @@ pub(super) fn payload_dma(device_read: bool) -> bool {
 
 /// Print the one summary of every unprinted occurrence.
 pub(super) fn report() {
-    slime_root::diagnostic_println!(
+    crate::diagnostic_println!(
         "SLIME_ROOT diagnostic repeats clock_served={} clock_refused={} io_device_read={} io_device_write={}",
         SERVED_REPEATS.load(Relaxed),
         REFUSED_REPEATS.load(Relaxed),

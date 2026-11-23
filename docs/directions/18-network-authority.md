@@ -3,7 +3,7 @@
 | | |
 | --- | --- |
 | Route | hardware |
-| Depends on | [Hardware H6 networking](../../roadmap/04-platform-hardware.md); the capability-matrix horizon tracks the NetworkDestination object shape |
+| Depends on | [Hardware H6 networking](../plans/framework-hardware.md#slice-acceptance); the capability-matrix horizon tracks the NetworkDestination object shape |
 | Enables | manifest-auditable exfiltration surface — particularly for agent components |
 
 ## Motivation

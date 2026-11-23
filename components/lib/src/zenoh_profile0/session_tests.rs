@@ -94,6 +94,7 @@ fn owned(outcome: &Outcome<'_>, out: &[u8]) -> (Vec<u8>, Vec<Ev>) {
             Event::SampleStored { .. } => {
                 unreachable!("a session that cannot fragment stores no sample")
             }
+            Event::Dropped { .. } => unreachable!("these sessions hold one run and drop nothing"),
         })
         .collect();
     (outcome.batch(out).to_vec(), events)
@@ -222,7 +223,8 @@ fn listen_handshake() {
         decode_batch(&init_syn),
         Ok(Message::InitSyn {
             zid: &ZID_CONNECTOR,
-            batch_size: 512
+            batch_size: 512,
+            qos: false
         })
     );
     let (init_ack, _) = expect_recv(&mut b, &init_syn, 11);
@@ -231,6 +233,7 @@ fn listen_handshake() {
             zid,
             batch_size,
             cookie: sent,
+            ..
         }) => {
             assert_eq!(zid, ZID_LISTENER);
             assert_eq!(batch_size, 512);

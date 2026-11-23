@@ -1,0 +1,64 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a20247-200d-7de8-a3fb-6c6ad7e7a201" "reader-admission-test" "planes-mechanism"
+  "A host test reaches the admission rule of the reader table"
+  "The root refuses a generation whose reader table names an instance that it does not declare. No test reaches that rule. The two host tests of PR 1117 call the helper declared_resource_readers with a stub predicate. A root whose admission accepts every row, or never calls the rule, passes every bound target: the booted planes carry only tables that the builder wrote. The review of PR 1117 found the gap.")
+  with {
+    intent = #active;
+    owns = {
+      "slime-root/src/**";
+      "slime-root/fixtures/**";
+    };
+    nonGoals = {
+      h.nonGoal "A change to what admission refuses. The rule of PR 1117 stands; this item adds a test that reaches it." h.agentDefault;
+      h.nonGoal "A booted plane that carries a reader table the builder did not write. A plane boots what the builder writes, and resource_reader_builder_check holds the builder." h.agentDefault;
+      h.nonGoal "An admission-level case for the arrival ceiling or the instance lifetime. Their tests call a helper in the same way. Each is a follow-up of its own." h.agentDefault;
+    };
+    requirements = {
+      h.req "admission-refuses-an-undeclared-reader"
+        "test_sel4_root runs at least 398 host tests, and reports the count as hostTests. main runs 397. One new test admits a whole generation through Admission::admit. The generation carries a reader table. The test admits it as built, then changes one reader identity to that of a name the generation does not declare, and requires the refusal UnsatisfiableResourceReaders."
+        { "test_sel4_root"; };
+      h.req "root-holds-no-component-name"
+        "root_size_check counts no string literal that names a product component, and reports the count as productComponentNames. The checker's ceiling is 0, so the gate refuses the first such literal."
+        { "root_size_check"; };
+    };
+    acceptance = {
+      h.observedWhere "test_sel4_root" {
+        h.atLeast "hostTests" 398;
+      };
+      h.observedWhere "root_size_check" {
+        h.atMost "productComponentNames" 0;
+      };
+    };
+    invariants = {
+      h.invariant "the-test-fails-without-the-rule"
+        "The new test fails when resource_readers_admission accepts every row, and when Admission::admit does not call it. The implementation pull request reports both runs."
+        h.agentDefault;
+      h.invariant "the-generation-is-built-not-written"
+        "The generation of the test comes from the generation builder, as slime-root/fixtures/admission-v5.bin does. The test changes bytes of it and authenticates the object and the generation again."
+        h.agentDefault;
+      h.invariant "the-series-keeps-its-ceiling"
+        "root_size_check passes. The series holds 33194 of 33200 code lines on main, and a test adds no code line to it."
+        h.agentDefault;
+    };
+    decisions = {
+      h.decided "one-test-at-the-admission-level"
+        "The item requires one test through Admission::admit, with a fixture generation under slime-root/fixtures/."
+        "the fixture admission-v5.bin holds one bootstrap object and no resource object, so a reader table cannot be written into it without moving every table behind the object table. slime-root/src/generation/large_image_tests.rs already admits a built fixture and changes its bytes"
+        h.agentDefault
+        { "admission-refuses-an-undeclared-reader"; };
+      h.decided "the-count-is-the-acceptance"
+        "The acceptance is the count of host tests, 398. The invariant the-test-fails-without-the-rule states what the test must show."
+        "the items of this series bind the same count, and a mutation exam would build the root's tests twice more on every run of the gate, at about ten minutes each"
+        h.agentDefault
+        { "admission-refuses-an-undeclared-reader"; };
+      h.decided "graders-change-in-the-planning-pull-request"
+        "The planning pull request of this item changes three grader files. scripts/check/check-root-size.py lowers the ceiling of productComponentNames from 6 to 0, the count that PR 1117 left. The recipe test_sel4_root no longer prints a fixed count of modules. A comment in scripts/lib/root_console.py states two forms that its audit does not follow."
+        "each file grades a promise, so it changes only in a pull request that adds an item (V4). The item root-names-no-component declares the lower ceiling as a follow-up. The recipe printed 25 modules whatever the source held"
+        h.agentDefault
+        { "root-holds-no-component-name"; };
+    };
+  };
+
+item

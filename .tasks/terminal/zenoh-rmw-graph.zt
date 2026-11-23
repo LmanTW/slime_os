@@ -1,0 +1,83 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a1cc3c-6d0f-7a22-9b6e-4d41c0a7d9a2" "zenoh-rmw-graph" "zenoh-transport"
+  "Zenoh Profile 0 builds a ROS 2 graph from the liveliness tokens an rmw_zenoh peer declares"
+  "The session item lets a Profile 0 listener take the declarations an rmw_zenoh peer sends, among them 26 liveliness tokens under `@ros2_lv` in three captured sessions. Nothing reads those tokens. A ROS 2 node cannot learn which nodes, topics and services its peer holds, and the QoS substring and the `%` name mangling that every token carries are undecoded. The session's declarations are recorded and not interpreted.")
+  with {
+    intent = #active;
+    depends = { "01a1cb73-ab5b-7711-8c1a-2a033f84b417"; };
+    owns = {
+      "components/lib/src/zenoh_rmw_graph*";
+      "components/lib/src/zenoh_rmw_graph/**";
+      "components/lib/src/lib.rs";
+      "contracts/zenoh-rmw-graph/**";
+      "scripts/generate/generate-zenoh-rmw-graph-bindings.py";
+    };
+    nonGoals = {
+      h.nonGoal "Declaring a token or answering a query: the graph is read-only, and the session still sends nothing after the handshake." h.agentDefault;
+      h.nonGoal "Deciding whether a publisher and a subscription are QoS-compatible. The graph holds each entity's QoS and does not match endpoints." h.agentDefault;
+      h.nonGoal "More than one domain. The graph is built for one domain id and refuses a token for another." h.agentDefault;
+      h.nonGoal "The type hash and type name of a token as anything but text: no RIHS01 derivation, no ROSIDL import, and no check that the hash matches the type." h.agentDefault;
+      h.nonGoal "The `@adv` advanced-publisher tokens and any other key outside `@ros2_lv`: the graph ignores and counts them." h.agentDefault;
+      h.nonGoal "A graph larger than the capacity its configuration declares, and eviction of a live entity to make room." h.agentDefault;
+      h.nonGoal "A native node or a native subscriber token from a Slime component: the graph reads a peer's tokens only." h.agentDefault;
+      h.nonGoal "Running the peer in CI. The 26 tokens are replayed from the captured bytes." h.agentDefault;
+    };
+    requirements = {
+      h.req "replays-the-captured-graphs"
+        "Replayed into a graph of capacity 16 for domain 0, the three captured sessions leave 11, 11 and 0 live entities, the talker's and listener's nodes, 6 topic counts and 14 service counts, and ignore 1 key outside `@ros2_lv` in each."
+        { "zenoh_rmw_graph_check"; };
+      h.req "withdrawal-drops-an-entity"
+        "A token withdrawn in a session removes its entity: the `lists` session declares 5 tokens, withdraws all 5 and leaves 0 entities."
+        { "zenoh_rmw_graph_check"; };
+      h.req "reads-the-qos-substring"
+        "The graph decodes the QoS substring of 12 rows into reliability, durability, history, depth, deadline, lifespan, liveliness and lease exactly as the host reference does, with an empty field meaning rmw_zenoh's default."
+        { "zenoh_rmw_graph_check"; };
+      h.req "demangles-names"
+        "A `%` in an enclave, namespace, node, topic, type or hash field reads as `/`, and the 8 synthetic tokens parse and build again to their own keys."
+        { "zenoh_rmw_graph_check"; };
+      h.req "refuses-what-it-must"
+        "The graph refuses 25 named keys, each as the pinned class: 21 tokens and 4 QoS substrings, with classes invalid-token, unknown-entity, wrong-domain and invalid-qos, and a token past its capacity as graph-full."
+        { "zenoh_rmw_graph_check"; };
+      h.req "holds-its-capacity"
+        "A graph of capacity 16 holds 16 entities and refuses the 17th as graph-full without evicting another."
+        { "zenoh_rmw_graph_check"; };
+      h.req "controls-are-refused"
+        "The judge refuses 196 corrupted records before it judges the real run."
+        { "zenoh_rmw_graph_check"; };
+      h.req "session-passes-unchanged"
+        "The session exam passes unchanged beside the graph slice, so the graph does not widen what the session takes."
+        { "zenoh_rmw_graph_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_rmw_graph_check" {
+        h.count "casesObserved" 106;
+        h.count "negativeControlsRefused" 196;
+      };
+    };
+    decisions = {
+      h.decided "graph-is-stricter-than-upstream"
+        "A token with more or fewer parts than its kind has, a zero-padded number, an upper-case Zenoh ID or a number of more than 10 digits is refused, where rmw_zenoh ignores extra parts and reads a number with `std::stoul`."
+        "the graph is bounded and deterministic, and a token that upstream reads loosely has two readings here"
+        h.agentDefault
+        { "refuses-what-it-must"; };
+      h.decided "one-domain-per-graph"
+        "A graph is built for one domain id and refuses a token for another as wrong-domain."
+        "rmw_zenoh creates a session for one domain and the graph's keys are scoped by it"
+        h.agentDefault
+        { "refuses-what-it-must"; };
+      h.decided "qos-fields-hold-the-source-defaults"
+        "An empty QoS field reads as rmw_zenoh's default: reliable, volatile, keep-last, depth 42, infinite deadline, lifespan and lease, automatic liveliness."
+        "`qos_to_keyexpr` omits a field equal to that default, and the captured tokens show it: a publisher on `chatter` sends `::,7:,:,:,,`"
+        h.agentDefault
+        { "reads-the-qos-substring"; };
+      h.decided "a-key-outside-the-admin-space-is-ignored-and-counted"
+        "A key that does not start with `@ros2_lv/` is ignored and counted, and does not fail the session."
+        "the peer sends an `@adv` token beside each publisher, and refusing it would close every session"
+        h.agentDefault
+        { "replays-the-captured-graphs"; };
+    };
+  };
+
+item

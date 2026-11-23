@@ -54,7 +54,7 @@ impl DeclaredCapability<'_> {
 /// Re-exported from [`crate::generation`], which owns the rule: it is pure over
 /// decoded generation data, so it belongs where `just test_sel4_root` can reach
 /// it. This is the same function the image links, not a copy.
-pub(super) use slime_root::generation::grant_crosses_spawn;
+pub(super) use crate::generation::grant_crosses_spawn;
 
 pub(super) fn nth_declared_capability<'a>(
     generation: &Generation<'a>,
@@ -133,7 +133,7 @@ pub(super) fn preflight_spawn_grants(
     let executable = match table.resolve_executable(executable_slot, RIGHT_EXEC | RIGHT_SPAWN) {
         Ok(executable) => executable,
         Err(error) => {
-            slime_root::diagnostic_println!(
+            crate::diagnostic_println!(
                 "SLIME_GRAPH spawn preflight executable task-instance={caller_instance} slot={executable_slot} held={:?} required={:#x} error={error:?}",
                 table.get(executable_slot),
                 RIGHT_EXEC | RIGHT_SPAWN,
@@ -142,7 +142,7 @@ pub(super) fn preflight_spawn_grants(
         }
     };
     let executable_index = executable.executable;
-    slime_root::diagnostic_println!(
+    crate::diagnostic_println!(
         "SLIME_GRAPH spawn preflight executable-ok task-instance={caller_instance} slot={executable_slot} executable={executable_index} rights={:#x}",
         executable.rights.bits(),
     );
@@ -162,7 +162,7 @@ pub(super) fn preflight_spawn_grants(
     let child = generation
         .instance(child_instance)
         .map_err(|_| IpcError::BadCapability)?;
-    slime_root::diagnostic_println!(
+    crate::diagnostic_println!(
         "SLIME_GRAPH spawn preflight child-ok task-instance={caller_instance} child={child_instance} name={}",
         child.name,
     );
@@ -184,13 +184,12 @@ pub(super) fn preflight_spawn_grants(
                 .is_ok_and(|m| m.holder == child_instance)
         })
         .count();
-    let declared =
-        slime_root::generation::declared_crossing_grants(generation, child, child_instance)
-            .map_err(|_| IpcError::BadCapability)?;
+    let declared = crate::generation::declared_crossing_grants(generation, child, child_instance)
+        .map_err(|_| IpcError::BadCapability)?;
     let parent_supplied = declared - minted_count;
     let respawn = launched.ever_launched(child_instance);
     if count != parent_supplied + minted_count && !(respawn && count == 0) {
-        slime_root::diagnostic_println!(
+        crate::diagnostic_println!(
             "SLIME_GRAPH spawn preflight count task-instance={caller_instance} child={child_instance} requested={count} parent={parent_supplied} minted={minted_count} respawn={respawn}",
         );
         return Err(IpcError::BadCapability);
@@ -424,7 +423,7 @@ pub(super) fn construct_child(
                     Ok(None) => task::CHILD_PRIORITY,
                     Err(_) => return Err(IpcError::BadCapability),
                 };
-                slime_root::diagnostic_println!(
+                crate::diagnostic_println!(
                     "SLIME_GRAPH schedule instance={} priority={priority} default={}",
                     generation
                         .instance(plan.instance)
@@ -477,14 +476,14 @@ pub(super) fn construct_child(
                 .and_then(|policy| policy.maximum_pages(instance.name)),
         )
         .map_err(|error| {
-            slime_root::diagnostic_println!(
+            crate::diagnostic_println!(
                 "SLIME_GRAPH construction refused instance={} error={error:?}",
                 instance.name
             );
             IpcError::DestinationSlotsExhausted
         })?;
 
-    slime_root::diagnostic_println!(
+    crate::diagnostic_println!(
         "SLIME_ROOT image launch task={} instance={} pages={} declared={} live_slots={} live_objects={} live_bytes={} allocation_descriptors_free={}",
         id.0,
         instance.name,
@@ -548,7 +547,7 @@ pub(super) fn construct_child(
         use core::sync::atomic::{AtomicBool, Ordering};
         static ARMED: AtomicBool = AtomicBool::new(true);
         if ARMED.swap(false, Ordering::Relaxed) {
-            slime_root::diagnostic_println!(
+            crate::diagnostic_println!(
                 "SLIME_MEM adaptive injected kind=construction task={} instance={}",
                 id.0,
                 instance.name,
@@ -630,7 +629,7 @@ pub(super) fn construct_child(
         );
         return Err(IpcError::DestinationSlotsExhausted);
     }
-    slime_root::diagnostic_println!(
+    crate::diagnostic_println!(
         "SLIME_GRAPH quota task={} instance={} executable={} pages={} buffers={} mappings={} loans={}",
         id.0,
         instance.name,
@@ -643,7 +642,7 @@ pub(super) fn construct_child(
     // As on the boot path, read back from the task record rather than from the
     // budget: the declared number and the live ceiling are two facts, and only
     // comparing them proves the declaration is what bounds the child (C10.2).
-    slime_root::diagnostic_println!(
+    crate::diagnostic_println!(
         "SLIME_MEM quota task={} instance={} declared={} installed={} base={:#x}",
         id.0,
         instance.name,
@@ -749,7 +748,7 @@ pub(super) fn construct_child(
         // The evidence that a child's own declared authority reached it. Only
         // the root can place these — the parent holds no copy — so this is the
         // only point at which it is observable.
-        slime_root::diagnostic_println!(
+        crate::diagnostic_println!(
             "SLIME_GRAPH declared placed task={} child={} slot={} kind={}",
             parent.0,
             id.0,
@@ -793,7 +792,7 @@ pub(super) fn release_child(
     // A revoke that did not complete leaves the task owned and its
     // incarnation quarantined; the exit and fault paths' retry settles it.
     if reclaimed.is_err() && !retirements.insert(id) {
-        return fatal!("SLIME_GRAPH FAIL pending retirement capacity task={}", id.0);
+        fatal!("SLIME_GRAPH FAIL pending retirement capacity task={}", id.0);
     }
     if let (Some(policy), Some(binding)) = (adaptive, binding.as_ref()) {
         policy.retire(
@@ -806,13 +805,13 @@ pub(super) fn release_child(
         );
     }
     match reclaimed {
-        Ok(cleanup) => slime_root::diagnostic_println!(
+        Ok(cleanup) => crate::diagnostic_println!(
             "SLIME_GRAPH spawn unwound task={} slots={} arena={}",
             id.0,
             cleanup.slot_count(),
             cleanup.arena.index(),
         ),
-        Err(error) => slime_root::diagnostic_println!(
+        Err(error) => crate::diagnostic_println!(
             "SLIME_GRAPH spawn unwind incomplete task={} error={error:?}",
             id.0
         ),
@@ -892,7 +891,7 @@ pub(super) fn serve_spawn(
         return Response::error(IpcError::InvalidOperation);
     };
     let Some(caller_instance) = tasks.get(id).and_then(|task| task.instance) else {
-        slime_root::diagnostic_println!(
+        crate::diagnostic_println!(
             "SLIME_GRAPH spawn refused task={} slot={executable_slot} undeclared-instance",
             id.0,
         );
@@ -908,7 +907,7 @@ pub(super) fn serve_spawn(
     ) {
         Ok(plan) => plan,
         Err(error) => {
-            slime_root::diagnostic_println!(
+            crate::diagnostic_println!(
                 "SLIME_GRAPH spawn refused task={} slot={executable_slot} ungranted",
                 id.0,
             );
@@ -920,7 +919,7 @@ pub(super) fn serve_spawn(
         .map_or("<unknown>", |record| record.name);
     // `DestinationSlotsExhausted`, whose status is -5 — `ERR_OUT_OF_MEMORY`,
     if launched.task_for_instance(plan.instance).is_some() {
-        slime_root::diagnostic_println!(
+        crate::diagnostic_println!(
             "SLIME_GRAPH spawn refused task={} child={name} class=instance-live",
             id.0,
         );
@@ -935,7 +934,7 @@ pub(super) fn serve_spawn(
     let budget = spawner_budget(generation, launched, tasks, id);
     let live = tasks.live_children(id);
     if live >= budget {
-        slime_root::diagnostic_println!(
+        crate::diagnostic_println!(
             // `child=` rather than `component=`: the budget is the *caller's*,
             // and naming the child's component beside it read as though the
             // ceiling belonged to the thing being refused.
@@ -950,7 +949,7 @@ pub(super) fn serve_spawn(
     // would otherwise restart forever, which is the exact behaviour the
     // milestone's check forbids.
     if lifecycle_service.is_exhausted(plan.instance) {
-        slime_root::diagnostic_println!(
+        crate::diagnostic_println!(
             "SLIME_GRAPH spawn refused task={} child={name} class=lifecycle-exhausted state={}",
             id.0,
             boot_contracts::lifecycle_policy::state_name(
@@ -976,7 +975,7 @@ pub(super) fn serve_spawn(
         Err(_) => Err(lifecycle::LifecycleError::Malformed),
     };
     if let Err(error) = backoff {
-        slime_root::diagnostic_println!(
+        crate::diagnostic_println!(
             "SLIME_GRAPH spawn refused task={} child={name} class={}",
             id.0,
             lifecycle_error_class(error),
@@ -988,14 +987,14 @@ pub(super) fn serve_spawn(
     // dependency has since left the state the edge names must wait for the same
     // condition its predecessor was launched under.
     if !lifecycle_service.dependencies_satisfied(lifecycle_policy, generation, plan.instance) {
-        slime_root::diagnostic_println!(
+        crate::diagnostic_println!(
             "SLIME_GRAPH spawn refused task={} child={name} class=lifecycle-dependency",
             id.0,
         );
         return Response::error(IpcError::WouldBlock);
     }
 
-    slime_root::diagnostic_println!(
+    crate::diagnostic_println!(
         "SLIME_GRAPH spawn authorized task={} slot={executable_slot} component={name} grants={}",
         id.0,
         plan.count,
@@ -1017,7 +1016,7 @@ pub(super) fn serve_spawn(
     ) {
         Ok(child) => child,
         Err(error) => {
-            slime_root::diagnostic_println!(
+            crate::diagnostic_println!(
                 "SLIME_GRAPH spawn failed task={} component={name} error={error:?}",
                 id.0,
             );
@@ -1061,7 +1060,7 @@ pub(super) fn serve_spawn(
                 adaptive.as_deref_mut(),
                 child,
             );
-            slime_root::diagnostic_println!(
+            crate::diagnostic_println!(
                 "SLIME_GRAPH spawn failed task={} component={name} error=EndpointInstall({error:?})",
                 id.0
             );
@@ -1089,7 +1088,7 @@ pub(super) fn serve_spawn(
                 adaptive.as_deref_mut(),
                 child,
             );
-            slime_root::diagnostic_println!(
+            crate::diagnostic_println!(
                 "SLIME_GRAPH spawn failed task={} component={name} error=NotificationInstall({error:?})",
                 id.0
             );
@@ -1141,14 +1140,14 @@ pub(super) fn serve_spawn(
                 adaptive.as_deref_mut(),
                 child,
             );
-            slime_root::diagnostic_println!(
+            crate::diagnostic_println!(
                 "SLIME_GRAPH spawn failed task={} component={name} error=ClockInstall({error:?})",
                 id.0
             );
             return Response::error(IpcError::BadCapability);
         }
     };
-    slime_root::diagnostic_println!(
+    crate::diagnostic_println!(
         "SLIME_CLOCK authority task={} instance={} flags={:#x} timers={} badge={:#x}",
         child.0,
         name,
@@ -1184,7 +1183,7 @@ pub(super) fn serve_spawn(
                 adaptive.as_deref_mut(),
                 child,
             );
-            slime_root::diagnostic_println!(
+            crate::diagnostic_println!(
                 "SLIME_GRAPH spawn failed task={} component={name} error=WaitSetInstall({error:?})",
                 id.0
             );
@@ -1192,7 +1191,7 @@ pub(super) fn serve_spawn(
         }
     };
     if child_sources != 0 {
-        slime_root::diagnostic_println!(
+        crate::diagnostic_println!(
             "SLIME_WAIT supervision task={} instance={name} sources={child_sources}",
             child.0,
         );
@@ -1224,7 +1223,7 @@ pub(super) fn serve_spawn(
                 adaptive.as_deref_mut(),
                 child,
             );
-            slime_root::diagnostic_println!(
+            crate::diagnostic_println!(
                 "SLIME_GRAPH spawn failed task={} component={name} error=SchedulingInstall({error:?})",
                 id.0
             );
@@ -1232,7 +1231,7 @@ pub(super) fn serve_spawn(
         }
     };
     if scheduling_policy.is_some() {
-        slime_root::diagnostic_println!(
+        crate::diagnostic_println!(
             "SLIME_SCHED class task={} instance={name} class={} priority={}",
             child.0,
             child_class.name(),
@@ -1261,7 +1260,7 @@ pub(super) fn serve_spawn(
                 adaptive.as_deref_mut(),
                 child,
             );
-            slime_root::diagnostic_println!(
+            crate::diagnostic_println!(
                 "SLIME_GRAPH spawn failed task={} component={name} error=LifecycleInstall({error:?})",
                 id.0
             );
@@ -1269,7 +1268,7 @@ pub(super) fn serve_spawn(
         }
     };
     if lifecycle_policy.is_some() {
-        slime_root::diagnostic_println!(
+        crate::diagnostic_println!(
             "SLIME_LIFECYCLE state task={} instance={name} state={} attempts={}",
             child.0,
             boot_contracts::lifecycle_policy::state_name(child_state),
@@ -1367,7 +1366,7 @@ pub(super) fn serve_spawn(
             adaptive.as_deref_mut(),
             child,
         );
-        slime_root::diagnostic_println!(
+        crate::diagnostic_println!(
             "SLIME_GRAPH spawn failed task={} component={name} error=NoHandleSlot",
             id.0,
         );
@@ -1396,7 +1395,7 @@ pub(super) fn serve_spawn(
             adaptive.as_deref_mut(),
             child,
         );
-        slime_root::diagnostic_println!(
+        crate::diagnostic_println!(
             "SLIME_GRAPH spawn failed task={} component={name} error=Activate",
             id.0,
         );
@@ -1413,7 +1412,7 @@ pub(super) fn serve_spawn(
         });
         if let Err(error) = install_driver(
             io_service,
-            slime_root::io_resource::DriverId(u64::from(child.0)),
+            crate::io_resource::DriverId(u64::from(child.0)),
             plan.instance,
             quota,
             shared,
@@ -1435,14 +1434,14 @@ pub(super) fn serve_spawn(
                 adaptive.as_deref_mut(),
                 child,
             );
-            slime_root::diagnostic_println!(
+            crate::diagnostic_println!(
                 "SLIME_IO FAIL spawned quota install task={} instance={} error={error:?}",
                 child.0,
                 name
             );
             return Response::error(IpcError::BadCapability);
         }
-        slime_root::diagnostic_println!(
+        crate::diagnostic_println!(
             "SLIME_IO quota task={} instance={} devices={} shared_granule={}",
             child.0,
             name,
@@ -1500,7 +1499,7 @@ pub(super) fn serve_spawn(
         })
         .count();
     *spawns += 1;
-    slime_root::diagnostic_println!(
+    crate::diagnostic_println!(
         "SLIME_GRAPH spawned task={} child={} component={name} grants={} endpoints={copied} notifications={notification_copied} handle={handle} supervision_grants={supervision_grants} buffer_factory_grants={buffer_factory_grants}",
         id.0,
         child.0,

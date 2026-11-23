@@ -3,7 +3,7 @@
 | | |
 | --- | --- |
 | Route | lifecycle |
-| Depends on | [Hardware H8](../../roadmap/04-platform-hardware.md) supplies display/compositor/input for a graphical chooser |
+| Depends on | [Hardware H8](../plans/framework-hardware.md#slice-acceptance) supplies display/compositor/input for a graphical chooser |
 | Enables | user-driven authority granting without ambient access; graphical and non-file generalizations beyond M6.6 |
 
 ## Motivation

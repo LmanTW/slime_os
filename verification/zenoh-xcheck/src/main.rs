@@ -347,8 +347,18 @@ fn same_network(ours: &Network<'_>, theirs: &NetworkMessage) -> Result<(), Strin
 /// that merely succeeds can still return a truncated ID, a shifted cookie or a wrong key.
 fn same(ours: &Message<'_>, theirs: &TransportMessage) -> Result<(), String> {
     match (ours, &theirs.body) {
-        (Message::InitSyn { zid, batch_size }, TransportBody::InitSyn(u)) => {
-            if *zid != &zid_bytes(&u.zid)[..] || *batch_size != u.batch_size {
+        (
+            Message::InitSyn {
+                zid,
+                batch_size,
+                qos,
+            },
+            TransportBody::InitSyn(u),
+        ) => {
+            if *zid != &zid_bytes(&u.zid)[..]
+                || *batch_size != u.batch_size
+                || *qos != u.ext_qos.is_some()
+            {
                 return Err("init syn differs".into());
             }
         }
@@ -357,12 +367,14 @@ fn same(ours: &Message<'_>, theirs: &TransportMessage) -> Result<(), String> {
                 zid,
                 batch_size,
                 cookie,
+                qos,
             },
             TransportBody::InitAck(u),
         ) => {
             if *zid != &zid_bytes(&u.zid)[..]
                 || *batch_size != u.batch_size
                 || *cookie != u.cookie.as_slice()
+                || *qos != u.ext_qos.is_some()
             {
                 return Err("init ack differs".into());
             }
@@ -1057,9 +1069,11 @@ fn part_e() {
             "refuses"
         };
         let our_reads = match decode_batch(&wire) {
-            Ok(Message::InitSyn { zid, batch_size }) if zid == &z[..] && batch_size == 512 => {
-                "accepts"
-            }
+            Ok(Message::InitSyn {
+                zid,
+                batch_size,
+                qos: false,
+            }) if zid == &z[..] && batch_size == 512 => "accepts",
             Ok(_) => "misreads",
             Err(_) => "refuses",
         };
@@ -1205,21 +1219,25 @@ mod tests {
         let honest = Message::InitSyn {
             zid: &z,
             batch_size: 512,
+            qos: false,
         };
         assert_eq!(same(&honest, &theirs), Ok(()));
         let truncated = Message::InitSyn {
             zid: &z[..7],
             batch_size: 512,
+            qos: false,
         };
         assert!(same(&truncated, &theirs).is_err(), "a truncated Zenoh ID");
         let reordered = Message::InitSyn {
             zid: &[8, 7, 6, 5, 4, 3, 2, 1],
             batch_size: 512,
+            qos: false,
         };
         assert!(same(&reordered, &theirs).is_err(), "a reordered Zenoh ID");
         let resized = Message::InitSyn {
             zid: &z,
             batch_size: 511,
+            qos: false,
         };
         assert!(same(&resized, &theirs).is_err(), "a different batch size");
     }

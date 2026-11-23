@@ -78,7 +78,7 @@ service contracts rather than reader punctuation or ambient POSIX state.
 
 ### Native application compilation
 
-The native-development roadmap extends Slisp from its bounded interpreter to a
+The [native-development plan](docs/plans/native-development.md) extends Slisp from its bounded interpreter to a
 compiler that emits the exact target-qualified Slime component-image format.
 Zutai remains the only schema/configuration language; Slisp may consume generated
 bindings but cannot define a second cross-boundary format or grant authority.
@@ -128,8 +128,7 @@ qualification requirements live in [`docs/plans/`](docs/plans/README.md);
 long-lived choices in [`docs/decisions/`](docs/decisions/README.md) retain their
 accepted or proposed status. [`docs/`](docs/README.md) is the entry point.
 
-The [roadmap classification](roadmap/README.md) identifies each retained source,
-its extracted owner, and detailed requirements not yet extracted. Historical
+Historical
 chronology and devlogs are preserved in the [private archive](docs/history.md). Open backlog
 bugs precede milestone work under rule V7 of `scripts/spec/check`; this page does not carry
 a second priority or completion table.
@@ -146,7 +145,6 @@ contracts/       Versioned Zutai schemas for every persisted, IPC, and boot form
 scripts/         Host tooling grouped as build/, check/, generate/, lib/, and spec/ (the work-item judge)
 tools/           Developer-facing helpers such as LLDB attachment
 docs/            Current architecture, operation, references, decisions, plans, and exploration
-roadmap/         Explicitly unextracted requirements and retained surrounding context
 docs/history.md  Immutable private archive locator and evidence/restoration boundary
 assets/          Boot/runtime assets
 deps/            Pinned seL4, rust-sel4, and Zutai submodules

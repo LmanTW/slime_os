@@ -18,7 +18,7 @@ item :: s.Item = (h.task "01a1c858-c278-7934-9c02-cdf9f35e4860" "system-spec-che
         "Running every shard of check-system-spec.py for one shard count runs each system's own checks, each named mutation and each control exactly once across the shards; a shard also compiles the systems its controls derive from. The unsharded run (shard 0 of 1) runs every check the unsharded check ran before this item. image_builder_closures_check runs what system_image_builder_check runs except the system-spec check."
         { "system_spec_check"; "system_image_builder_check"; "image_builder_closures_check"; };
       h.req "off-critical-path"
-        "In main's CI, the system-spec check runs as parallel shard jobs, and no shard's check step takes more than 900 s; the image-builder job no longer runs the unsharded system-spec check."
+        "In main's CI, the system-spec check runs as parallel shard jobs, the check step of every shard but shard 0 takes at most 900 s, and the CI critical path takes at most 1800 s; the image-builder job no longer runs the unsharded system-spec check."
         { "critical-path-observed"; };
     };
     acceptance = {
@@ -26,7 +26,7 @@ item :: s.Item = (h.task "01a1c858-c278-7934-9c02-cdf9f35e4860" "system-spec-che
       h.observed "system_image_builder_check";
       h.observed "image_builder_closures_check";
       h.human "critical-path-observed"
-        "Reading 3 consecutive main-branch CI runs after the implementation merged that ran the seL4 jobs to success: did every system-spec shard's check step take at most 900 s in each, did the image-builder job run without the unsharded system-spec check, and did the slowest run take at most 1800 s from its first job starting to the CI aggregate finishing? Note the last run's URL.";
+        "Reading 3 consecutive main-branch CI runs after the implementation merged that ran the seL4 jobs to success: did the check step of every system-spec shard but shard 0 take at most 900 s in each, did the image-builder job run without the unsharded system-spec check, and did the slowest run take at most 1800 s from its first job starting to the CI aggregate finishing? Note the last run's URL.";
     };
     decisions = {
       h.decided "grader-first"
@@ -40,9 +40,9 @@ item :: s.Item = (h.task "01a1c858-c278-7934-9c02-cdf9f35e4860" "system-spec-che
         h.agentDefault
         { "same-assertions"; };
       h.decided "time-bounds"
-        "A shard's check step is bounded at 900 s and the critical path at 1800 s"
-        "four shards of the measured 2370 to 2481 s give about 620 s each, and the contract-source job, the next longest, took 1112 to 1138 s in its main step plus about 370 s of environment and image build"
-        h.agentDefault
+        "The check step of every shard but shard 0 is bounded at 900 s, and the critical path at 1800 s; shard 0 is bounded only by the critical path"
+        "shard 0 also runs generate-generation-from-spec.py --check, which evaluates all 78 systems while the shard's store holds its own 20; in CI run 1051, the first main run with shard jobs, shard 0's step took 1438 s, shards 1 to 3 took 863, 785 and 294 s, and the critical path took 1677 s"
+        (h.fromHuman "照 2 開 planning PR" "Claude Code session session_01Udthewm8RwFz3LWFnV5Vji, 2026-11-11, choosing option 2: bound every shard but shard 0 at 900 s and keep the 1800 s critical-path bound")
         { "off-critical-path"; "critical-path-observed"; };
     };
   };

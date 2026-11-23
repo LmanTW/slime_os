@@ -1,0 +1,51 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.bug "01a1ee31-983b-78a0-a2aa-0fe766c1ca2d" "test-run-inventory-stale-controls" "contracts"
+  "The inventory controls of the test-run check fail on main, on two facts that changed"
+  "just system_test_run_inventory_check fails on main within four seconds. Its arm controls in scripts/check/check-system-test-run.py hold two facts that later commits changed. They expect five network arms with no device, and commit 7cb3c28 added a sixth, sel4-zenoh-service. They expect sel4-io-tcp-buffers to be a planned arm, and commit 6507525 removed its planning registration when its closure landed. The evidence branch holds 11 records of the target, and none passed. just system_image_closure_gates_check depends on the target, and none of its 11 records passed.")
+  with {
+    intent = #active;
+    owns = {
+      "scripts/check/check-system-test-run.py";
+    };
+    nonGoals = {
+      h.nonGoal "A change to scripts/generate/generate-system-test-runs.py, to a run record or to a closure. The generator and the records are right, and the controls are stale." h.agentDefault;
+      h.nonGoal "The other gates of system_image_closure_gates_check. This item observes the target that fails first and makes no claim about the gates after it." h.agentDefault;
+      h.nonGoal "A control that derives the arm counts from the generator. The control pins both counts so that a new arm changes a reviewed number." h.agentDefault;
+      h.nonGoal "A CI job for the target. Whether a pull request runs it is a separate decision." h.agentDefault;
+    };
+    requirements = {
+      h.req "counts-match-the-declared-arms"
+        "The arm control holds the network checker to ten arms that attach a NIC and six arms with no device, as ARM_DEVICES of scripts/generate/generate-system-test-runs.py declares them."
+        { "system_test_run_inventory_check"; };
+      h.req "planned-arm-controls-need-no-planned-arm"
+        "The two controls of a planned arm run while no arm of the network checker is planned. The check refuses an arm whose closure is absent and that has no planning registration, and it refuses a planning registration whose artifact exists."
+        { "system_test_run_inventory_check"; };
+      h.req "inventory-check-passes"
+        "system_test_run_inventory_check passes: its inventory controls, its arm controls and its record check."
+        { "system_test_run_inventory_check"; };
+    };
+    acceptance = {
+      h.observed "system_test_run_inventory_check";
+    };
+    decisions = {
+      h.decided "open-the-bug"
+        "The stale controls are a backlog bug."
+        "the target is a promise of the contracts area and it has no passing record"
+        (h.fromHuman "1 選 A，2 照你建議，3 開 backlog bug" "Claude Code session session_01Udthew69PFkRyDtWmFtXKa, 2026-11-18, answering whether the inventory controls get a backlog bug")
+        { "inventory-check-passes"; };
+      h.decided "fix-in-the-planning-pull-request"
+        "The planning pull request of this item changes the controls."
+        "the checker is in the grader set of a target that promises of specs/contracts.zt bind, so it changes only in a pull request that adds an item (V4). An item that landed alone would leave the fix without a pull request that may carry it"
+        h.agentDefault
+        { "counts-match-the-declared-arms"; "planned-arm-controls-need-no-planned-arm"; };
+      h.decided "simulate-the-planned-arm"
+        "The controls give sel4-io-tcp-buffers an absent closure name, or register it under an unfinished work item, in place of an arm that is planned in the tree."
+        "the network checker has no planned arm today, and the two refusals are rules of the generator that hold whether or not one exists. The control fails with a message if the arm is planned again"
+        h.agentDefault
+        { "planned-arm-controls-need-no-planned-arm"; };
+    };
+  };
+
+item

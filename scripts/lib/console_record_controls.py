@@ -348,23 +348,32 @@ def _require(code: str, pattern: str, description: str) -> None:
 
 
 _DIAGNOSTIC_ENTRY_POINTS = frozenset({"write", "print"})
+# The install of the root's own console UART. The module may publish it, and
+# only the root binary may name it; `root_console.py` judges what it does.
+_DIAGNOSTIC_INSTALL = "install"
+_ROOT_BINARY = Path("slime-root/src/main.rs")
 
 
 def _audit_diagnostic_entry_points(diagnostic: str) -> None:
     """Only the serialized write body may reach the kernel byte sink.
 
     Public functions are limited to the qualified write/print pair, so another
-    root producer cannot reach an unlocked sink through the shared module.
+    root producer cannot reach an unlocked sink through the shared module. The
+    console install is the one other public function, and it emits nothing.
     """
     public = re.findall(
         r"\bpub\s*(\([^)]*\))?\s*(?:const\s+|unsafe\s+|extern\s+\S+\s+)*fn\s+(\w+)", diagnostic
     )
+    names = [name for _, name in public]
     if (
         any(scope for scope, _ in public)
-        or {name for _, name in public} != _DIAGNOSTIC_ENTRY_POINTS
-        or len(public) != 2
+        or len(names) != len(set(names))
+        or set(names) - {_DIAGNOSTIC_INSTALL} != _DIAGNOSTIC_ENTRY_POINTS
     ):
-        _reject("diagnostic module may publish only the qualified write and print entry points")
+        _reject(
+            "diagnostic module may publish only the qualified write and print entry points "
+            "and the console install"
+        )
     if re.search(r"\bpub\s*(?:\([^)]*\)\s*)?(?:static|const|mod|struct|trait)\b", diagnostic):
         _reject("diagnostic module must not publish alternate output items")
     # Re-exports are allowed only for the record macros themselves.
@@ -401,7 +410,8 @@ def _audit_diagnostic_call_sites(code: str, path: Path) -> None:
             if match.group(1).startswith("{")
             else [match.group(1)]
         )
-        if any(name not in _DIAGNOSTIC_ENTRY_POINTS for name in names):
+        allowed = _DIAGNOSTIC_ENTRY_POINTS | ({_DIAGNOSTIC_INSTALL} if path == _ROOT_BINARY else frozenset())
+        if any(name not in allowed for name in names):
             _reject(f"unqualified diagnostic entry point in {path}: {match.group(0)}")
 
 
@@ -744,6 +754,16 @@ def _audit_controls(product_root: Path) -> int:
             "fn bad(bytes: &[u8]) { crate::diagnostic::write_raw(bytes); }",
         ),
         ("aliased diagnostic module", "slime-root/src/console.rs", "use crate::diagnostic as out;"),
+        (
+            "console install named outside the root binary",
+            "slime-root/src/console.rs",
+            "fn bad() { crate::diagnostic::install(0); }",
+        ),
+        (
+            "second public console install",
+            "slime-root/src/diagnostic.rs",
+            "pub fn install(registers: usize) {}\npub fn install(registers: usize) {}",
+        ),
         (
             "re-exported private sink",
             "slime-root/src/diagnostic.rs",

@@ -3,12 +3,12 @@
 | | |
 | --- | --- |
 | Route | determinism |
-| Depends on | [D3 deterministic-component authority](../../roadmap/08-native-development.md#deterministic-component-authority) (capability-matrix amendment for clock/entropy objects) |
+| Depends on | [D3 deterministic-component authority](../plans/native-development.md#deterministic-component-authority) (capability-matrix amendment for clock/entropy objects) |
 | Enables | flake-free rollback/health CI; completes QEMU's tier-0 role as the deterministic verification platform |
 
 ## Motivation
 
-[D3 deterministic-component authority](../../roadmap/08-native-development.md#deterministic-component-authority)
+[D3 deterministic-component authority](../plans/native-development.md#deterministic-component-authority)
 is promoted work; [entry 11](11-flight-recorder-replay.md) remains parked. Their
 composition is the payoff: a test generation binds clock and entropy to
 virtual fixtures so the full boot-and-health-check run is

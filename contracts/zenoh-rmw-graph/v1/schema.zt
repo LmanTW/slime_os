@@ -1,0 +1,97 @@
+-- The synthetic rows of the rmw_zenoh graph exam, handed from its checker to its Rust tests.
+--
+-- `check-zenoh-profile0.py --slice rmw-graph` writes one record of this shape to
+-- `build/zenoh-rmw-graph/fixtures.zti`; the `zenoh_rmw_graph::` tests read it. The captured sessions are
+-- `contracts/zenoh-rmw-session/v1`'s. The rows here are the ones this repository wrote: QoS substrings,
+-- liveliness-token keys the graph must take, keys it must refuse, and keys outside `@ros2_lv` it must
+-- ignore. Only the container is fixed here; the grammar is rmw_zenoh's and the judge owns it.
+
+Row :: type {
+  name : Text;
+  key : Text;
+};
+
+Graph :: type {
+  formatVersion : Int;
+  qos : List Row;
+  tokens : List Row;
+  refuse : List Row;
+  qosRefuse : List Row;
+  ignored : List Row;
+};
+
+FromData @Row :: derive
+FromData @Graph :: derive
+
+formatVersion :: Int = 1;
+qosCount :: Int = 12;
+tokenCount :: Int = 8;
+refuseCount :: Int = 21;
+qosRefuseCount :: Int = 4;
+ignoredCount :: Int = 2;
+maxKeyBytes :: Int = 253;
+maxNameBytes :: Int = 64;
+
+d ::= import stdlib.data;
+r ::= import stdlib.result;
+
+-- `decode` ignores a field it does not know, so the field set is closed here: every record, at the top
+-- level and in each row, may name only the fields below.
+topFields :: List Text = { "formatVersion"; "qos"; "tokens"; "refuse"; "qosRefuse"; "ignored"; };
+rowFields :: List Text = { "name"; "key"; };
+
+isAllowed :: Text -> List Text -> Bool
+  = wanted allowed => match allowed {
+    | {;} => false;
+    | {head; ...tail} => if head == wanted then true else isAllowed wanted tail;
+  };
+
+onlyThese :: List Text -> List d.DataField -> Bool
+  = allowed found => match found {
+    | {;} => true;
+    | {head; ...tail} => isAllowed head.name allowed && onlyThese allowed tail;
+  };
+
+recordIsClosed :: List Text -> Data -> Bool
+  = allowed data => match d.asRecord data {
+    | #ok { value = found; } => onlyThese allowed found;
+    | #err { error = _; } => true;
+  };
+
+everyRowClosed :: List Data -> Bool
+  = rows => match rows {
+    | {;} => true;
+    | {head; ...tail} => recordIsClosed rowFields head && everyRowClosed tail;
+  };
+
+rowsAreClosed :: Text -> Data -> Bool
+  = group data => match d.field group data {
+    | #ok { value = value; } => match d.asList value {
+      | #ok { value = rows; } => everyRowClosed rows;
+      | #err { error = _; } => true;
+    };
+    | #err { error = _; } => true;
+  };
+
+closedGraph :: Data -> Bool
+  = data => recordIsClosed topFields data && rowsAreClosed "qos" data && rowsAreClosed "tokens" data && rowsAreClosed "refuse" data && rowsAreClosed "qosRefuse" data && rowsAreClosed "ignored" data;
+
+extraField :: DecodeIssue
+  = { path = {;}; error = #custom { message = "a field the contract does not name"; }; };
+
+decodeGraph :: Data -> Validation DecodeIssue Graph
+  = data => if closedGraph data then decode data else r.invalidOne extraField;
+
+{
+  Row =;
+  Graph =;
+  decodeGraph =;
+  formatVersion =;
+  qosCount =;
+  tokenCount =;
+  refuseCount =;
+  qosRefuseCount =;
+  ignoredCount =;
+  maxKeyBytes =;
+  maxNameBytes =;
+}

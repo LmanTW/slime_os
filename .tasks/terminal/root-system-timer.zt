@@ -1,0 +1,147 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.milestone "01a1f82b-ddcc-7e34-a374-1c2b0d23ff6c" "root-system-timer" "planes-mechanism"
+  "A Raspberry Pi 5 image can count the SoC's system timer, and then no EL0 program names a generic-timer register"
+  "Every AArch64 root reads CNTPCT_EL0 and programs CNTP_CTL_EL0 and CNTP_CVAL_EL0 from EL0, and every AArch64 component reads CNTPCT_EL0 and CNTFRQ_EL0. The kernel must export those registers, and the verified kernel configuration exports none. docs/decisions/verified-kernel-profile.md makes this the second prerequisite of the verified profile: the root programs a device timer, and no EL0 code reads or writes a generic-timer register. Two source files hold every such instruction: slime-root/src/platform_timer.rs and components/runtime/src/clock.rs.")
+  with {
+    intent = #active;
+    depends = {
+      "01a1f677-0511-752b-8231-8e9b491399de";
+    };
+    owns = {
+      "slime-root/src/**";
+      "slime-root/build.rs";
+      "components/runtime/src/clock.rs";
+      "scripts/build/build-sel4.py";
+    };
+    nonGoals = {
+      h.nonGoal "A claim that the system timer works on the board. No gate of this item boots the image. An operator observes the board, and the implementation pull request states that observation as made or as not made." h.agentDefault;
+      h.nonGoal "A read-only mapping of the timer's counter page into components. docs/decisions/verified-kernel-profile.md asks for it. In this item a component of a system-timer image asks the root, as every RISC-V and x86-64 component does. A later item maps the page." h.agentDefault;
+      h.nonGoal "A change to a kernel configuration, a new target profile, or a change to the features a profile requires. The image of this item runs on the kernel of bcm2712-rpi5 and under the profile aarch64-rpi5, which still requires the generic timer. The item of the verified profile changes them." h.agentDefault;
+      h.nonGoal "A change to an image built without the switch. The default Raspberry Pi 5 image and every QEMU image keep their time source." h.agentDefault;
+      h.nonGoal "A component built outside this repository. A component that the SDK built for aarch64-rpi5 without the switch reads the generic timer, and the gate of this item refuses an image that holds one." h.agentDefault;
+      h.nonGoal "A closure source for the system-timer image. The image builder takes a flag, as it does for the test terminator and the early fault of the Milk-V Duo S." h.agentDefault;
+      h.nonGoal "The pages under docs/ that state where a root and a component read time. docs/ is a process path, and a process pull request follows the implementation." h.agentDefault;
+    };
+    requirements = {
+      h.req "no-el0-program-names-a-generic-timer-register"
+        "rpi5_system_timer_image_check passes. It builds two bcm2712-rpi5 images with --system-timer: the product, --component-graph, and the clock-authority composition, --clock-authority-plane. In each it reads the root ELF, the root child ELF and the component image of every executable, and none holds an MRS or MSR of a generic-timer register. The same two images built without the flag are its controls: each root then writes CNTP_CTL_EL0 and reads CNTPCT_EL0, and clock-authority-probe reads CNTPCT_EL0."
+        { "rpi5_system_timer_image_check"; };
+      h.req "the-switch-has-one-source"
+        "rpi5_system_timer_image_check passes: build-sel4.py --system-timer writes an image identity that records system_timer, under a name of its own, and the identity of the build without the flag records none. The builder refuses the flag on another platform and refuses SLIME_SYSTEM_TIMER in its environment. The gate sets no variable: the flag alone separates a build from its control, so the flag reaches the root build and every component build."
+        { "rpi5_system_timer_image_check"; };
+      h.req "driver-decisions-have-host-tests"
+        "test_sel4_root runs at least 390 host tests, and reports the count as hostTests. main runs 383. The new tests call the functions that compute the compare value of a deadline, read the counter from its two halves, program compare channel 3 and park it."
+        { "test_sel4_root"; };
+      h.req "timer-role-within-its-ceiling"
+        "root_size_check counts at most 1450 code lines in the timer role, and reports the count as timerCodeLines. main holds 1345."
+        { "root_size_check"; };
+      h.req "series-within-its-ceiling"
+        "root_size_check counts at most 33200 code lines in the series, and reports the count as seriesCodeLines. main holds 33073."
+        { "root_size_check"; };
+      h.req "aarch64-qemu-root-keeps-its-timer"
+        "sel4_boot_check and sel4_root_boot_check pass: a root for qemu-arm-virt still proves and serves the generic timer."
+        { "sel4_boot_check"; "sel4_root_boot_check"; };
+      h.req "riscv64-root-keeps-its-timer"
+        "riscv64_sel4_root_boot_check passes: a root for qemu-riscv-virt still proves its device timer."
+        { "riscv64_sel4_root_boot_check"; };
+      h.req "x86-64-root-keeps-its-timer"
+        "x86_64_sel4_root_boot_check passes: a root for qemu-pc99 still proves the HPET."
+        { "x86_64_sel4_root_boot_check"; };
+      h.req "aarch64-components-keep-direct-reads"
+        "clock_direct_read_check passes: a component of a qemu-arm-virt image still reads the counter in its own thread, and the root serves no clock read."
+        { "clock_direct_read_check"; };
+    };
+    acceptance = {
+      h.observed "rpi5_system_timer_image_check";
+      h.observedWhere "test_sel4_root" {
+        h.atLeast "hostTests" 390;
+      };
+      h.observedWhere "root_size_check" {
+        h.atMost "timerCodeLines" 1450;
+        h.atMost "seriesCodeLines" 33200;
+      };
+      h.observed "sel4_boot_check";
+      h.observed "sel4_root_boot_check";
+      h.observed "riscv64_sel4_root_boot_check";
+      h.advisory (h.observed "x86_64_sel4_root_boot_check");
+      h.advisory (h.observed "clock_direct_read_check");
+    };
+    invariants = {
+      h.invariant "a-build-without-the-switch-keeps-its-code"
+        "The root ELF of every configuration built without the switch keeps the bytes of its .text and .data sections. The implementation renames the conditions that select a timer backend and changes no backend that exists. The section .rodata keeps its size and may differ: new lines enter two source files, and a panic location records a line number. The implementation pull request reports the SHA-256 of the three sections for the thirteen configurations that root-library built, before and after."
+        h.agentDefault;
+      h.invariant "the-root-keeps-the-platform-timer-trait"
+        "The system timer is one more backend behind PlatformTimer in slime-root/src/platform_timer.rs. The timer queue, the clock service and the operations of slime-root/src/ipc.rs do not change."
+        h.agentDefault;
+      h.invariant "a-missed-match-is-not-lost"
+        "The compare channel matches the low word of the counter. The backend reads the counter again after it writes the compare value, and it programs again when the counter passed the value and the status register holds no match."
+        h.agentDefault;
+      h.invariant "host-tested-code-touches-no-device"
+        "A host test of the backend reads and writes host memory that stands in for the register page. It maps no device and invokes no seL4 operation."
+        h.agentDefault;
+      h.invariant "the-fixture-item-closes-first"
+        "The implementation pull request makes this item active after the item root-without-fixture is terminal. That item bounds the series at 33100, and this one adds 93 lines."
+        h.agentDefault;
+    };
+    decisions = {
+      h.decided "the-device-timer-is-the-bcm2835-system-timer"
+        "The backend counts the BCM2835 system timer at physical address 0x10_7c00_3000 and takes compare channel 3, interrupt 99."
+        "docs/decisions/verified-kernel-profile.md names timer@7c003000. deps/sel4/tools/dts/rpi5b.dts places it under the soc range at 0x10_0000_0000, gives it a rate of 1 MHz and lists SPI 67 for its fourth interrupt. The kernel of bcm2712 counts the generic timer and names no system timer among its devices. Linux's driver, drivers/clocksource/bcm2835_timer.c, takes channel 3 and leaves channels 0 and 2 to the firmware"
+        h.agentDefault
+        { "no-el0-program-names-a-generic-timer-register"; "driver-decisions-have-host-tests"; };
+      h.decided "a-build-switch-not-a-target-profile"
+        "The image builder selects the backend with --system-timer, which sets SLIME_SYSTEM_TIMER=1 for the root's build script and for the component runtime. The target profile stays aarch64-rpi5."
+        "a target profile fixes a kernel configuration, a set of required features and the flags of an SDK release, and the verified profile needs the root's own console on the board first. A switch lets an operator bring the timer up on the kernel that still prints. The verified profile's item turns the switch into the profile's rule"
+        h.agentDefault
+        { "the-switch-has-one-source"; };
+      h.decided "a-component-asks-the-root-in-this-item"
+        "A component of a system-timer image reads the clock through the root's operations 44 and 70, which every RISC-V and x86-64 component uses."
+        "the image then holds no generic-timer instruction with a change of two functions in components/runtime/src/clock.rs. docs/decisions/ambient-clock-reads.md measured the cost of a served read: 0.75 s of root time for 23453 reads under QEMU TCG. The read-only counter page removes that cost and needs a mapping in every component's address space, which is an item of its own"
+        h.agentDefault
+        { "no-el0-program-names-a-generic-timer-register"; };
+      h.decided "the-gate-reads-what-the-image-holds"
+        "The gate reads the ELFs that the image identity names, held to their recorded SHA-256, and the component image of every executable row of the generation, through the generated bindings of the generation and component image contracts. It reads code segments as 4-byte words."
+        "a generation holds component images, not ELF files, so a scan of build outputs would not read what ships, and a scan of the whole image would read the kernel, which uses these registers above EL0. A data word inside an executable segment with the bits of an access is reported as one: the audit then refuses an image that is clean and never accepts one that is not"
+        h.agentDefault
+        { "no-el0-program-names-a-generic-timer-register"; };
+      h.decided "the-product-image-needs-a-second-composition"
+        "The image builder takes --clock-authority-plane, which embeds the composition sel4-clock-authority, and the gate builds that image beside the product."
+        "the six executables of the product generation hold no clock read with or without the flag, so the product image alone cannot show that the flag reaches a component build. clock-authority-probe reads the counter and its rate. The builder has a flag of this kind for nine other compositions, and a gate that set the variable itself for this one would not observe the builder"
+        h.agentDefault
+        { "no-el0-program-names-a-generic-timer-register"; };
+      h.decided "the-timer-role-grows-before-it-leaves"
+        "The ceiling of the timer role rises from 1350 to 1450."
+        "docs/decisions/root-task-scope.md moves the timer role to a component in stage one, and the backend moves with it. Until then the root programs the timer, so the backend is root code. A draft adds 91 code lines. The series ceiling falls in the same pull request, from 34100 to 33200"
+        h.agentDefault
+        { "timer-role-within-its-ceiling"; "series-within-its-ceiling"; };
+      h.decided "the-bounds-come-from-a-draft"
+        "The bound on hostTests is 390, on timerCodeLines 1450 and on seriesCodeLines 33200."
+        "a draft of the implementation, on a local branch, runs 390 host tests, seven of them new, and holds 1436 code lines in the timer role and 33166 in the series. The gate passes on it: twelve EL0 programs, with 35 accesses in each of the two roots and 2 in clock-authority-probe without the flag, and none with it"
+        h.agentDefault
+        { "driver-decisions-have-host-tests"; "timer-role-within-its-ceiling"; "series-within-its-ceiling"; };
+      h.decided "a-mandatory-target-without-a-record"
+        "The item binds rpi5_system_timer_image_check as a mandatory acceptance, and that target has no record."
+        "the target is new with this item, and it is the item's claim. It needs the kernel prefix of bcm2712, which the Evidence workflow has not built for a bound target before. The item cannot close while the runner cannot build it, and then the owner decides"
+        h.agentDefault
+        { "no-el0-program-names-a-generic-timer-register"; };
+      h.decided "two-advisory-targets"
+        "The acceptances on x86_64_sel4_root_boot_check and clock_direct_read_check are advisory."
+        "the Evidence runner cannot build an x86-64 image: none of the seven records of the first target passed. clock_direct_read_check passed in 14 of its 17 records on the evidence branch at 1825352b, so a failure of it does not show a fault of this item. The implementation pull request runs both"
+        h.agentDefault
+        { "x86-64-root-keeps-its-timer"; "aarch64-components-keep-direct-reads"; };
+      h.decided "mandatory-targets-have-passing-records"
+        "Every other mandatory acceptance binds a target that the evidence branch records as passed."
+        "on the evidence branch at 1825352b the records are: root_size_check 9 of 9 passed, test_sel4_root 17 of 17, sel4_root_boot_check 7 of 7, riscv64_sel4_root_boot_check 7 of 7 and sel4_boot_check 8 of 9"
+        h.agentDefault
+        { "aarch64-qemu-root-keeps-its-timer"; "riscv64-root-keeps-its-timer"; };
+      h.decided "graders-change-in-the-planning-pull-request"
+        "The planning pull request of this item adds the gate: scripts/lib/el0_timer_audit.py, scripts/check/check-el0-generic-timer.py and the recipe rpi5_system_timer_image_check. It changes the size checker: the timer ceiling rises to 1450, the boot ceiling falls from 6050 to 5650, the series ceiling falls from 34100 to 33200, a ceiling of 150 bounds what a product root compiles of the binary, and the table of long functions no longer names main."
+        "a file that a bound target reads is a grader (V4), and the size checker grades promises, so it changes only in a pull request that adds an item. The item root-without-fixture left the lower ceilings to this pull request"
+        h.agentDefault
+        { "no-el0-program-names-a-generic-timer-register"; "timer-role-within-its-ceiling"; "series-within-its-ceiling"; };
+    };
+  };
+
+item

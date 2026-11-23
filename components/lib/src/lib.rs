@@ -35,16 +35,28 @@ pub mod tick_clock;
 pub mod uart16550;
 pub mod virtio_mmio;
 pub mod zenoh_link;
+pub mod zenoh_link_limits_v3;
 #[cfg(test)]
 mod zenoh_links;
 pub mod zenoh_node;
 pub mod zenoh_profile0;
+#[cfg(test)]
+mod zenoh_rmw;
+#[cfg(test)]
+mod zenoh_rmw_data;
+#[cfg(test)]
+mod zenoh_rmw_data_link;
+pub mod zenoh_rmw_graph;
+pub mod zenoh_rmw_link;
 pub mod zenoh_service;
 #[cfg(feature = "component-runtime")]
 pub mod zenoh_service_client;
 #[cfg(test)]
 mod zenoh_service_link;
 pub mod zenoh_service_server;
+pub mod zenoh_service_server_roster;
+#[cfg(test)]
+mod zenoh_service_stack;
 #[cfg(test)]
 mod zenoh_stock;
 #[cfg(test)]

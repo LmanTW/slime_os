@@ -319,3 +319,182 @@ fn a_run_whose_slices_are_shorter_than_the_maximum_is_taken() {
         message
     );
 }
+
+// A `Run` holds one run's state and takes its timeout and limit from the caller, so a table of runs shares
+// them. These tests drive it directly.
+
+const TIMEOUT: u64 = 5000;
+
+fn run_join(
+    run: &mut Run,
+    storage: &mut [u8],
+    bodies: &[Vec<u8>],
+    first: u32,
+    now: u64,
+    limit: usize,
+) {
+    for body in bodies {
+        let fragment = decode_fragment(body, Some(BATCH)).expect("fragment");
+        run.accept(&fragment, storage, first, now, TIMEOUT, limit)
+            .expect("accepted");
+    }
+}
+
+#[test]
+fn a_run_joins_a_message_as_a_reassembly_does() {
+    let (message, bodies) = fragments(5000, FIRST);
+    let mut storage = std::vec![0u8; message.len()];
+    let mut run = Run::new();
+    assert!(!run.is_open());
+    run_join(&mut run, &mut storage, &bodies, FIRST, 0, message.len());
+    let (joined, next) = run.finish(&storage).expect("finished");
+    assert_eq!(joined, &message[..]);
+    assert_eq!(next, FIRST.wrapping_add(bodies.len() as u32));
+    assert!(!run.is_open());
+}
+
+#[test]
+fn two_runs_hold_two_messages_in_two_storages_at_once() {
+    let (first_message, first_bodies) = fragments(5000, FIRST);
+    let (second_message, second_bodies) = fragments(3000, 9000);
+    let mut a = std::vec![0u8; first_message.len()];
+    let mut b = std::vec![0u8; second_message.len()];
+    let (mut run_a, mut run_b) = (Run::new(), Run::new());
+    // The fragments of the two messages arrive interleaved, each into its own storage.
+    let mut pairs = first_bodies.iter().zip(second_bodies.iter());
+    for (x, y) in pairs.by_ref() {
+        let fx = decode_fragment(x, Some(BATCH)).expect("fragment");
+        let fy = decode_fragment(y, Some(BATCH)).expect("fragment");
+        run_a
+            .accept(&fx, &mut a, FIRST, 0, TIMEOUT, 6000)
+            .expect("a");
+        run_b
+            .accept(&fy, &mut b, 9000, 0, TIMEOUT, 6000)
+            .expect("b");
+    }
+    for rest in first_bodies.iter().skip(second_bodies.len()) {
+        let fragment = decode_fragment(rest, Some(BATCH)).expect("fragment");
+        run_a
+            .accept(&fragment, &mut a, FIRST, 0, TIMEOUT, 6000)
+            .expect("a");
+    }
+    assert_eq!(run_a.finish(&a).expect("a done").0, &first_message[..]);
+    assert_eq!(run_b.finish(&b).expect("b done").0, &second_message[..]);
+}
+
+#[test]
+fn a_run_takes_its_deadline_and_its_limit_from_the_caller() {
+    let (message, bodies) = fragments(5000, FIRST);
+    let mut storage = std::vec![0u8; message.len()];
+    let mut run = Run::new();
+    let first = decode_fragment(&bodies[0], Some(BATCH)).expect("fragment");
+    run.accept(&first, &mut storage, FIRST, 100, TIMEOUT, message.len())
+        .expect("first");
+    // The same run is late for a shorter timeout and in time for a longer one.
+    assert_eq!(run.deadline(TIMEOUT), Some(100 + TIMEOUT));
+    assert_eq!(run.deadline(1), Some(101));
+    assert!(!run.expired(100 + TIMEOUT, TIMEOUT));
+    assert!(run.expired(100 + TIMEOUT + 1, TIMEOUT));
+    assert!(run.expired(102, 1));
+    // A limit one byte under the message refuses it, whatever the storage holds.
+    let mut other = Run::new();
+    let mut again = std::vec![0u8; message.len()];
+    let result = bodies.iter().try_for_each(|body| {
+        let fragment = decode_fragment(body, Some(BATCH)).expect("fragment");
+        other
+            .accept(&fragment, &mut again, FIRST, 0, TIMEOUT, message.len() - 1)
+            .map(|_| ())
+    });
+    assert_eq!(
+        result,
+        Err(FragmentError::Refused(
+            crate::zenoh_profile0::Refusal::OverBound
+        ))
+    );
+    assert!(!other.is_open());
+}
+
+#[test]
+fn a_run_that_is_not_open_has_no_deadline_and_finishes_nothing() {
+    let run = Run::new();
+    assert_eq!(run.deadline(TIMEOUT), None);
+    assert!(!run.expired(u64::MAX, TIMEOUT));
+    let mut run = Run::new();
+    assert_eq!(run.finish(&[]).err(), Some(FragmentError::FragmentSequence));
+}
+
+#[test]
+fn a_run_measures_its_deadline_from_its_first_fragment_and_never_refreshes_it() {
+    let (message, bodies) = fragments(5000, FIRST);
+    assert!(bodies.len() >= 3);
+    let mut storage = std::vec![0u8; message.len()];
+    let mut run = Run::new();
+    let take = |run: &mut Run, storage: &mut [u8], at: usize, now: u64, timeout: u64| {
+        let fragment = decode_fragment(&bodies[at], Some(BATCH)).expect("fragment");
+        run.accept(&fragment, storage, FIRST, now, timeout, message.len())
+    };
+    take(&mut run, &mut storage, 0, 1000, 700).expect("first");
+    // A continuation 600 ms later is in time and must not move the deadline.
+    take(&mut run, &mut storage, 1, 1600, 700).expect("second");
+    assert_eq!(run.deadline(700), Some(1700));
+    // 101 ms after the second fragment is 701 ms after the first: late, though under 700 ms from the second.
+    assert_eq!(
+        take(&mut run, &mut storage, 2, 1701, 700),
+        Err(FragmentError::ReassemblyTimeout)
+    );
+    assert!(!run.is_open());
+}
+
+#[test]
+fn a_run_takes_its_timeout_from_the_call_and_holds_none_of_its_own() {
+    let (message, bodies) = fragments(5000, FIRST);
+    let mut storage = std::vec![0u8; message.len()];
+    // Two timeouts that no constant can both equal: the same run is in time under the longer and late under the
+    // shorter, in the same state.
+    // The second fragment arrives 9000 ms after the first. A timeout of 8000 refuses it, and one of 10000 takes
+    // it, so a fixed value under 9000 refuses the second case and one over 9000 takes the first.
+    for (timeout, late) in [
+        (100u64, true),
+        (8_000, true),
+        (10_000, false),
+        (60_000, false),
+    ] {
+        let mut run = Run::new();
+        let first = decode_fragment(&bodies[0], Some(BATCH)).expect("fragment");
+        run.accept(&first, &mut storage, FIRST, 0, timeout, message.len())
+            .expect("first");
+        let second = decode_fragment(&bodies[1], Some(BATCH)).expect("fragment");
+        // `expired` is read before the fragment arrives: a late fragment is refused and releases the run.
+        assert_eq!(run.expired(9000, timeout), late, "timeout {timeout}");
+        let result = run.accept(&second, &mut storage, FIRST, 9000, timeout, message.len());
+        assert_eq!(result.is_err(), late, "timeout {timeout}");
+        assert_eq!(run.is_open(), !late, "timeout {timeout}");
+    }
+}
+
+#[test]
+fn the_first_fragment_of_a_run_must_carry_the_number_it_is_given() {
+    let (message, bodies) = fragments(5000, FIRST);
+    let mut storage = std::vec![0u8; message.len()];
+    let fragment = decode_fragment(&bodies[0], Some(BATCH)).expect("fragment");
+    for expected in [FIRST - 1, FIRST + 1, 0, u32::MAX] {
+        let mut run = Run::new();
+        assert_eq!(
+            run.accept(&fragment, &mut storage, expected, 0, TIMEOUT, message.len()),
+            Err(FragmentError::SequenceMismatch),
+            "expected {expected}"
+        );
+        assert!(!run.is_open());
+    }
+    let mut run = Run::new();
+    assert!(
+        run.accept(&fragment, &mut storage, FIRST, 0, TIMEOUT, message.len())
+            .is_ok()
+    );
+    // A continuation is held to its predecessor and not to the number the first one was given.
+    let skipped = decode_fragment(&bodies[2], Some(BATCH)).expect("fragment");
+    assert_eq!(
+        run.accept(&skipped, &mut storage, 0, 1, TIMEOUT, message.len()),
+        Err(FragmentError::FragmentSequence)
+    );
+}

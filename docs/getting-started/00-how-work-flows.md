@@ -11,7 +11,7 @@ already know why a planning PR lands before an implementation PR, skip to the
 A work item is a `task/v2` Zutai file under `.tasks/items/`. It names what
 must become true and the `just` targets that prove it. The judge
 `scripts/spec/check` runs on every PR from the base commit, so a PR cannot
-change the judge that grades it. The rules V1 to V10 in
+change the judge that grades it. The rules V1 to V11 in
 [the devloop v1.5 decision](../decisions/work-item-devloop.md#rules) refuse a
 tree that contradicts the store.
 
@@ -30,7 +30,7 @@ flowchart TD
     A["Step 1: check the backlog"] --> B["Step 2: write the item with scripts/spec/tasks new"]
     B --> C["Step 3: planning PR carries the item as planned, with its exam"]
     C --> D["Step 4: set the intent to active and implement"]
-    D --> E["Step 5: implementation PR, judged under V1 to V10"]
+    D --> E["Step 5: implementation PR, judged under V1 to V11"]
     E --> F["Step 6: Evidence workflow writes records and done witnesses"]
     F --> G["Step 7: closeout bot PR moves the item to .tasks/terminal/"]
 ```
@@ -111,13 +111,17 @@ template. Its `Verification` table wants exact commands, the observed result,
 and an evidence class: *direct*, *inherited* or *inference*. Name the item by
 its slug and UUID.
 
-- **Enforced by:** the `Spec judge` workflow runs V1 to V10 on every push and
+- **Enforced by:** the `Spec judge` workflow runs V1 to V11 on every push and
   after each review. Every implementation path must sit under the `owns` of an
   item that is on base and `#active` on head (V2).
+- **Review:** every PR but a closeout needs one approval on its head, from a
+  person in `HUMAN_OWNERS` or from an account in `REVIEW_AGENTS`, and not from
+  the author (V11). A comment that starts with `@claude review` asks the
+  review agent for its verdict.
 - **Approvals:** a grader change, an area invariant change, an existing
   contract schema change, or a change to `scripts/spec/`, `HUMAN_OWNERS`,
-  `AGENT_ACCOUNTS` or `specs/allowed_signers` needs one approval on the head.
-  The approver is in `HUMAN_OWNERS` and is not the author (V4).
+  `AGENT_ACCOUNTS`, `REVIEW_AGENTS` or `specs/allowed_signers` needs that
+  approval by name (V4).
 - **Never** write `Closes #123` or `Fixes #123`. GitHub does not own
   completion here ([decision](../decisions/no-github-issue-projection.md)).
 
@@ -182,7 +186,7 @@ versions for people. After "add X", an agent does the following:
    inferred (5).
 
 On GitHub an agent pushes with a person's account. That person is the author
-and cannot give the V4 approval on that PR. Review an agent's work against the
+and cannot approve that PR. The review agent or another owner does. Review an agent's work against the
 list above, not against the diff alone. The judge catches a skipped planning
 PR or a self-graded exam. It does not judge the PR's evidence classes, or
 whether a `#human` question was asked of a person.

@@ -126,40 +126,6 @@ impl<const CAPACITY: usize> WindowTable<CAPACITY> {
         Ok(())
     }
 
-    /// Retained only for host-side regression checks of the retired startup
-    /// bind contract. Product code declares windows from root-owned mappings
-    /// and never accepts a child-supplied base (B46).
-    #[cfg(test)]
-    pub fn bind(
-        &mut self,
-        task: TaskId,
-        slot: u32,
-        base: usize,
-        len: usize,
-    ) -> Result<Window, IpcError> {
-        if slot != STARTUP_WINDOW_SLOT {
-            return Err(IpcError::InvalidOperation);
-        }
-        if !self.entries.iter().flatten().any(|(w, _)| w.task == task) {
-            return Err(IpcError::InvalidOperation);
-        }
-        let Some((window, bound)) = self
-            .entries
-            .iter_mut()
-            .flatten()
-            .find(|(w, _)| w.task == task && w.base == base)
-        else {
-            return Err(IpcError::InvalidLength);
-        };
-        if window.len != len {
-            return Err(IpcError::InvalidLength);
-        }
-        if !*bound {
-            *bound = true;
-        }
-        Ok(*window)
-    }
-
     /// The window `task`'s descriptor names, if that thread was declared.
     ///
     /// Thread identity is not trusted as authority: the badge authenticates
@@ -188,6 +154,42 @@ impl<const CAPACITY: usize> WindowTable<CAPACITY> {
         }
         self.len -= released;
         released > 0
+    }
+}
+
+#[cfg(test)]
+impl<const CAPACITY: usize> WindowTable<CAPACITY> {
+    /// Retained only for host-side regression checks of the retired startup
+    /// bind contract. Product code declares windows from root-owned mappings
+    /// and never accepts a child-supplied base (B46).
+    pub fn bind(
+        &mut self,
+        task: TaskId,
+        slot: u32,
+        base: usize,
+        len: usize,
+    ) -> Result<Window, IpcError> {
+        if slot != STARTUP_WINDOW_SLOT {
+            return Err(IpcError::InvalidOperation);
+        }
+        if !self.entries.iter().flatten().any(|(w, _)| w.task == task) {
+            return Err(IpcError::InvalidOperation);
+        }
+        let Some((window, bound)) = self
+            .entries
+            .iter_mut()
+            .flatten()
+            .find(|(w, _)| w.task == task && w.base == base)
+        else {
+            return Err(IpcError::InvalidLength);
+        };
+        if window.len != len {
+            return Err(IpcError::InvalidLength);
+        }
+        if !*bound {
+            *bound = true;
+        }
+        Ok(*window)
     }
 }
 

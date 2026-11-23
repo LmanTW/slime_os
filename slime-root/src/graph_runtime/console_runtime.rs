@@ -102,7 +102,7 @@ pub(super) fn start_console_dispatcher(
     allocator: &mut ObjectAllocator,
     endpoint: sel4::cap::Endpoint,
     tables: ConsoleTables<'_>,
-) {
+) -> Result<(), Stop> {
     let ConsoleTables {
         windows,
         tasks,
@@ -112,19 +112,17 @@ pub(super) fn start_console_dispatcher(
         scopes,
     } = tables;
     let scratch_addr = ptr::addr_of!(CONSOLE_PAGE) as usize;
-    let scratch = match ScratchPage::claim(bootinfo, scratch_addr) {
-        Ok(scratch) => scratch,
-        Err(error) => fatal!("console scratch unavailable: {error:?}"),
-    };
+    let scratch = ScratchPage::claim(bootinfo, scratch_addr)
+        .map_err(|error| stop!("console scratch unavailable: {error:?}"))?;
     let input_source = match input {
         Some(terminal) => console::ScriptedInput::new(script).with_terminal(terminal),
         None => console::ScriptedInput::new(script),
     };
 
-    let tcb = match allocator.allocate_fixed::<sel4::cap_type::Tcb>() {
-        Ok(slot) => slot.cap(),
-        Err(error) => fatal!("console TCB unavailable: {error:?}"),
-    };
+    let tcb = allocator
+        .allocate_fixed::<sel4::cap_type::Tcb>()
+        .map_err(|error| stop!("console TCB unavailable: {error:?}"))?
+        .cap();
     let ipc_addr = ptr::addr_of!(CONSOLE_IPC_BUFFER) as usize;
     let ipc_frame = child_vspace::image_frame(bootinfo, ipc_addr);
 
@@ -134,10 +132,10 @@ pub(super) fn start_console_dispatcher(
         let slot = &mut *ptr::addr_of_mut!(CONSOLE_CONTEXT);
         let input_slot = &mut *ptr::addr_of_mut!(CONSOLE_INPUT);
         *input_slot = Some(input_source);
-        let input = match input_slot.as_mut() {
-            Some(input) => ptr::addr_of_mut!(*input),
-            None => fatal!("console input unset"),
+        let Some(input) = input_slot.as_mut() else {
+            return Err(stop!("console input unset"));
         };
+        let input = ptr::addr_of_mut!(*input);
         *slot = Some(console::ConsoleContext {
             endpoint,
             scratch,
@@ -148,10 +146,10 @@ pub(super) fn start_console_dispatcher(
             namespaces: ptr::addr_of_mut!(*namespaces),
             scopes: scopes as *const _,
         });
-        match slot.as_ref() {
-            Some(context) => ptr::addr_of!(*context),
-            None => fatal!("console context unset"),
-        }
+        let Some(context) = slot.as_ref() else {
+            return Err(stop!("console context unset"));
+        };
+        ptr::addr_of!(*context)
     };
 
     let configured = tcb.tcb_configure(
@@ -166,15 +164,11 @@ pub(super) fn start_console_dispatcher(
         ipc_addr as sel4::Word,
         ipc_frame,
     );
-    if let Err(error) = configured {
-        fatal!("console thread configure failed: {error:?}")
-    }
+    configured.map_err(|error| stop!("console thread configure failed: {error:?}"))?;
     // The root's own priority: this thread answers on equal terms with the
     // service loop rather than starving behind it.
     let scheduled = tcb.tcb_set_sched_params(sel4::init_thread::slot::TCB.cap(), 255, 255);
-    if let Err(error) = scheduled {
-        fatal!("console thread priority failed: {error:?}")
-    }
+    scheduled.map_err(|error| stop!("console thread priority failed: {error:?}"))?;
 
     let stack_top = ptr::addr_of!(CONSOLE_STACK) as usize + size_of::<console::ConsoleStack>();
     let mut registers = sel4::UserContext::default();
@@ -187,10 +181,9 @@ pub(super) fn start_console_dispatcher(
     *registers.sp_mut() = thread_abi::initial_stack_pointer(stack_top) as sel4::Word;
     *registers.c_param_mut(0) = context as usize as sel4::Word;
     let started = tcb.tcb_write_all_registers(true, &mut registers);
-    if let Err(error) = started {
-        fatal!("console thread start failed: {error:?}")
-    }
-    slime_root::diagnostic_println!("SLIME_ROOT console dispatcher started");
+    started.map_err(|error| stop!("console thread start failed: {error:?}"))?;
+    crate::diagnostic_println!("SLIME_ROOT console dispatcher started");
+    Ok(())
 }
 
 /// The console thread's entry point.

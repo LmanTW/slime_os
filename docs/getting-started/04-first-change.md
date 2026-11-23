@@ -63,8 +63,9 @@ the assertion.
 
 **Behavior in the root or a component** — edit the owning module (per the
 index), run the narrowest `sel4_*` plane gate that
-exercises the path, and for root logic also `just test_sel4_root` (its test
-count is asserted; raise it deliberately when you add tests). Commit the
+exercises the path, and for root logic also `just test_sel4_root` (it counts
+the `#[test]` attributes in the source and fails when the run misses one, so a
+new test changes no recipe). Commit the
 change and rerun the gate on the clean tree, so its build result records
 `dirty = false`.
 

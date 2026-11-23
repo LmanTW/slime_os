@@ -1,0 +1,36 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a1f39c-2b08-7489-9134-7513fadde0f1" "zenoh-lanes-handshake" "zenoh-transport"
+  "A link with several runs holds its batch to the largest INIT_ACK it writes"
+  "A link with several runs offers the QoS unit extension on its INIT, so its largest INIT_ACK is 88 bytes and not 87. The limits contract version 2 admitted a batch of 89, which cannot carry that INIT_ACK and its stream length. The contract now refuses it. The exam has no row at that edge, and `LaneLimits` in Rust still takes a batch of 89.")
+  with {
+    intent = #planned;
+    supersedes = { "01a1ee8a-6ef8-73ab-8725-b6c0481587c3/limits-v2-declares-runs"; };
+    depends = { "01a1ee8a-6ef8-73ab-8725-b6c0481587c3"; };
+    owns = {
+      "components/lib/src/zenoh_profile0/lane_limits*";
+    };
+    nonGoals = {
+      h.nonGoal "The QoS offer on an INIT, the lane counters and the reassembly runs. The item `zenoh-fragment-lanes` owns them." h.agentDefault;
+      h.nonGoal "Any change to `contracts/zenoh-link-limits/v2`. A merged change already holds the batch to 90 bytes for a link with several runs." h.agentDefault;
+      h.nonGoal "Any change to version 1 or to a link with 1 run, which writes no extension and keeps a floor of 89." h.agentDefault;
+    };
+    requirements = {
+      h.req "contract-holds-the-qos-init-ack"
+        "The contract `contracts/zenoh-link-limits/v2` takes 7 records and refuses 15. A heap link with 2 or 16 runs needs a batch of 90. A heap link with 1 run needs 89."
+        { "zenoh_lanes_check"; };
+    };
+    acceptance = {
+      h.observed "zenoh_lanes_check";
+    };
+    decisions = {
+      h.decided "one-byte-for-the-offer"
+        "A link with more than 1 run charges one byte of its batch for the QoS unit extension on its INIT_ACK."
+        "`zenoh-codec` 1.0.0 writes an INIT_ACK of 87 bytes without the extension and 88 with it, and an INIT cannot be fragmented"
+        h.agentDefault
+        { "contract-holds-the-qos-init-ack"; };
+    };
+  };
+
+item

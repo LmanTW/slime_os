@@ -3,7 +3,7 @@
 | | |
 | --- | --- |
 | Route | determinism |
-| Depends on | replay of arbitrary components additionally wants [D3 deterministic-component authority](../../roadmap/08-native-development.md#deterministic-component-authority) |
+| Depends on | replay of arbitrary components additionally wants [D3 deterministic-component authority](../plans/native-development.md#deterministic-component-authority) |
 | Enables | [entry 26](26-hermetic-testing.md); failure reports as generation hash + trace |
 
 ## Motivation

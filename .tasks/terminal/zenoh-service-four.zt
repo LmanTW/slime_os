@@ -1,0 +1,97 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a203cb-3b7f-7306-8a75-ad22e5c3b015" "zenoh-service-four" "zenoh-service-core"
+  "The Zenoh service is built for four holders and six rows, and a booted composition runs all four"
+  "The Zenoh service component is built for 2 holders and 2 rows. The composition `sel4-zenoh-service` runs two holders, each with one row. No boot shows a third or fourth holder, a holder with two rows, or a delivery on a row that differs from its publication's row. The stack exam measured 4 holders and 6 rows on the host and bound the component to 2 and 2.")
+  with {
+    intent = #active;
+    owns = {
+      "components/services/zenoh-service/**";
+      "components/applications/zenoh-holder-gamma/**";
+      "components/applications/zenoh-holder-delta/**";
+      "components/applications/zenoh-holder-publisher/**";
+      "components/applications/zenoh-peer/**";
+      "components/lib/src/zenoh_service_stack*";
+      "contracts/component-spec/v1/components/zenoh-holder-gamma.zti";
+      "contracts/component-spec/v1/components/zenoh-holder-delta.zti";
+      "contracts/system-spec/v1/systems/sel4-zenoh-service-four.zti";
+      "contracts/generation-manifest/v1/compositions/sel4-zenoh-service-four.zti";
+      "contracts/composition-inventory/v1/inventory.zti";
+      "contracts/system-image-closure/v3/closures/sel4-zenoh-service-four.zti";
+      "contracts/system-test-run/v2/runs/sel4-zenoh-service-four.zti";
+      "scripts/generate/generate-system-test-runs.py";
+      "Cargo.toml";
+      "Cargo.lock";
+    };
+    nonGoals = {
+      h.nonGoal "More than four holders or six rows, a sample above 12 bytes, and a ring deeper than four slots. The component declares those ceilings and the generation declares limits at or below them." h.agentDefault;
+      h.nonGoal "A boot with a holder that faults, a second boot, and a stalled link. Their items own them, and this item changes none of their judges." h.agentDefault;
+      h.nonGoal "The two-holder composition `sel4-zenoh-service`. It keeps its system spec, its manifest and its closure. The component serves its table below the new ceilings, and the peer's link takes the larger table." h.agentDefault;
+      h.nonGoal "A holder that publishes more than one key, a second publisher, and more than four samples in one run. The booted judge counts four publications in total." h.agentDefault;
+      h.nonGoal "The seL4 stack depth and the release build. The stack exam measures a debug build on the host. Moving its built size to 4 holders and 6 rows is a separate item that supersedes its pins." h.agentDefault;
+    };
+    requirements = {
+      h.req "component-is-built-for-four-holders"
+        "`HOLDERS` is 4 and `ROWS` is 6 in the component. The system spec of the composition declares limits of 4 holders and a stack of 32768 bytes. The stack exam binds the component to 2 holders until a separate item moves it."
+        { "zenoh_service_four_check"; };
+      h.req "composition-declares-four-holders"
+        "The system spec of `sel4-zenoh-service-four` declares the four holders, their two new executables, their endpoints and six grant rows. The service holds 8 buffers, 8 byte pages, 8 loans and 10 mappings."
+        { "zenoh_service_four_check"; };
+      h.req "four-holders-exchange-under-qemu"
+        "One boot of the composition prints four attaches. `alpha` publishes four samples, each reaches three holders, and each of those holders is delivered each sample. The peer receives all four once. `beta` is refused once, and every instance exits 0."
+        { "zenoh_service_four_check"; };
+      h.req "two-row-holders-are-delivered-on-their-own-row"
+        "`gamma` and `delta` hold the command key as row 0 and the exchange key as row 1. Each sample reaches each of them on row 1. `beta` holds one row and is delivered on row 0."
+        { "zenoh_service_four_check"; };
+      h.req "the-two-holder-run-is-unchanged"
+        "`zenoh_service_booted_check` and `zenoh_service_peer_check` still pass on the composition `sel4-zenoh-service`, with the component built for 4 holders and 6 rows."
+        { "zenoh_service_booted_check"; "zenoh_service_peer_check"; };
+      h.req "controls-are-refused"
+        "The judge refuses 68 inputs. 21 remove one declaration from a synthetic file set. 47 corrupt an honest transcript."
+        { "zenoh_service_four_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_service_four_check" {
+        h.count "casesObserved" 30;
+        h.count "negativeControlsRefused" 68;
+      };
+      h.observedWhere "zenoh_service_booted_check" {
+        h.count "casesObserved" 19;
+        h.count "negativeControlsRefused" 70;
+      };
+      h.observedWhere "zenoh_service_peer_check" {
+        h.count "casesObserved" 11;
+        h.count "negativeControlsRefused" 36;
+      };
+    };
+    decisions = {
+      h.decided "four-holders-and-six-rows"
+        "The size is 4 holders and 6 rows, with a 12-byte sample and a ring of 4 slots. `alpha` publishes one key. `beta` subscribes to it with one row. `gamma` and `delta` hold two subscribe rows each."
+        "the stack exam measured that size, and the stated size of its planning item was 4 holders and 6 rows. The two-row holders make the receiving row differ from the publishing row, which the merged judge now resolves"
+        h.agentDefault
+        { "composition-declares-four-holders"; "two-row-holders-are-delivered-on-their-own-row"; };
+      h.decided "a-new-composition-and-the-old-one-stays"
+        "The composition `sel4-zenoh-service-four` is added as generation 174. `sel4-zenoh-service` stays, so the merged booted gate and the peer gate keep their composition."
+        "a change to the two-holder composition would move two merged gates and their closures, and the component serves a table below its ceilings"
+        h.agentDefault
+        { "the-two-holder-run-is-unchanged"; };
+      h.decided "gamma-and-delta-are-two-executables"
+        "`gamma` and `delta` each run their own executable, a subscriber with two rows. They do not publish and do not ask for a refusal. `beta` keeps the merged subscriber and its one refusal."
+        "the merged subscriber requires one row and takes row 0. A subscriber with two rows needs another executable or a startup argument, and a new executable is the smaller change"
+        h.agentDefault
+        { "two-row-holders-are-delivered-on-their-own-row"; };
+      h.decided "the-peer-takes-a-larger-session"
+        "The peer's session takes up to three subscriptions from the service and declares two of its own, so its subscriber table holds five. The peer still declares one."
+        "the service declares one subscription for each distinct subscribe key, and this composition has two. A booted run with the merged peer, whose subscriber table holds two, failed with `subscriber-limit`"
+        h.agentDefault
+        { "four-holders-exchange-under-qemu"; };
+      h.decided "provision-endpoints-are-pinned-high"
+        "The system spec pins the provision endpoints of `delta` and `gamma` at slots 28 and 27 of the service. `alpha` keeps slot 29 and `beta` keeps slot 30."
+        "a boot with them unpinned refused the loan to `delta` as absent, and the boot with these two pins passed. The cause was not isolated. A pin above 30 is refused by the builder, so the pins sit just below 29"
+        h.agentDefault
+        { "composition-declares-four-holders"; };
+    };
+  };
+
+item

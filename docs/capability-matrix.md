@@ -15,8 +15,8 @@ in the root, `boot-contracts`, and roughly fourteen userspace components.
 
 What still lives in more than one place, by design, is *enforcement*: the rights
 types the root builds from those bits in `slime-root/src/graph.rs`, and the
-operations that check them in `slime-root/src/main.rs`'s dispatcher and the
-owning mechanism module. Those are predicates over one vocabulary, not copies of
+operations that check them in the dispatcher,
+`slime-root/src/graph_runtime/services.rs`, and the owning mechanism module. Those are predicates over one vocabulary, not copies of
 it.
 
 ## Grammar
@@ -188,7 +188,8 @@ Semantics not visible in the table:
   with nothing for the kernel to carry, so the descriptor arrives alone and the
   receiver takes up the authority behind it with `CAPABILITY IMPORT`.
 - Only `Endpoint`, `SharedBuffer`, `Loan`, `Supervision`, and `Directory` are
-  nameable by a transfer (`capability_kind` in `slime-root/src/main.rs`). No
+  nameable by a transfer (`capability_kind` in
+  `slime-root/src/graph_runtime/services/capability.rs`). No
   other kind can move; an `Executable` or a factory reaches a child as a spawn
   grant or a declared binding, never as a transfer.
 - C9.5 narrows `CAPABILITY IMPORT` for one class of receiver, and only that one:
@@ -353,8 +354,8 @@ observe the graph returning to zero live tasks.
 | Candidate object | Candidate rights | Trigger | Open questions |
 | --- | --- | --- | --- |
 | Generation-update authority as an object | possibly STAGE_PENDING | a generation service that must not hold raw block write | Boundary between userspace staging and immutable selector-owned slot writes, now that management is a component reaching storage over an IO0 ring whose write right is declared per ring in `contracts/block-authority/v1` |
-| NetworkDestination | CONNECT / SEND / RECV / LISTEN | the RPi5 transport route ([RP5](../roadmap/09-rpi5-ros2-demo.md)) and [Hardware H6](../roadmap/04-platform-hardware.md) | IO4 answered the shape question *without* a capability kind: exact (protocol, address, port) tuples are a declared resource (`contracts/network-destination/v1`) that the root copies to the declared `network-service` through `CAPABILITY NETWORK DESTINATIONS READ` (and its own static interface through `CAPABILITY NETWORK INTERFACE READ`, `contracts/network-interface/v1`), with tuple matching in userspace. Whether a per-connection object and rights bits are ever needed is now the open question, and IO4's unfinished data plane is what would decide it |
-| EnergyAccount | READ? | [Hardware H track](../roadmap/04-platform-hardware.md) | Whether accounting is authority at all or read-only telemetry |
+| NetworkDestination | CONNECT / SEND / RECV / LISTEN | the RPi5 transport route ([RP5](plans/rpi5-ros2-demo.md#rp5--node-and-transport-runtime-envelope)) and [Hardware H6](plans/framework-hardware.md#slice-acceptance) | IO4 answered the shape question *without* a capability kind: exact (protocol, address, port) tuples are a declared resource (`contracts/network-destination/v1`) that the root copies to the declared `network-service` through `CAPABILITY NETWORK DESTINATIONS READ` (and its own static interface through `CAPABILITY NETWORK INTERFACE READ`, `contracts/network-interface/v1`), with tuple matching in userspace. Whether a per-connection object and rights bits are ever needed is now the open question, and IO4's unfinished data plane is what would decide it |
+| EnergyAccount | READ? | [Hardware H track](plans/framework-hardware.md#slice-acceptance) | Whether accounting is authority at all or read-only telemetry |
 
 M6.1 landed non-consuming narrow derive-copy spawn grants, per-spawner
 accounting, and supervision handles; B39–B50 moved endpoint creation from a

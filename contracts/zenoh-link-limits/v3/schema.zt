@@ -1,0 +1,355 @@
+-- The limits one Zenoh Profile 0 link is built and declared with. This is version 3.
+--
+-- Version 3 adds two fields to a configuration. `maxRuns` is the reassembly runs a heap link holds at once.
+-- `localSubscriptions` is the subscriptions this side of the session may declare. Version 1 has neither,
+-- and a link built from it keeps one run and one local subscription. Version 2 is
+-- `contracts/zenoh-link-limits/v2`, which `.tasks/items/zenoh-fragment-lanes.zt` planned, and it adds `maxRuns` alone. This version restates that item's rules for
+-- `maxRuns` so that one record carries both fields, and it adds nothing to them.
+--
+-- Profile 0 was sized for one message, the demo's `Counter`, and its bounds were fixed in code. A
+-- link now carries a named configuration in one of two modes:
+--
+--   fixed  No heap. Every buffer is an array sized from the configuration, a message must fit in one
+--          batch, and a fragment is refused. `demo` is the configuration the first release shipped
+--          and does not change; `large` is the same mode with bigger arrays.
+--   heap   The owning component supplies the storage a fragmented message is reassembled into, from
+--          its own allocator. A message may be larger than a batch and is sent and received as
+--          fragments. `maxRuns` messages are reassembled at a time, one for each lane.
+--
+-- A configuration is judged here, before a link is built from it, so a declaration that cannot hold
+-- its own largest message, cannot cross the network service in one operation, or leaves the owning
+-- component too little stack or heap is refused instead of failing later.
+--
+-- What this contract does not do is choose a size. Nothing here says how many keys a link may hold
+-- or how large a message may be: the protocol has no such cap (a subscriber id is 32 bits, an alias
+-- id 16, a message any length), and the repository's own `1` and `12` come from the demo's single
+-- `Counter`. A configuration declares what it needs, and this contract checks that the declaration
+-- is consistent with the memory it also declares. The limits that remain each have a source, named
+-- beside them.
+
+Config :: type {
+  name : Text;
+  mode : Text;
+  batchBytes : Int;
+  payloadBytes : Int;
+  keyBytes : Int;
+  attachmentBytes : Int;
+  maxKeys : Int;
+  maxSubscribers : Int;
+  localSubscriptions : Int;
+  maxRuns : Int;
+  outstandingSamples : Int;
+  stackBytes : Int;
+  reassemblyTimeoutMs : Int;
+  heapBytes : Int;
+};
+
+Limits :: type {
+  formatVersion : Int;
+  configs : List Config;
+};
+
+FromData @Config :: derive
+FromData @Limits :: derive
+
+formatVersion :: Int = 3;
+
+modeFixed :: Text = "fixed";
+modeHeap :: Text = "heap";
+
+-- Source: the network service moves at most one data page per operation (`DATA_BYTES` in
+-- `components/proto/src/network_service.rs`). A batch is the size of one stream operation, its
+-- two-byte length included, so a fragment body is the batch less those two bytes and a batch of
+-- `dataBytes` is exactly one operation.
+dataBytes :: Int = 4096;
+
+-- The length every stream operation carries ahead of its body: a message in a fixed link must fit
+-- the batch less this.
+streamLengthBytes :: Int = 2;
+
+-- Source: INIT and OPEN are transport messages and cannot be sent as FRAGMENTs, so a batch must hold
+-- the largest one the profile permits. An INIT_ACK with a 16-byte ZID (`MAX_ZID_BYTES`), the size
+-- parameters and a 64-byte cookie (`MAX_COOKIE_BYTES`) is 87 bytes: header, version, ZID length and
+-- ZID, resolution and batch size, cookie length and cookie. An OPEN_SYN with the longest lease and
+-- sequence number and a 64-byte cookie is 76.
+handshakeBytes :: Int = 87;
+
+-- A link with several runs offers the QoS unit extension on its INIT, one byte after the rest of it, so its
+-- largest INIT_ACK is 88 bytes. `zenoh-codec` 1.0.0 writes 87 without the extension and 88 with it. This restates
+-- the rule of version 2, which holds the batch of such a link to that INIT_ACK.
+qosOfferBytes :: Int = 1;
+
+-- A link sends a key declaration whole, in one FRAME, and does not fragment it. The longest
+-- declaration the host encoder writes is an UNDECLARE_SUBSCRIBER whose extension body is the key
+-- behind two bytes. Around that body it adds a header, a four-byte id, the extension tag and the
+-- body's length; the FRAME before it adds a header byte and a sequence number of up to five; and the
+-- stream length adds two. That is 18 bytes and the width of the body's length field, which grows with
+-- the key: one byte below 128, two below 16384, three above.
+declarationFixedBytes :: Int = 18;
+
+-- Source: the key-expression alias id and the scope every reference to it carries are 16 bits
+-- (`ExprId` is `u16` in `zenoh-protocol` 1.0.0), so a link cannot name more keys than this.
+aliasIds :: Int = 65535;
+
+-- Source: Profile 0 requires exactly the 33-byte `rmw_zenoh` attachment on every Put and refuses
+-- one that is shorter (`malformed-message`) or longer (`over-bound`) in every configuration
+-- (`components/lib/src/zenoh_profile0.rs`). The field is the wire size, not a choice, so a
+-- configuration that declares another size could not carry a valid Put. The optional attachment is
+-- a later item.
+requiredAttachmentBytes :: Int = 33;
+
+-- Source: a key's length travels as a 16-bit variable-length field (`contracts/zenoh-profile/v1`:
+-- "key scope, key length, cookie length"), which `key_reference` reads with `LEB128_SHORT_BITS`, so
+-- a key longer than this can be neither encoded nor decoded.
+maxKeyLengthBytes :: Int = 65535;
+
+-- Source: a payload's length travels as a 32-bit variable-length field (`LEB128_MAX_BITS` in
+-- `contracts/zenoh-profile/v1`), which `push` reads with that width, and the encoder converts a
+-- slice length to `u32`, so a payload longer than this can be neither encoded nor decoded.
+maxPayloadLengthBytes :: Int = 4294967295;
+
+-- What a full-key Put adds around its key, attachment and payload, besides the widths of the key's
+-- and the payload's lengths: the PUSH header, the scope, the Put header, the attachment extension tag
+-- and the attachment's one-byte length, five bytes in all. The host reference encoder proves it.
+messageFixedBytes :: Int = 5;
+
+-- What a FRAME adds before the message it carries: its header byte and a sequence number of up to
+-- five bytes.
+frameFixedBytes :: Int = 6;
+
+-- The contract's integers are 63-bit and it multiplies a sample count by the notices per sample and by
+-- a message or a payload of up to 2^32 bytes. At this count the largest such product, 2000000000
+-- notices of 2^32 bytes, is 8.6e18 and stays under 9.2e18, so every total is computed only for a count
+-- that cannot overflow it, and a count past it is refused and not evaluated.
+maxOutstandingSamples :: Int = 1000000000;
+
+-- What a fragment adds around its slice of a message: the header byte and a sequence number of at
+-- most five bytes, with a margin. Observed: a stock peer with a 2048-byte batch sent fragments of
+-- 2046 bytes, the batch less the stream length.
+fragmentFramingBytes :: Int = 8;
+
+-- Arithmetic from the code's own arrays, not a measured high-water mark. A link's locals are
+-- several batch-sized arrays and a scratch twice that size, so the stack covers `stackFactor`
+-- batches; each declared key and subscriber slot is a key array and a small header; each queued
+-- sample notice is a small header, and in fixed mode also the payload array it copies. The
+-- implementation's host tests hold these to `size_of` of the real types.
+stackFactor :: Int = 8;
+slotOverheadBytes :: Int = 16;
+noticeOverheadBytes :: Int = 40;
+
+-- The session machine's own fixed storage: its two subscriber slots, its alias, its cookie and
+-- identity. Measured once on the current types as 608 bytes with a `size_of` test, and held here
+-- with a margin; the slot term below counts the key and subscriber slots a configuration declares
+-- beyond those, so the two overlap and the sum is conservative.
+sessionFixedBytes :: Int = 640;
+noticesPerSample :: Int = 2;
+
+-- Source: the session's subscriber table holds `per_side + local` slots (`Params` in
+-- `components/lib/src/zenoh_profile0/session.rs`), and `sessionFixedBytes` already covers the first one. Each
+-- local subscription beyond the first adds one slot of a key array and a small header, `slotOverheadBytes`.
+-- The count is at most the grants contract's `maxCount`, 65535, which is also the scope width.
+maxLocalSubscriptions :: Int = 65535;
+
+-- Source: a stock peer keeps one defragmentation buffer for each pair of a priority (0 to 7) and a
+-- reliability, so a heap link holds at most 16 runs. A fixed link holds none and a heap link at least one.
+maxRunsPerLink :: Int = 16;
+
+-- Arithmetic from the code's own arrays, as `slotOverheadBytes` is. A run beyond the first adds a run header,
+-- and a link with two or more runs adds the counters of its lanes once. These restate the values of
+-- `scripts/lib/zenoh_lanes_exam.py`; a version-2 schema that disagrees with them is a defect of one of the two. They agree today.
+runOverheadBytes :: Int = 64;
+laneCounterBytes :: Int = 64;
+
+d ::= import stdlib.data;
+l ::= import stdlib.list;
+r ::= import stdlib.result;
+t ::= import stdlib.text;
+
+-- The record is closed. `decode` reads the fields it knows and ignores the rest, so a field the
+-- contract does not name would pass unseen; this refuses it at the top level and in every config.
+limitsFields :: List Text = { "formatVersion"; "configs"; };
+configFields :: List Text = { "name"; "mode"; "batchBytes"; "payloadBytes"; "keyBytes"; "attachmentBytes"; "maxKeys"; "maxSubscribers"; "localSubscriptions"; "maxRuns"; "outstandingSamples"; "stackBytes"; "reassemblyTimeoutMs"; "heapBytes"; };
+
+member :: Text -> List Text -> Bool
+  = name names => match names { | {;} => false; | {head; ...tail} => if head == name then true else member name tail; };
+
+allMembers :: List Text -> List Text -> Bool
+  = names found => match found { | {;} => true; | {head; ...tail} => member head names && allMembers names tail; };
+
+nameOf :: d.DataField -> Text
+  = field => field.name;
+
+closedRecord :: List Text -> Data -> Bool
+  = names data => match d.asRecord data {
+    | #ok { value = fields; } => allMembers names (l.map nameOf fields);
+    | #err { error = _; } => true;
+  };
+
+allClosed :: List Data -> Bool
+  = items => match items { | {;} => true; | {head; ...tail} => closedRecord configFields head && allClosed tail; };
+
+closedConfigs :: Data -> Bool
+  = data => match d.field "configs" data {
+    | #ok { value = value; } => match d.asList value { | #ok { value = items; } => allClosed items; | #err { error = _; } => true; };
+    | #err { error = _; } => true;
+  };
+
+closedLimits :: Data -> Bool
+  = data => closedRecord limitsFields data && closedConfigs data;
+
+count :: List Config -> Int
+  = items => match items { | {;} => 0; | { _; ...rest } => 1 + count rest; };
+
+-- The width of a variable-length integer, one to five bytes.
+lebBytes :: Int -> Int
+  = n => if n < 128 then 1 else (if n < 16384 then 2 else (if n < 2097152 then 3 else (if n < 268435456 then 4 else 5)));
+
+-- The whole serialized message a Put becomes: payload, key and attachment, the fixed bytes around
+-- them and the widths of the key's and the payload's lengths.
+messageBytes :: Config -> Int
+  = c => c.payloadBytes + c.keyBytes + c.attachmentBytes + messageFixedBytes + lebBytes c.keyBytes + lebBytes c.payloadBytes;
+
+-- The bytes a key declaration takes on the wire, stream length included: the key, the fixed bytes
+-- around it and the width of the length of its two-byte-longer extension body.
+declarationBytes :: Config -> Int
+  = c => c.keyBytes + declarationFixedBytes + lebBytes (c.keyBytes + 2);
+
+-- The key and subscriber slots a configuration declares.
+slotBytes :: Config -> Int
+  = c => (c.maxKeys + c.maxSubscribers) * (c.keyBytes + slotOverheadBytes);
+
+-- The queued sample notices. A fixed link copies each payload into its notice; a heap link hands
+-- the sample out as a slice of the reassembly buffer, so its notices carry no payload.
+noticeBytes :: Config -> Int
+  = c => noticesPerSample * c.outstandingSamples
+    * (noticeOverheadBytes + (if c.mode == modeFixed then c.payloadBytes else 0));
+
+-- The slots of the local subscriptions beyond the first, which `sessionFixedBytes` already covers.
+localBytes :: Config -> Int
+  = c => (c.localSubscriptions - 1) * (c.keyBytes + slotOverheadBytes);
+
+-- The extension a link with several runs offers on its INIT. A link with one run or none writes none.
+offerBytes :: Config -> Int
+  = c => if c.maxRuns > 1 then qosOfferBytes else 0;
+
+-- What the runs beyond the first add: a run header each, and the lane counters once.
+runBytes :: Config -> Int
+  = c => if c.maxRuns > 1 then (c.maxRuns - 1) * runOverheadBytes + laneCounterBytes else 0;
+
+-- The memory the owning component declares for the link's fixed storage.
+requiredStack :: Config -> Int
+  = c => stackFactor * c.batchBytes + sessionFixedBytes + slotBytes c + noticeBytes c + localBytes c + runBytes c;
+
+commonOk :: Config -> Bool
+  = c => t.length c.name >= 1 && t.length c.name <= 16
+    && c.batchBytes >= handshakeBytes + streamLengthBytes + offerBytes c && c.batchBytes <= dataBytes
+    && c.payloadBytes >= 1 && c.payloadBytes <= maxPayloadLengthBytes && c.keyBytes >= 1 && c.keyBytes <= maxKeyLengthBytes
+    && declarationBytes c <= c.batchBytes
+    && c.attachmentBytes == requiredAttachmentBytes
+    && c.maxKeys >= 1 && c.maxKeys <= aliasIds
+    && c.maxSubscribers >= 1 && c.maxSubscribers <= c.maxKeys
+    && c.localSubscriptions >= 1 && c.localSubscriptions <= maxLocalSubscriptions
+    && c.outstandingSamples >= 1 && c.outstandingSamples <= maxOutstandingSamples
+    && c.stackBytes >= requiredStack c;
+
+-- No heap: the message is one batch, so there is nothing to reassemble.
+fixedOk :: Config -> Bool
+  = c => messageBytes c + frameFixedBytes <= c.batchBytes - streamLengthBytes
+    && c.maxRuns == 0 && c.reassemblyTimeoutMs == 0 && c.heapBytes == 0;
+
+-- The heap a heap link needs: a sample is handed out as a slice of the buffer it was reassembled
+-- into, so every queued sample notice holds a whole message until it is consumed, and one more
+-- message is being reassembled. The link queues `noticesPerSample` notices for each outstanding
+-- sample (`NOTICES = 2 * MAX_EVENTS` in `zenoh_link.rs`), so that many messages can be held at
+-- once. A heap that holds fewer would have to refuse an admitted sample or overwrite one the
+-- component still holds. Each run holds one message being reassembled, so the heap counts `maxRuns` of them.
+heapNeeded :: Config -> Int
+  = c => (noticesPerSample * c.outstandingSamples + c.maxRuns) * messageBytes c;
+
+-- A heap link: the batch must carry more than a fragment's own framing, so a message makes
+-- progress, a stalled reassembly must expire, and the heap the component's allocator provides holds
+-- every outstanding sample and the message being reassembled.
+heapOk :: Config -> Bool
+  = c => c.batchBytes > fragmentFramingBytes
+    && c.maxRuns >= 1 && c.maxRuns <= maxRunsPerLink
+    && c.reassemblyTimeoutMs >= 1
+    && c.heapBytes >= heapNeeded c;
+
+configOk :: Config -> Bool
+  = c => commonOk c
+    && (if c.mode == modeFixed then fixedOk c else if c.mode == modeHeap then heapOk c else false);
+
+allConfigsOk :: List Config -> Bool
+  = items => match items { | {;} => true; | { head; ...rest } => configOk head && allConfigsOk rest; };
+
+hasName :: Text -> List Config -> Bool
+  = name items => match items {
+    | {;} => false;
+    | { head; ...rest } => if head.name == name then true else hasName name rest;
+  };
+
+-- Two configurations may not share a name, since a link and an exam name one by it.
+distinct :: List Config -> Bool
+  = items => match items {
+    | {;} => true;
+    | { head; ...rest } => if hasName head.name rest then false else distinct rest;
+  };
+
+limitsOk :: Limits -> Bool
+  = rec => rec.formatVersion == formatVersion
+    && count rec.configs >= 1
+    && allConfigsOk rec.configs && distinct rec.configs;
+
+unknownField :: DecodeIssue
+  = { path = {;}; error = #custom { message = "a field the contract does not name"; }; };
+
+outOfBounds :: DecodeIssue
+  = { path = {;}; error = #custom { message = "a configuration outside the bounds the contract declares"; }; };
+
+bounded :: Validation DecodeIssue Limits -> Validation DecodeIssue Limits
+  = checked => match checked {
+    | #valid { value = rec; } => if limitsOk rec then #valid { value = rec; } else r.invalidOne outOfBounds;
+    | #invalid { errors = errs; } => #invalid { errors = errs; };
+  };
+
+decodeLimits :: Data -> Validation DecodeIssue Limits
+  = data => if closedLimits data then bounded (decode data) else r.invalidOne unknownField;
+
+{
+  Config =;
+  Limits =;
+  decodeLimits =;
+  formatVersion =;
+  modeFixed =;
+  modeHeap =;
+  dataBytes =;
+  streamLengthBytes =;
+  handshakeBytes =;
+  qosOfferBytes =;
+  declarationFixedBytes =;
+  lebBytes =;
+  declarationBytes =;
+  aliasIds =;
+  requiredAttachmentBytes =;
+  maxKeyLengthBytes =;
+  maxPayloadLengthBytes =;
+  messageFixedBytes =;
+  frameFixedBytes =;
+  maxOutstandingSamples =;
+  fragmentFramingBytes =;
+  stackFactor =;
+  slotOverheadBytes =;
+  noticeOverheadBytes =;
+  sessionFixedBytes =;
+  noticesPerSample =;
+  maxLocalSubscriptions =;
+  maxRunsPerLink =;
+  runOverheadBytes =;
+  laneCounterBytes =;
+  messageBytes =;
+  heapNeeded =;
+  localBytes =;
+  offerBytes =;
+  runBytes =;
+  requiredStack =;
+}

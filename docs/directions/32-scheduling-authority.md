@@ -4,7 +4,7 @@
 | --- | --- |
 | Route | lifecycle |
 | Current owner | [Runtime scheduling class](../architecture/runtime-authority.md#scheduling-class) |
-| Related exploration | [Resource accounts](25-resource-accounts.md), [energy accounting](17-energy-accounting.md), and [foreign workloads](../../roadmap/05-foreign-workloads.md) |
+| Related exploration | [Resource accounts](25-resource-accounts.md), [energy accounting](17-energy-accounting.md), and [foreign workloads](../plans/foreign-workloads.md) |
 
 ## Open questions
 

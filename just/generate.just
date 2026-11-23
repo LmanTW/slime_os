@@ -21,6 +21,13 @@ zenoh_stock_gen:
 zenoh_undeclare_gen:
     python3 scripts/generate/generate-zenoh-undeclare-bindings.py
 
+# Renders the constants of contracts/zenoh-link-limits/v3 as components/proto/src/zenoh_link_v3_limits.rs.
+# The link-limits v3 exam requires the committed file to equal this output byte for byte.
+# `just zenoh_link_v3_limits_gen --check` compares the file and writes nothing. The exam's recipe runs that form.
+[group('generate')]
+zenoh_link_v3_limits_gen mode="":
+    python3 scripts/generate/generate-zenoh-link-v3-limits-bindings.py {{mode}}
+
 # Renders the constants of contracts/zenoh-service-grants/v1 as components/proto/src/zenoh_service_grants.rs.
 # The grants exam requires the committed file to equal this output byte for byte.
 [group('generate')]

@@ -124,15 +124,6 @@ impl SlotPool {
         self.total = total;
         Ok(())
     }
-    #[cfg(test)]
-    pub fn new(range: Range<usize>) -> Result<Self, AllocError> {
-        let mut pool = Self::EMPTY;
-        pool.initialize(range.clone())?;
-        pool.words
-            .provision_host(range.len().div_ceil(BITS), SlotWord::EMPTY);
-        pool.admit(pool.unadmitted_initial())?;
-        Ok(pool)
-    }
     pub fn planner(&mut self) -> SlotPlan<'_> {
         for index in 0..self.count {
             let word = self.word_mut(index);
@@ -325,6 +316,18 @@ impl SlotPool {
         }
         self.live -= released;
         self.next_word = 0;
+    }
+}
+
+#[cfg(test)]
+impl SlotPool {
+    pub fn new(range: Range<usize>) -> Result<Self, AllocError> {
+        let mut pool = Self::EMPTY;
+        pool.initialize(range.clone())?;
+        pool.words
+            .provision_host(range.len().div_ceil(BITS), SlotWord::EMPTY);
+        pool.admit(pool.unadmitted_initial())?;
+        Ok(pool)
     }
 }
 

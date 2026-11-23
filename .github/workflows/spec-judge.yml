@@ -5,12 +5,12 @@
 # rewrite the judge or the lists that judge it.
 #
 # This is the only judge of a pull request, and it blocks: the `main`
-# ruleset requires its `Devloop v1.5 judge` status check. A personal-account
-# repository cannot require a workflow from `main`, so a pull request could
-# edit this file or add a workflow that reports a passing check of the same
-# name. .github/CODEOWNERS covers .github/, and the ruleset requires Code
-# Owner review, so such a pull request needs another owner's approval. On
-# GitLab a protected pipeline definition replaces both.
+# ruleset requires its `Devloop v1.5 judge` status check and allows no bypass
+# of it. A personal-account repository cannot require a workflow from `main`,
+# so a pull request could edit this file or add a workflow that reports a
+# passing check of the same name. No mechanism stops that. The review rules
+# make it a blocking finding (docs/decisions/independent-review.md). On
+# GitLab a protected pipeline definition replaces the finding.
 name: Spec judge
 
 on:
@@ -18,9 +18,12 @@ on:
   pull_request_review:
     types: [submitted, dismissed]
 
-concurrency:
-  group: spec-judge-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+# No concurrency group. A pull request gets one judge run from its push and
+# one from each review, and the Agent review workflow runs them again after a
+# verdict. In one group, a run started again cancelled a newer run. The
+# ruleset does not merge a head while any check run named `Devloop v1.5 judge`
+# on it is cancelled or failed, although a later one of that name succeeded.
+# So every judge run finishes, and each reads the approvals when it runs.
 
 permissions:
   contents: read
@@ -30,19 +33,49 @@ jobs:
   judge:
     name: Devloop v1.5 judge
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The closure path below resolves the closure of every promised target,
+    # as the Evidence workflow's plan job does. The light path resolves none.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
+      # V7 reads the evidence of every promise when a milestone, or an item
+      # under one, enters #active. Finding a record needs its target's closure
+      # digest, and a target with a system image resolves that through
+      # scripts/lib/system_image_closure.py, which builds zutai-cli from
+      # deps/zutai and lists every submodule tree. An item enters #active only
+      # in a pull request that adds or changes an item file naming `#active`,
+      # so only such a pull request pays for the submodules and the full shell.
+      - name: Detect whether an item may start
+        id: scope
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          closures=false
+          while IFS= read -r path; do
+            if grep -q '#active' "$path"; then closures=true; fi
+          done < <(git diff --name-only --diff-filter=AMR "$BASE"...HEAD -- '.tasks/items/*.zt')
+          echo "closures=$closures" >> "$GITHUB_OUTPUT"
+          echo "closures=$closures"
+      - name: Check out the submodules
+        if: steps.scope.outputs.closures == 'true'
+        run: git submodule update --init --recursive
+      # The same environment as the Evidence workflow's plan job.
+      - uses: ./.github/actions/slime-env
+        if: steps.scope.outputs.closures == 'true'
+        with:
+          build-save: 'false'
       - uses: nixbuild/nix-quick-install-action@v35
+        if: steps.scope.outputs.closures != 'true'
         with:
           nix_conf: |
             keep-env-derivations = true
             keep-outputs = true
       # The same `spec` shell and cache key as CI's work_items job.
       - uses: nix-community/cache-nix-action@v7
+        if: steps.scope.outputs.closures != 'true'
         with:
           primary-key: >-
             spec-v1-${{ runner.os }}-${{ runner.arch }}-${{
@@ -55,18 +88,21 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
           GITHUB_TOKEN: ${{ github.token }}
+          # The closure resolver needs cargo and the tools of the default
+          # shell. Every other rule needs only the `spec` shell.
+          SHELL_ATTR: ${{ steps.scope.outputs.closures == 'true' && '.#default' || '.#spec' }}
         run: |
           judge="$RUNNER_TEMP/judge"
           mkdir -p "$judge"
           paths=""
-          for path in scripts/spec contracts/observation contracts/task specs/allowed_signers HUMAN_OWNERS AGENT_ACCOUNTS; do
+          for path in scripts/spec contracts/observation contracts/task specs/allowed_signers HUMAN_OWNERS AGENT_ACCOUNTS REVIEW_AGENTS; do
             if git cat-file -e "$BASE:$path" 2>/dev/null; then paths="$paths $path"; fi
           done
           if git cat-file -e "$BASE:scripts/spec/check" 2>/dev/null; then
             git archive "$BASE" $paths | tar -x -C "$judge"
           else
             echo "the base carries no judge; judging with the head's code"
-            cp -r --parents scripts/spec contracts/observation contracts/task specs/allowed_signers HUMAN_OWNERS AGENT_ACCOUNTS "$judge"/
+            cp -r --parents scripts/spec contracts/observation contracts/task specs/allowed_signers HUMAN_OWNERS AGENT_ACCOUNTS REVIEW_AGENTS "$judge"/
           fi
-          SPEC_ROOT="$PWD" SPEC_JUDGE=base nix develop .#spec --command \
+          SPEC_ROOT="$PWD" SPEC_JUDGE=base nix develop "$SHELL_ATTR" --command \
             python3 "$judge/scripts/spec/check" --base "$BASE" --forge github

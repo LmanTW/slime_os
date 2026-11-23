@@ -282,6 +282,11 @@ BOOT_SELECTION_IMAGE = BUILD_ROOT / "slime-sel4-boot-selection.elf"
 BOOT_SELECTION_MANIFEST = BUILD_ROOT / "slime-sel4-boot-selection.identity.json"
 DEMO_IMAGE = BUILD_ROOT / "slime-sel4-demo.elf"
 DEMO_MANIFEST = BUILD_ROOT / "slime-sel4-demo.identity.json"
+# The clock-authority composition: its probe is the one component that reads
+# the monotonic counter and its rate, which `rpi5_system_timer_image_check`
+# reads in a board image.
+CLOCK_AUTHORITY_IMAGE = BUILD_ROOT / "slime-sel4-clock-authority.elf"
+CLOCK_AUTHORITY_MANIFEST = BUILD_ROOT / "slime-sel4-clock-authority.identity.json"
 PRIVATE_MEMORY_IMAGE = BUILD_ROOT / "slime-sel4-private-memory.elf"
 PRIVATE_MEMORY_MANIFEST = BUILD_ROOT / "slime-sel4-private-memory.identity.json"
 PRIVATE_1G_IMAGE = BUILD_ROOT / "slime-sel4-private-memory-1g.elf"
@@ -298,9 +303,12 @@ PRIVATE_CYCLES_MANIFEST = BUILD_ROOT / "slime-sel4-private-memory-cycles.identit
 # builds by closure identity (`scripts/lib/closure_image.py`); these remain
 # because a legacy or SDK gate still selects them directly.
 FIXTURE_VARIANT = "fixture"
+# Read by `slime-root/build.rs` and by `components/runtime/src/clock.rs`.
+SYSTEM_TIMER_SWITCH = "SLIME_SYSTEM_TIMER"
 GRAPH_VARIANT = "graph"
 SAMPLE_VARIANT = "sample"
 DEMO_VARIANT = "demo"
+CLOCK_AUTHORITY_VARIANT = "clock-authority"
 # C9.2's bounded userspace wait set over one declared Notification. Carried as
 # a legacy variant because P6.4 replays it on pc99, whose Multiboot2 route has
 # no loader image and therefore no committed closure; the AArch64 plane builds
@@ -331,6 +339,7 @@ BOOT_SELECTION_VARIANT = "boot-selection"
 VARIANT_MANIFESTS = {
     GRAPH_VARIANT: "sel4",
     DEMO_VARIANT: "sel4-demo",
+    CLOCK_AUTHORITY_VARIANT: "sel4-clock-authority",
     SAMPLE_VARIANT: "sel4-sample",
     WAIT_SET_VARIANT: "sel4-wait-set",
     ROLLBACK_VARIANT: "sel4-rollback",
@@ -345,6 +354,7 @@ VARIANT_TARGET_DIRS = {
     FIXTURE_VARIANT: "root",
     GRAPH_VARIANT: "root-graph",
     DEMO_VARIANT: "root-demo",
+    CLOCK_AUTHORITY_VARIANT: "root-clock-authority",
     SAMPLE_VARIANT: "root-sample",
     WAIT_SET_VARIANT: "root-wait-set",
     ROLLBACK_VARIANT: "root-rollback",
@@ -359,6 +369,7 @@ VARIANT_IMAGES = {
     FIXTURE_VARIANT: (IMAGE, MANIFEST),
     GRAPH_VARIANT: (GRAPH_IMAGE, GRAPH_MANIFEST),
     DEMO_VARIANT: (DEMO_IMAGE, DEMO_MANIFEST),
+    CLOCK_AUTHORITY_VARIANT: (CLOCK_AUTHORITY_IMAGE, CLOCK_AUTHORITY_MANIFEST),
     SAMPLE_VARIANT: (SAMPLE_IMAGE, SAMPLE_MANIFEST),
     WAIT_SET_VARIANT: (WAIT_SET_IMAGE, WAIT_SET_MANIFEST),
     ROLLBACK_VARIANT: (ROLLBACK_IMAGE, ROLLBACK_MANIFEST),
@@ -370,7 +381,7 @@ VARIANT_IMAGES = {
     PRIVATE_ISOLATION_VARIANT: (PRIVATE_ISOLATION_IMAGE, PRIVATE_ISOLATION_MANIFEST),
 }
 
-CHILD_MANIFEST = ROOT / "slime-root" / "child" / "Cargo.toml"
+CHILD_MANIFEST = ROOT / "components" / "root-child" / "Cargo.toml"
 CHUNK_SIZE = 1024 * 1024
 
 
@@ -1519,6 +1530,8 @@ def media_tree(variant: str, platform: Platform, arguments: argparse.Namespace) 
         suffix += "-early-fault"
     if arguments.test_terminator:
         suffix += "-test-terminator"
+    if arguments.system_timer:
+        suffix += "-system-timer"
     return BUILD_ROOT / "media" / f"{platform.name}{suffix}"
 
 
@@ -1551,6 +1564,7 @@ def write_manifest(
     generation: Path | None = None,
     duo_early_fault: bool = False,
     test_terminator: bool = False,
+    system_timer: bool = False,
     source_platform: Platform | None = None,
 ) -> None:
     source_platform = source_platform or platform
@@ -1589,6 +1603,8 @@ def write_manifest(
         suffix += "-early-fault"
     if test_terminator:
         suffix += "-test-terminator"
+    if system_timer:
+        suffix += "-system-timer"
     stable_child = copy_artifact(child_elf, f"slime-root-child{suffix}.elf", source_platform)
     stable_root = copy_artifact(root_elf, f"slime-root{suffix}.elf", source_platform)
     stable_loader = (
@@ -1688,6 +1704,8 @@ def write_manifest(
         manifest["duo_early_fault"] = True
     if test_terminator:
         manifest["test_terminator"] = True
+    if system_timer:
+        manifest["system_timer"] = True
     if platform.emulated:
         # Emulator launch facts, which gates read to build their QEMU command.
         manifest["qemu"] = {
@@ -1772,6 +1790,22 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--system-timer",
+        action="store_true",
+        help=(
+            "build a distinct Raspberry Pi 5 image whose root counts the SoC's system "
+            "timer and whose components ask the root for the clock"
+        ),
+    )
+    parser.add_argument(
+        "--clock-authority-plane",
+        action="store_true",
+        help=(
+            "embed the clock-authority generation, whose probe reads the monotonic "
+            "counter and its rate, writing a separate image"
+        ),
+    )
+    parser.add_argument(
         "--demo-plane",
         action="store_true",
         help=(
@@ -1850,6 +1884,7 @@ def main() -> None:
         for variant, chosen in (
             (GRAPH_VARIANT, arguments.component_graph),
             (DEMO_VARIANT, arguments.demo_plane),
+            (CLOCK_AUTHORITY_VARIANT, arguments.clock_authority_plane),
             (SAMPLE_VARIANT, arguments.sample_plane),
             (WAIT_SET_VARIANT, arguments.wait_set_plane),
             (ROLLBACK_VARIANT, arguments.rollback_plane),
@@ -1878,6 +1913,15 @@ def main() -> None:
         fail("--test-terminator requires --component-graph")
     if arguments.test_terminator and arguments.duo_early_fault:
         fail("--test-terminator cannot be combined with --duo-early-fault")
+    # The root's build script and the component runtime both read this
+    # variable, so the flag is its only source: an ambient value would build a
+    # system-timer image under the name and the identity of the default one.
+    if os.environ.get(SYSTEM_TIMER_SWITCH):
+        fail(f"{SYSTEM_TIMER_SWITCH} is set by --system-timer; unset it")
+    if arguments.system_timer:
+        if arguments.platform != BCM2712_RPI5.name:
+            fail(f"--system-timer requires --platform {BCM2712_RPI5.name}")
+        os.environ[SYSTEM_TIMER_SWITCH] = "1"
 
     if Path.cwd().resolve() != ROOT:
         fail(f"run from repository root: {ROOT}")
@@ -1947,6 +1991,11 @@ def main() -> None:
         manifest_path = manifest_path.with_name(
             manifest_path.name.replace(".identity.json", "-test-terminator.identity.json")
         )
+    if arguments.system_timer:
+        image = image.with_name(image.name.replace(".elf", "-system-timer.elf"))
+        manifest_path = manifest_path.with_name(
+            manifest_path.name.replace(".identity.json", "-system-timer.identity.json")
+        )
     media: dict[str, object] | None = None
     if platform.boot_route == "kernel-loader":
         package_image(payload_tool, loader, root_elf, image, platform)
@@ -1980,6 +2029,7 @@ def main() -> None:
         generation=generation,
         duo_early_fault=arguments.duo_early_fault,
         test_terminator=arguments.test_terminator,
+        system_timer=arguments.system_timer,
     )
     if media is not None:
         print(

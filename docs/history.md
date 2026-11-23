@@ -32,22 +32,22 @@ this is not an exhaustive secret-absence guarantee. Do not broaden access.
 All 491 historical devlog files and the frozen backlog index were verified
 against the archive before removal. The snapshot also preserves the retired
 foundation and port deliveries, component-platform migration records, and
-I/O driver/proof investigations. The [roadmap classification](../roadmap/README.md)
-distinguishes archived sections from requirements still owned by the product.
+I/O driver/proof investigations. [Plans](plans/README.md) own the
+requirements the product still carries.
 
 The [archived release record](https://git.justaslime.dev/iceice666/slime_os-history/src/commit/45ed1745907b2d0a13fdf70c8b34eb635bed5f23/roadmap/README.md#x86-64-framework-cpuproduct-boot-release) preserves the observed P6.1–P6.6 Framework CPU/product boot completion.
 
 Promoted directions 2, 3, 5, 10, 23, 24, 28, 30, 31, and 33 are archive
 lookups rather than full exploratory pages. Their current owners are:
 
-- [native development](../roadmap/08-native-development.md) for deterministic
+- [native development](plans/native-development.md) for deterministic
   components, build provenance and on-device build requirements;
 - [checked rights algebra](architecture/ipc-and-capabilities.md#checked-rights-algebra)
   for the current model boundary and vocabulary discipline;
 - [authority and trust](plans/authority-and-trust.md) for revocation/leases,
   TPM/attestation, distributed authority, Secret and Accelerator design and
   unresolved questions;
-- [foreign workloads](../roadmap/05-foreign-workloads.md) for personality and
+- [foreign workloads](plans/foreign-workloads.md) for personality and
   guest design requirements and unresolved questions.
 
 The archive retains original probe measurements and promotion history. Later
@@ -62,9 +62,19 @@ originals; current authority and target limits remain in architecture owners.
 Composition notes retain current grants and verification boundaries; their
 numbering, failed migrations and closure stories route to archived originals.
 Historical removal is checked against the corresponding archive content, with
-prior link migrations distinguished from changed facts. Remaining roadmap files
-retain explicitly unextracted requirements; those are not private history by
-implication.
+prior link migrations distinguished from changed facts. The requirements the roadmap
+files retained now live in [plans](plans/README.md). They are not private history.
+
+The `roadmap/` directory was retired after that migration. Sections for
+milestones with a live gate were removed without a new archive snapshot. Their
+last text is in this repository at commit `19866cefb1db78a0b113ee4852c011b6cb4c693e`,
+under `roadmap/`.
+
+Two files outside the process class still name a retired roadmap path:
+`contracts/generation-manifest/v1/compositions/sel4.md` and
+`components/build-support/src/lib.rs`. Each changes only under a work item that
+owns it. The paths they name, `roadmap/07-architecture-portability.md` and
+`roadmap/10-component-platform.md`, resolve at the product archive anchor above.
 
 Local Notion exports under an ignored, untracked `spec/` directory are not part
 of this product checkout or the immutable archive snapshot. They are not current

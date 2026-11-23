@@ -176,5 +176,4 @@ For an automated failure:
 - `just spec_tasks_status` — each work item's state from the `evidence`
   branch: what is open and what is enforced.
 - [Architecture](../architecture/README.md) — current subsystem ownership and
-  invariants; [plans](../plans/README.md) — unfinished requirements; the
-  [roadmap classification](../../roadmap/README.md) names retained detail.
+  invariants; [plans](../plans/README.md) — unfinished requirements.
