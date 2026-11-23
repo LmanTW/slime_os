@@ -52,9 +52,10 @@ failed TLS check. The owner dropped vsock: this record plans no vsock link.
 
 - **The stack is a pinned dependency.** The candidate is `rustls` with a `no_std`-capable provider. The record does not
   pin a version, because `rustls` 0.23.13, the version upstream 1.0.0 uses, carries five advisories. The work item must
-  show three facts. The dependency builds `no_std` on the target. `just deny` reports no advisory for it. It stays out
-  of every closure that does not use it. The owner chose zero advisories as the exit condition. `deny.toml` gains no
-  ignore for this dependency. If a fact fails, the item stays open until a crate release fixes it.
+  show three facts. The dependency builds `no_std` on the target. `just deny` passes with the dependency in the graph, so
+  it reports no advisory, no license refusal and no ban. It stays out of every closure that does not use it. The owner
+  chose a passing `just deny` as the exit condition. `deny.toml` gains no ignore for this dependency. If a fact fails,
+  the item stays open until a crate release fixes it.
 - **Entropy comes from a granted capability.** The handshake needs random bytes. It takes them from `entropy-service`. A
   holder with no entropy grant cannot open a TLS link. `getrandom` has no backend on a bare-metal target, so the
   component supplies one through its `custom` feature.
@@ -149,7 +150,7 @@ and `crypto-bigint` 0.5.5, each with an open advisory. The probe did not try to 
 
 - the network service carries UDP, which reopens QUIC and a datagram Zenoh link;
 - a calendar-time source lands, which replaces the fixed validation time;
-- the TLS dependency check fails, which stops the TLS slice and leaves serial as the only slice.
+- a combination of crates builds `no_std` and passes `just deny`, which releases the hold on the TLS slice.
 
 ## References
 
