@@ -128,7 +128,7 @@ zenoh_rmw_router_link_check:
 # such declaration. The Rust tests drive the link through the handshakes of two runs of rmw_zenohd, captured by
 # scripts/lib/zenoh_rmw_router_data.py, three ways, and publish four Puts. The bytes equal what scripts/lib/zenoh_wire.py
 # writes. The expectation is scripts/lib/zenoh_rmw_client_put_exam.py. No router runs here. Nothing needs a registry or a
-# ROS install. It fails until the link has the Put path.
+# ROS install.
 [group('hardware')]
 zenoh_rmw_client_put_check:
     python3 scripts/check/check-zenoh-profile0.py --slice rmw-client-put

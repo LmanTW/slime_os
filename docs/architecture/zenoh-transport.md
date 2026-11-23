@@ -494,12 +494,31 @@ within 1 µs of the attachment's source timestamp, so the publisher stamped it.
 `INIT_SYN`, the `OPEN_SYN` that echoes the router's cookie, and the subscription on the chatter key. It delivers the four
 samples whole, one byte at a time and all at once.
 
+A router declares no subscription to a client. A session with no client role refuses a Put on a key its peer did not
+declare, as `undeclared-key`. A session with the client role writes a whole Put on any key that validates. It still
+validates the key, the attachment and the payload, and the other session errors apply.
+
+| Put | A session with no client role | A session with the client role |
+| --- | --- | --- |
+| Whole, on a key the peer declared | written | written |
+| Whole, on a key the peer did not declare | refused as `undeclared-key` | written |
+| In fragments, on a key the peer did not declare | refused as `undeclared-key` | refused as `undeclared-key` |
+
+The Put the link writes is the peer form: the sender mapping, the `PUT` header with the attachment extension, and no
+timestamp. `scripts/lib/zenoh_rmw_client_put_exam.py` judges a client-role link through the two handshakes of
+`zenoh_rmw_router_data`, fed whole, one byte at a time and all at once. The link publishes four Puts on the chatter key,
+and the exam compares each with the bytes `scripts/lib/zenoh_wire.py` writes. The router is not in that exam.
+
 Known limits:
 
 - The plain session and the plain link take the role. The graph link and the graph session do not, and no component
   connects to a router yet.
-- Nothing writes a Put to a router. The captures show only what a router forwards to a subscriber, so a Slime publisher
-  reaching a ROS listener through a router is untested.
+- A router writes nothing back, so the link cannot tell a matched Put from a dropped one.
+- Two host probes, on one host and with the Python wire library, ran a client behind `rmw_zenohd` and a ROS `listener`.
+  The router delivered a Put only to a listener whose subscription had the same key, type hash included, and dropped
+  the others without a reply. The probes are not fixtures, and no Rust link has met a router.
+- A Put in fragments keeps the declared-key check for every session, because no exam observes a client writing
+  fragments.
 - A client-role session reads a FRAME through the plain decoder, including one that negotiated lanes. The session sends a
   FRAME down the lane path only when it is not a client.
 - The captures show no liveliness token, no `Put` with the encoding flag, no sample larger than one frame and no router
@@ -590,6 +609,9 @@ Known limits:
   Zlib-licensed transitive crates, which the root `deny.toml` does not allow;
 - `just zenoh_rmw_client_check` — a connector with the client role against two handshakes of `rmw_zenohd`: 13 cases
   and 52 controls. A connector with no role still refuses them; explicit, not part of `all`;
+- `just zenoh_rmw_client_put_check` — a client-role link writes four Puts through the handshakes of two `rmw_zenohd` runs:
+  25 cases and 66 controls. No router runs, and a link with no role still refuses an undeclared key; explicit, not part of
+  `all`;
 - `just zenoh_rmw_router_link_check` — a client-role link against two runs of `rmw_zenohd` with a talker: 50 cases, 4
   refusals and 113 controls. The plain decoder still refuses the timestamp without the role; explicit, not part of `all`;
 - `just zenoh_rmw_booted_check` — the `sel4-zenoh-rmw` boot: 17 cases and 65 controls, and the arm under QEMU;
