@@ -2519,28 +2519,35 @@ def run_rmw_discover() -> list[str]:
         _time.sleep(LIVE_SETTLE_S)
         # The program holds its session open until the checker writes a line to its stdin, so the first listings are
         # read while the tokens stand. The program's stdout is read here line by line and ends when the program exits.
-        process = subprocess.Popen([str(program), "discover"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, env=environment, start_new_session=True)
+        process = subprocess.Popen([str(program), "discover"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=environment, start_new_session=True)
         pids.append(process.pid)
         declared = 0
         deadline = _time.monotonic() + LIVE_PROGRAM_S
+        pending = b""
+        descriptor = process.stdout.fileno()
+        # The pipe is read on its descriptor and split here. A buffered reader could hold a line `select` cannot see.
         while declared < DISCOVER_TOKENS:
-            if not select.select([process.stdout], [], [], max(0.0, deadline - _time.monotonic()))[0]:
-                fail(f"rmw-discover: the live program declared {declared} of {DISCOVER_TOKENS} tokens in {LIVE_PROGRAM_S} s")
-            line = process.stdout.readline()
-            if not line:
-                fail("rmw-discover: the live program ended before it declared both tokens")
+            while b"\n" not in pending:
+                if not select.select([descriptor], [], [], max(0.0, deadline - _time.monotonic()))[0]:
+                    fail(f"rmw-discover: the live program declared {declared} of {DISCOVER_TOKENS} tokens in {LIVE_PROGRAM_S} s")
+                chunk = _os.read(descriptor, 4096)
+                if not chunk:
+                    fail("rmw-discover: the live program ended before it declared both tokens")
+                pending += chunk
+            raw, pending = pending.split(b"\n", 1)
+            line = raw.decode("utf-8", errors="replace")
             if line.startswith(LIVE_PREFIX):
-                text = line.rstrip("\n").removeprefix(LIVE_PREFIX)
+                text = line.removeprefix(LIVE_PREFIX)
                 if not text.startswith("live "):
                     fail(f"rmw-discover: the program printed a line that is not a `live` line: {text!r}")
                 lines.append(text)
                 declared += text.startswith("live token-declared ")
         _time.sleep(LIVE_SETTLE_S)
         lines += discover_listings(f"{ros}/bin/ros2", environment, "held")
-        process.stdin.write("close\n")
+        process.stdin.write(b"close\n")
         process.stdin.flush()
         rest, _ = process.communicate(timeout=LIVE_PROGRAM_S)
-        lines += live_program_lines(rest)
+        lines += live_program_lines(pending.decode("utf-8", errors="replace") + rest.decode("utf-8", errors="replace"))
         if process.returncode != 0:
             fail(f"rmw-discover: the live program exited {process.returncode}")
         _time.sleep(LIVE_SETTLE_S)
