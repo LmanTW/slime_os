@@ -132,6 +132,7 @@ import zenoh_rmw_client_exam
 import zenoh_rmw_client_put_exam
 import zenoh_rmw_token_exam
 import zenoh_rmw_live_exam
+import zenoh_rmw_discover_exam
 import zenoh_rmw_router
 import zenoh_rmw_router_data
 import zenoh_rmw_router_link_exam
@@ -2480,6 +2481,101 @@ def run_rmw_live() -> list[str]:
     return lines
 
 
+DISCOVER_ENVIRONMENT = ("SLIME_ROS_ENV", "SLIME_RMW_ZENOHD")
+DISCOVER_TOKENS = 2
+
+
+def discover_names(ros2: str, environment: dict[str, str], kind: str) -> str:
+    """The names `ros2 <kind> list --no-daemon` printed. A daemon could keep a graph the router lost."""
+    done = subprocess.run([ros2, kind, "list", "--no-daemon"], capture_output=True, text=True, env=environment, timeout=40)
+    if done.returncode != 0:
+        _sys.stderr.write((done.stdout + done.stderr)[-2000:])
+        fail(f"rmw-discover: `ros2 {kind} list` exited {done.returncode}")
+    return zenoh_rmw_discover_exam.names([line.strip() for line in done.stdout.splitlines() if line.strip()])
+
+
+def discover_listings(ros2: str, environment: dict[str, str], when: str) -> list[str]:
+    return [f"ros {kind}s {when} {discover_names(ros2, environment, kind)}" for kind in ("node", "topic")]
+
+
+def run_rmw_discover() -> list[str]:
+    missing = [name for name in DISCOVER_ENVIRONMENT if not _os.environ.get(name)]
+    if missing:
+        fail(f"rmw-discover: the operator's environment names no {', '.join(missing)}; a discover run needs a router and ros2")
+    ros = _os.environ["SLIME_ROS_ENV"]
+    target_dir = ROOT / "build" / "zenoh-live" / "target"
+    environment = {**_os.environ, "AMENT_PREFIX_PATH": ros, "LD_LIBRARY_PATH": f"{ros}/lib", "RMW_IMPLEMENTATION": "rmw_zenoh_cpp", "ROS_DOMAIN_ID": "0"}
+    host = subprocess.run(["rustc", "-vV"], capture_output=True, text=True, check=True)
+    target = next(line.split(": ", 1)[1] for line in host.stdout.splitlines() if line.startswith("host: "))
+    build = ["cargo", "build", "--release", "--target", target, "--manifest-path", str(LIVE_CRATE / "Cargo.toml")]
+    if subprocess.run(build, cwd=ROOT, env={**_os.environ, "CARGO_TARGET_DIR": str(target_dir)}).returncode != 0:
+        fail("rmw-discover: the live program did not build")
+    program = target_dir / target / "release" / "zenoh-live"
+    pids: list[int] = []
+    lines: list[str] = []
+    try:
+        live_start([environment["SLIME_RMW_ZENOHD"]], environment, pids, subprocess.DEVNULL)
+        _time.sleep(LIVE_SETTLE_S)
+        # The program holds its session open until the checker writes a line to its stdin, so the first listings are
+        # read while the tokens stand. The program's stdout is read here line by line and ends when the program exits.
+        process = subprocess.Popen([str(program), "discover"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, env=environment, start_new_session=True)
+        pids.append(process.pid)
+        declared = 0
+        while declared < DISCOVER_TOKENS:
+            line = process.stdout.readline()
+            if not line:
+                fail("rmw-discover: the live program ended before it declared both tokens")
+            if line.startswith(LIVE_PREFIX):
+                text = line.rstrip("\n").removeprefix(LIVE_PREFIX)
+                if not text.startswith("live "):
+                    fail(f"rmw-discover: the program printed a line that is not a `live` line: {text!r}")
+                lines.append(text)
+                declared += text.startswith("live token-declared ")
+        _time.sleep(LIVE_SETTLE_S)
+        lines += discover_listings(f"{ros}/bin/ros2", environment, "held")
+        process.stdin.write("close\n")
+        process.stdin.flush()
+        rest, _ = process.communicate(timeout=LIVE_PROGRAM_S)
+        lines += live_program_lines(rest)
+        if process.returncode != 0:
+            fail(f"rmw-discover: the live program exited {process.returncode}")
+        _time.sleep(LIVE_SETTLE_S)
+        lines += discover_listings(f"{ros}/bin/ros2", environment, "closed")
+    except subprocess.TimeoutExpired:
+        fail("rmw-discover: a command did not finish in time")
+    finally:
+        live_stop(pids)
+    return lines
+
+
+def rmw_discover_main(controls_only: bool) -> int:
+    exam = zenoh_rmw_discover_exam
+    try:
+        refused_controls = exam.all_controls()
+        item_cases, item_controls = exam.item_pins()
+    except exam.DiscoverExamError as error:
+        fail(str(error))
+    if refused_controls != exam.PINNED_CONTROLS:
+        fail(f"rmw-discover: {refused_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if item_cases and item_cases != exam.PINNED_CASES:
+        fail(f"rmw-discover: the item fixes {item_cases} cases, the checker pins {exam.PINNED_CASES}")
+    if item_controls and item_controls != exam.PINNED_CONTROLS:
+        fail(f"rmw-discover: the item requires {item_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 rmw-discover judge: refused {refused_controls} corrupted transcripts")
+        return 0
+    try:
+        cases, _ = exam.judge(run_rmw_discover())
+    except exam.DiscoverExamError as error:
+        fail(str(error))
+    if cases != exam.PINNED_CASES:
+        fail(f"rmw-discover: {cases} cases, the item fixes {exam.PINNED_CASES}")
+    print(f"[zenoh-profile0] slice=rmw-discover cases={cases} controls={refused_controls}")
+    devloop_observations.record(casesObserved=cases, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 rmw-discover check: ros2 listed the Slime node and its topic from the tokens a client-role link wrote, and lost them on close")
+    return 0
+
+
 def rmw_live_main(controls_only: bool) -> int:
     exam = zenoh_rmw_live_exam
     try:
@@ -3912,7 +4008,7 @@ def lost_holder_main(controls_only: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-client", "rmw-router-link", "rmw-client-put", "rmw-token", "rmw-live", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "qos", "lanes", "link-limits-v3", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service-peer", "service-four", "service", "service-link", "holder-fault", "service-stack", "link-v3-reader", "lost-holder"), required=True)
+    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-client", "rmw-router-link", "rmw-client-put", "rmw-token", "rmw-live", "rmw-discover", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "qos", "lanes", "link-limits-v3", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service-peer", "service-four", "service", "service-link", "holder-fault", "service-stack", "link-v3-reader", "lost-holder"), required=True)
     parser.add_argument("--controls-only", action="store_true")
     arguments = parser.parse_args()
     if arguments.slice == "composition":
@@ -3945,6 +4041,8 @@ def main() -> int:
         return rmw_token_main(arguments.controls_only)
     if arguments.slice == "rmw-live":
         return rmw_live_main(arguments.controls_only)
+    if arguments.slice == "rmw-discover":
+        return rmw_discover_main(arguments.controls_only)
     if arguments.slice == "rmw-data":
         return rmw_data_main(arguments.controls_only)
     if arguments.slice == "rmw-graph":
