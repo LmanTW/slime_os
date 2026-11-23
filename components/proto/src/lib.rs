@@ -44,6 +44,7 @@ pub mod spawn_arguments;
 pub mod store;
 pub mod syscall_abi;
 pub mod trace_sink;
+pub mod zenoh_link_v3_limits;
 pub mod zenoh_profile;
 pub mod zenoh_service_client;
 pub mod zenoh_service_client_wire;
