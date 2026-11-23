@@ -5,6 +5,7 @@ item :: s.Item = (h.task "01a20854-dd6d-7325-a645-1853023d6ec4" "zenoh-link-v3-r
   "The Zenoh service builds its session parameters from a configuration of the version 3 link-limits contract"
   "`contracts/zenoh-link-limits/v3` declares `localSubscriptions`, and `components/proto/src/zenoh_link_v3_limits.rs` holds its constants. Nothing reads them. `Params::from_limits` sets `local` to 1. The Zenoh service builds `Params { local: 3, per_side: 2, events: 4, ..Params::DEMO }` as a literal, so no contract judges its count against its stack.")
   with {
+    intent = #active;
     depends = { "01a1ef06-fb8b-7046-b24b-47fccf60c29f"; };
     owns = {
       "components/lib/src/zenoh_link_limits_v3*";
