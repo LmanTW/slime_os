@@ -5,6 +5,7 @@ item :: s.Item = (h.bug "01a1ee7f-e814-78bc-b7b1-5eb1e488be89" "riscv-plane-arm-
   "Two plane gates boot an AArch64 closure image on qemu-riscv-virt"
   "scripts/check/check-sel4-wait-set-plane.py and scripts/check/check-sel4-sample-plane.py admit --platform qemu-riscv-virt and build the closure of their plane for it. Both closures name qemu-arm-virt. qemu-system-riscv64 then boots an AArch64 image, the serial line stays silent after OpenSBI, and each gate fails at its timeout: 240 s for the wait-set plane, 180 s for the sample plane. just riscv64_qemu_check runs both arms, so it cannot pass. The defect is as old as this repository's history. At its first commit, 783cf87a, the sample gate already built the closure for every platform, and the wait-set gate admitted qemu-arm-virt only. Commit 0361bff4 made the wait-set gate admit every platform of scripts/lib/sel4_boot.py and sent only qemu-pc99 to the plane flag. No CI job runs the recipe, and the evidence branch holds no record of it.")
   with {
+    intent = #active;
     owns = {
       "scripts/check/check-sel4-wait-set-plane.py";
       "scripts/check/check-sel4-sample-plane.py";

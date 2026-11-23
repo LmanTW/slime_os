@@ -1,0 +1,45 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.bug "01a2084e-403e-71a9-8470-8eaf2118b811" "system-timer-knob-unclassified" "contracts"
+  "The image inventory refuses the system-timer switch of the image builder"
+  "just system_image_closure_aggregate_check fails on main at 870c0ec: build knob(s) in none of the three classes, SLIME_SYSTEM_TIMER in build-sel4.py. Commit 742dab01 added that name to scripts/build/build-sel4.py for the flag --system-timer. scripts/check/check-system-image-aggregate.py reads every quoted SLIME_* name under scripts/build as a build knob, and it requires a class for each. The commit gave the name no class. just system_image_closure_gates_check depends on the target, so it cannot pass. No workflow under .github/workflows names either target.")
+  with {
+    intent = #active;
+    owns = {
+      "scripts/check/check-system-image-aggregate.py";
+    };
+    nonGoals = {
+      h.nonGoal "A closure for the system-timer image. A closure-declared knob needs a closure that declares it, and no closure or system spec names that image. The item root-system-timer chose a build switch, and its decision a-build-switch-not-a-target-profile leaves the rule to the item of the verified profile." (h.fromHuman "Legacy 類 (Recommended)" "Claude Code session 5f81f1ad-ee63-4df8-b08a-1cf001c0e9c5, 2026-11-23, choosing the legacy class over a closure-declared knob and over a fourth class");
+      h.nonGoal "A fourth class for a switch that only a builder flag sets. It needs new assertions in the inventory." (h.fromHuman "Legacy 類 (Recommended)" "Claude Code session 5f81f1ad-ee63-4df8-b08a-1cf001c0e9c5, 2026-11-23, choosing the legacy class over a closure-declared knob and over a fourth class");
+      h.nonGoal "The other gates of system_image_closure_gates_check. This item makes no claim about them." h.agentDefault;
+      h.nonGoal "A pull-request job for the target. Whether one runs it is a separate decision." h.agentDefault;
+    };
+    requirements = {
+      h.req "every-build-knob-has-one-class"
+        "system_image_closure_aggregate_check passes: every quoted SLIME_* name under scripts/build is in exactly one class, and the controls for an unclassified knob and for a knob in two classes still refuse."
+        { "system_image_closure_aggregate_check"; };
+    };
+    acceptance = {
+      h.observed "system_image_closure_aggregate_check";
+    };
+    decisions = {
+      h.decided "open-the-bug"
+        "The unclassified switch is a backlog bug with its own planning pull request."
+        "the target is a promise of the contracts area and it fails on main. Pull request 1170 changes the same checker for the RISC-V plane gates, and one line there would mix two causes in one pull request"
+        (h.fromHuman "另開 bug PR" "Claude Code session 5f81f1ad-ee63-4df8-b08a-1cf001c0e9c5, 2026-11-23, choosing a separate bug pull request over one more line in pull request 1170")
+        { "every-build-knob-has-one-class"; };
+      h.decided "fix-in-the-planning-pull-request"
+        "The planning pull request of this item changes the inventory."
+        "the checker is in the grader set of a target that promises of specs/contracts.zt bind, so it changes only in a pull request that adds an item (V4). An item that landed alone would leave the fix without a pull request that may carry it"
+        h.agentDefault
+        { "every-build-knob-has-one-class"; };
+      h.decided "the-switch-joins-the-legacy-class"
+        "SLIME_SYSTEM_TIMER joins the legacy class of the inventory."
+        "only scripts/build/build-sel4.py sets the switch, from --system-timer, and scripts/build/build-system-image.py does not read it. The switch changes image bytes, so the non-keying class does not hold it. The builder refuses a value from the environment, and it gives the image and its identity the suffix -system-timer, so a build records that it read the switch"
+        (h.fromHuman "Legacy 類 (Recommended)" "Claude Code session 5f81f1ad-ee63-4df8-b08a-1cf001c0e9c5, 2026-11-23, choosing the legacy class over a closure-declared knob and over a fourth class")
+        { "every-build-knob-has-one-class"; };
+    };
+  };
+
+item
