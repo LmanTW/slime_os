@@ -51,10 +51,16 @@ failed TLS check. The owner dropped vsock: this record plans no vsock link.
 ### TLS over TCP
 
 - **The stack is a pinned dependency.** The candidate is `rustls` with a `no_std`-capable provider, as upstream 1.0.0 uses
-  `rustls` 0.23.13. The work item must show that the dependency builds `no_std` on the target, passes `just deny`, and
-  stays out of every closure that does not use it. If it cannot, this slice stops and the record is revised.
-- **Entropy and time come from granted capabilities.** The handshake needs random bytes and a clock to check certificate
-  validity. It takes the first from `entropy-service` and the second from a clock grant. A holder with neither cannot open a TLS link.
+  `rustls` 0.23.13. The work item must show that the dependency builds `no_std` on the target and passes `just deny`. It must
+  also show that the dependency stays out of every closure that does not use it. If any of these fails, this slice
+  stops and the record is revised.
+- **Entropy comes from a granted capability.** The handshake needs random bytes. It takes them from `entropy-service`. A
+  holder with no entropy grant cannot open a TLS link.
+- **The validation time is fixed by the generation.** The repository has no calendar-time source. `clock-authority/v2`
+  grants timers and simulated time, and a monotonic read measures time since boot. The generation therefore declares one
+  time, and the link checks each certificate's validity window against it. A certificate that expired after that time is
+  still accepted until a new generation declares a later time. A calendar-time source is the proper fix, and it is a
+  separate decision.
 - **Trust is declared by the generation.** The generation names the trust anchor and, for mutual TLS, the client
   certificate and key. The key crosses a process boundary only as a granted object, never as a path. The record format is a
   Zutai schema under `contracts/`.
@@ -76,8 +82,8 @@ failed TLS check. The owner dropped vsock: this record plans no vsock link.
 - **The framer is judged from upstream bytes.** The exam reproduces frames that `z-serial` 0.2.3 wrote, byte for byte,
   and decodes frames the Rust framer wrote with `z-serial`. A host reference in Python reproduces the same bytes first,
   as `scripts/lib/zenoh_wire.py` does for the codec.
-- **The stock peer is built from source.** The peer is `zenoh` 1.0.0 built with `transport_serial`, pinned by hash and
-  placed in a standalone crate outside the root workspace, as `verification/zenoh-xcheck` is. QEMU exposes the guest's UART
+- **The stock peer is built from source.** The peer is `zenoh` 1.0.0 built with `transport_serial`, pinned by hash. It lives
+  in a standalone crate outside the root workspace, as `verification/zenoh-xcheck` does. QEMU exposes the guest's UART
   as a host pseudo-terminal for that peer.
 - **Fixed mode only.** A serial frame holds at most 1500 bytes. A link on a serial line takes the fixed mode of
   `zenoh-link-limits/v1`, with a batch of at most 1500 bytes. The heap mode and FRAGMENT stay refused on that link.
@@ -99,7 +105,7 @@ failed TLS check. The owner dropped vsock: this record plans no vsock link.
 - **vsock.** It reuses `StreamFramerOf` but needs a new virtio driver. The owner dropped it.
 - **TLS terminated in a separate service.** The guest holds no key and speaks plain TCP to a TLS terminator. This moves
   the trust boundary to a new component and leaves the wire between the two unprotected. Rejected for the first slice.
-- **QUIC, WebSocket and UDP.** Each needs UDP in the network service, which its page lists as not implemented. Out of scope.
+- **QUIC and UDP.** Each needs UDP in the network service, which its page lists as not implemented. Out of scope.
 - **Change the pinned wheel.** A new wheel hash re-stales every closure that names it, and no 1.0.0 wheel contains the
   serial feature. Rejected.
 
@@ -124,6 +130,7 @@ failed TLS check. The owner dropped vsock: this record plans no vsock link.
 ## Revisit when
 
 - the network service carries UDP, which reopens QUIC and a datagram Zenoh link;
+- a calendar-time source lands, which replaces the fixed validation time;
 - the TLS dependency check fails, which stops the TLS slice and leaves serial as the only slice.
 
 ## References
