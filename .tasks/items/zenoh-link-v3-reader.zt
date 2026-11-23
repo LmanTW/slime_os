@@ -10,13 +10,14 @@ item :: s.Item = (h.task "01a20854-dd6d-7325-a645-1853023d6ec4" "zenoh-link-v3-r
       "components/lib/src/zenoh_link_limits_v3*";
       "components/lib/src/lib.rs";
       "components/services/zenoh-service/src/main.rs";
+      "components/lib/src/zenoh_service_stack*";
     };
     nonGoals = {
       h.nonGoal "Any change to `contracts/zenoh-link-limits/v3`, its generated constants or its exam. This item reads them and edits none." h.agentDefault;
       h.nonGoal "A reader of a v3 record file. The service holds one configuration as a constant. A record reader and the lanes configuration are later items." h.agentDefault;
       h.nonGoal "The links of `zenoh-peer`, `zenoh-rmw-peer` and `lidar-publisher`. Each keeps its own `Params`." h.agentDefault;
       h.nonGoal "`Params::from_limits` and the v1 `Limits`. A v1 link keeps one local subscription." h.agentDefault;
-      h.nonGoal "The stack exam's measured values. The exam pins the link type with 2 aliases, and this item moves that one pin." h.agentDefault;
+      h.nonGoal "The stack exam's measured values. The exam pins the link type with 2 aliases. This item moves that pin and the `ALIASES` constant of the stack test that restates it." h.agentDefault;
       h.nonGoal "Runs, heap links and fragments. The service's link is a fixed link with no run." h.agentDefault;
     };
     requirements = {

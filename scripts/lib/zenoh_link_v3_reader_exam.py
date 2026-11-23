@@ -52,7 +52,7 @@ FACTS: tuple[facts.Fact, ...] = (
     ("reader-module", LIB, r"^pub mod zenoh_link_limits_v3;$", "pub mod zenoh_link_limits_v3;"),
 )
 # Declarations the component no longer holds: the literal that the configuration replaces.
-ABSENT = (("params-literal", MAIN, r"^\s*local: 3,$", "        local: 3,"),)
+ABSENT = (("params-literal", MAIN, r"\blocal:\s*3\b", "        local: 3,"),)
 
 LINE = re.compile(
     r"config (\S+) (fixed|heap)((?: \d+){12})|required (\S+) (\d+)|params (\S+)((?: \d+){7}) (fixed|heap)|case (\S+) (\S+)"
