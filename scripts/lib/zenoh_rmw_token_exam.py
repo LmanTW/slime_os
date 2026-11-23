@@ -12,7 +12,8 @@ print it, line for line:
 
 * the bytes the link wrote: the client INIT_SYN, the OPEN_SYN that echoes the router's cookie, a FRAME for each token
   declaration with the key written in full, and a FRAME that withdraws the publisher token;
-* the CLOSE the link wrote when the owner closed it, and that the link then holds no token;
+* the tokens the link held after the withdrawal, which is the node token alone, then the CLOSE it wrote when the owner
+  closed it, and that the link then holds no token;
 * six refusals, each with the class it is refused as.
 
 The bytes are the plain form: a DECLARE with no QoS extension, a named token with the sender mapping, and an UNDECLARE_TOKEN
@@ -44,6 +45,8 @@ PUBLISHER_ID = 11
 TYPE_NAME = "std_msgs::msg::dds_::String_"
 TOPIC = "/chatter"
 UNTOKEN_EXTENSION = wire.Extension(15, True, 2, b"\x00\x00")
+# The QoS substring of the default QoS, which ends the publisher token's key.
+QOS_HEX = graph.qos_to_keyexpr(graph.DEFAULT_QOS).encode().hex()
 
 REFUSALS = (
     ("no-role-link-declares-a-token", "invalid-config"),
@@ -164,6 +167,7 @@ def good_lines() -> list[str]:
         lines.append(f"clienttoken fed {name} {ack} {open_ack}")
         for mode in MODES:
             lines.append(f"clienttoken sent {name} {mode} {hexed(written(ack))}")
+            lines.append(f"clienttoken held {name} {mode} tokens=1 ids={NODE_ID}")
             lines.append(f"clienttoken closed {name} {mode} reason=0 wrote={hexed(close_bytes())} tokens=none")
             lines.append(f"clienttoken ok {name}-{mode}")
     for refused, cls in REFUSALS:
@@ -191,7 +195,7 @@ def judge(lines: list[str]) -> tuple[int, int]:
 
 
 def reference_controls() -> int:
-    """The handshake controls of the Put exam, which this exam builds on, and the controls on the token shapes."""
+    """The handshake controls of the Put exam, which this exam builds on. The token bytes have transcript controls only."""
     try:
         return put.reference_controls()
     except put.ClientPutExamError as error:
@@ -206,7 +210,7 @@ def transcript_mutations() -> list[tuple[str, list[str]]]:
         out[first], out[second] = out[second], out[first]
         return out
 
-    kinds = {kind: [i for i, line in enumerate(good) if line.startswith(f"clienttoken {kind} ")] for kind in ("fed", "sent", "closed", "ok", "refused")}
+    kinds = {kind: [i for i, line in enumerate(good) if line.startswith(f"clienttoken {kind} ")] for kind in ("fed", "sent", "held", "closed", "ok", "refused")}
     out: list[tuple[str, list[str]]] = [
         ("an empty transcript", []),
         ("a line that is not a client token exam line", [*good, "clientput ok router-data-1-whole"]),
@@ -221,7 +225,7 @@ def transcript_mutations() -> list[tuple[str, list[str]]]:
     ]
     for index, line in enumerate(good):
         out.append((f"line {index} missing ({line[:44]})", [*good[:index], *good[index + 1 :]]))
-    for kind in ("fed", "sent", "closed"):
+    for kind in ("fed", "sent", "held", "closed"):
         for index in kinds[kind]:
             fields = good[index].split(" ")
             last = fields[-1]
@@ -246,12 +250,14 @@ def transcript_mutations() -> list[tuple[str, list[str]]]:
         ("a node token declared as a wildcard key", sent_with(lambda s: s.replace(node, node.replace(b"slime_node".hex(), b"slime_*ode".hex(), 1), 1))),
         ("a node token without the sender mapping", sent_with(lambda s: s.replace(node, node.replace("1e66", "1e26", 1), 1))),
         ("a publisher token under another domain", sent_with(lambda s: s.replace(publisher, publisher.replace(b"@ros2_lv/0/".hex(), b"@ros2_lv/1/".hex(), 1), 1))),
-        ("a publisher token with the QoS substring dropped", sent_with(lambda s: s.replace(publisher, publisher.replace(b"::".hex(), b";;".hex(), 1), 1))),
+        ("a publisher token with the QoS substring changed", sent_with(lambda s: s.replace(publisher, publisher.replace(QOS_HEX, b";;,:,:,:,,".hex(), 1), 1))),
         ("a withdrawal that names the node token", sent_with(lambda s: s.replace(withdraw, withdraw.replace("870b5f", "870a5f", 1), 1))),
         ("a withdrawal without its extension", sent_with(lambda s: s.replace(withdraw, withdraw.replace("5f020000", "", 1), 1))),
         ("a withdrawal that was never written", sent_with(lambda s: s.replace(withdraw, "", 1))),
         ("the publisher token written before the node token", sent_with(lambda s: s.replace(node + publisher, publisher + node, 1))),
         ("a declaration frame that skips a sequence number", sent_with(lambda s: s.replace(publisher, publisher.replace(f"{INITIAL_SN + 1:02x}", f"{INITIAL_SN + 5:02x}", 1), 1))),
+        ("a link that holds no token after the withdrawal", [good[i].replace("tokens=1 ids=10", "tokens=0 ids=-", 1) if i == kinds["held"][0] else good[i] for i in range(len(good))]),
+        ("a link that holds the withdrawn token", [good[i].replace("tokens=1 ids=10", "tokens=2 ids=10,11", 1) if i == kinds["held"][0] else good[i] for i in range(len(good))]),
         ("a link that still holds a token after the close", [good[i].replace("tokens=none", "tokens=1", 1) if i == kinds["closed"][0] else good[i] for i in range(len(good))]),
         ("a close with another reason", [good[i].replace("reason=0", "reason=1", 1) if i == kinds["closed"][0] else good[i] for i in range(len(good))]),
         ("a local close that wrote nothing", [good[i].replace("wrote=02002300", "wrote=-", 1) if i == kinds["closed"][0] else good[i] for i in range(len(good))]),
@@ -282,9 +288,9 @@ def all_controls() -> int:
 
 # What the item fixes, held here as well so the gate stays correct after the item is closed and moved to
 # .tasks/terminal. While the item is open its stored predicates are compared with these. Both are exact.
-PINNED_CASES = 26
+PINNED_CASES = 32
 PINNED_REFUSALS = len(REFUSALS)
-PINNED_CONTROLS = 73
+PINNED_CONTROLS = 87
 
 
 def item_pins() -> tuple[int, int]:

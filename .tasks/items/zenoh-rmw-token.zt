@@ -3,7 +3,7 @@ h ::= import "./helpers.zt";
 
 item :: s.Item = (h.task "01a20852-64d5-76b3-acce-bb1e92bc4708" "zenoh-rmw-token" "zenoh-transport"
   "A Profile 0 link with the client role declares and withdraws the liveliness tokens of a node"
-  "`ros2 node list` and `ros2 topic list` build their graph from liveliness tokens under `@ros2_lv`. A client-role link writes none, so a ROS node hears its Puts and no ROS tool sees it. A host probe declared a node token and a publisher token for a Slime node through `rmw_zenohd` with the Python wire library. `ros2` listed the node and the topic, and listed neither after the tokens were withdrawn. The Rust encoder has no token declaration and no session call writes one.")
+  "`ros2 node list` and `ros2 topic list` build their graph from liveliness tokens under `@ros2_lv`. A client-role link writes none, so a ROS node hears its Puts and no ROS tool sees it. A host probe declared a node token and a publisher token for a Slime node through `rmw_zenohd` with the Python wire library. `ros2` listed the node and the topic. A client that closed its session lost both, and a client that withdrew a token while it stayed connected lost that token's topic. The Rust encoder has no token declaration and no session call writes one.")
   with {
     owns = {
       "components/lib/src/zenoh_profile0.rs";
@@ -25,10 +25,10 @@ item :: s.Item = (h.task "01a20852-64d5-76b3-acce-bb1e92bc4708" "zenoh-rmw-token
         "A link with the client role, open with a router, declares the node token and the publisher token of `slime_node`. Each is one FRAME equal to the bytes the exam builds from `build_token`, with the key in full and the sequence numbers following the OPEN_SYN's."
         { "zenoh_rmw_token_check"; };
       h.req "client-link-withdraws-a-token"
-        "The link withdraws the publisher token by its id, in one FRAME equal to the bytes the exam builds. The session stays open and the node token stays declared."
+        "The link withdraws the publisher token by its id, in one FRAME equal to the bytes the exam builds. The transcript prints the tokens the link holds afterwards as the node token alone."
         { "zenoh_rmw_token_check"; };
       h.req "token-is-the-plain-form"
-        "A token declaration is a named token with the sender mapping and no QoS extension. A withdrawal carries the extension a real peer writes. The judge refuses a wildcard key, a missing sender mapping, a wrong domain, a wrong id and a missing extension. The router took a withdrawal without the extension in a probe, so the extension follows the capture and not the router."
+        "A token declaration is a named token with the sender mapping and no QoS extension. A withdrawal carries the extension a real peer writes. The judge refuses a wildcard key, a missing sender mapping, a wrong domain, a wrong id, a changed QoS substring and a missing extension."
         { "zenoh_rmw_token_check"; };
       h.req "no-role-link-refuses-a-token"
         "A link with no client role refuses to declare a token as `invalid-config`."
@@ -43,13 +43,13 @@ item :: s.Item = (h.task "01a20852-64d5-76b3-acce-bb1e92bc4708" "zenoh-rmw-token
         "The session exam, the stock-peer exam and the Put exam pass unchanged beside the token slice."
         { "zenoh_session_check"; "zenoh_stock_check"; "zenoh_rmw_client_put_check"; };
       h.req "controls-are-refused"
-        "The judge refuses 73 corrupted records before it judges the real run: 68 mutated transcripts and 5 corrupted captures."
+        "The judge refuses 87 corrupted records before it judges the real run: 82 mutated transcripts and 5 corrupted captures."
         { "zenoh_rmw_token_check"; };
     };
     acceptance = {
       h.observedWhere "zenoh_rmw_token_check" {
-        h.count "casesObserved" 26;
-        h.count "negativeControlsRefused" 73;
+        h.count "casesObserved" 32;
+        h.count "negativeControlsRefused" 87;
       };
       h.observed "zenoh_session_check";
       h.observed "zenoh_stock_check";
@@ -67,7 +67,7 @@ item :: s.Item = (h.task "01a20852-64d5-76b3-acce-bb1e92bc4708" "zenoh-rmw-token
         h.agentDefault
         { "token-is-the-plain-form"; };
       h.decided "a-withdrawal-carries-the-captured-extension"
-        "A withdrawal carries the extension of the captured one, `5f 02 00 00`. A probe withdrew a token with and without it, and the router took both."
+        "A withdrawal carries the extension of the captured one, `5f 02 00 00`. A probe withdrew a token with and without it, and the router took both, so the extension follows the capture and not the router."
         "the capture shows a real peer writing the extension, and no probe showed the router needing it"
         h.agentDefault
         { "client-link-withdraws-a-token"; "token-is-the-plain-form"; };
