@@ -6,7 +6,10 @@
 # machine: the LiDAR exams need the operator's `SLIME_LIDAR_BAG` capture,
 # and link_wake_check reaches zenoh_external_check, which has no
 # eclipse-zenoh wheel pinned for linux aarch64. rpi5_boot_check needs the
-# board on the operator's USB-C cable and its Debug Probe.
+# board on the operator's USB-C cable and its Debug Probe. zenoh_rmw_live_check
+# starts rmw_zenohd and two ROS nodes from packages the operator names in
+# SLIME_ROS_ENV, SLIME_RMW_ZENOHD, SLIME_ROS_TALKER and SLIME_ROS_LISTENER,
+# because those packages are not pinned in flake.nix.
 operator = [
   "rpi5_ros2_zenoh_check",
   "rpi5_boot_check",
@@ -16,6 +19,7 @@ operator = [
   "lidar_foxglove_bridge_check",
   "lidar_foxglove_demo_check",
   "link_wake_check",
+  "zenoh_rmw_live_check",
 ]
 
 # Observed wall time in seconds on the ubuntu-24.04-arm runner, as
