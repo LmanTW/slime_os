@@ -5,6 +5,7 @@ item :: s.Item = (h.task "01a206d6-affa-7472-81d5-42e7b0257a4d" "zenoh-stack-fou
   "The stack exam measures the built size of the Zenoh service at 4 holders and 6 rows"
   "The stack exam binds the built size of the Zenoh service to 2 holders and 2 rows, and grades the system spec of `sel4-zenoh-service`. The item `zenoh-service-four` builds the component for 4 holders and 6 rows and runs it in `sel4-zenoh-service-four`. The exam must grade that size and that spec.")
   with {
+    intent = #active;
     supersedes = { "01a1ef67-2110-75db-a6f7-3d5b5addb0f8/pages-follow-the-client-contract"; };
     owns = {
       "components/lib/src/zenoh_service_stack*";

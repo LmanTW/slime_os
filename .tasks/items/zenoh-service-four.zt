@@ -5,6 +5,7 @@ item :: s.Item = (h.task "01a203cb-3b7f-7306-8a75-ad22e5c3b015" "zenoh-service-f
   "The Zenoh service is built for four holders and six rows, and a booted composition runs all four"
   "The Zenoh service component is built for 2 holders and 2 rows. The composition `sel4-zenoh-service` runs two holders, each with one row. No boot shows a third or fourth holder, a holder with two rows, or a delivery on a row that differs from its publication's row. The stack exam measured 4 holders and 6 rows on the host and bound the component to 2 and 2.")
   with {
+    intent = #active;
     owns = {
       "components/services/zenoh-service/**";
       "components/applications/zenoh-holder-gamma/**";
