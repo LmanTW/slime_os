@@ -84,9 +84,14 @@ fn params() -> Params {
 }
 
 fn connect() -> Result<Link, String> {
-    let stream = TcpStream::connect(ROUTER).map_err(|error| format!("no router on {ROUTER}: {error}"))?;
-    stream.set_nodelay(true).map_err(|error| error.to_string())?;
-    stream.set_nonblocking(true).map_err(|error| error.to_string())?;
+    let stream =
+        TcpStream::connect(ROUTER).map_err(|error| format!("no router on {ROUTER}: {error}"))?;
+    stream
+        .set_nodelay(true)
+        .map_err(|error| error.to_string())?;
+    stream
+        .set_nonblocking(true)
+        .map_err(|error| error.to_string())?;
     let config = Config {
         zid: &ZID,
         lease_ms: LEASE_MS,
@@ -111,11 +116,16 @@ fn pump(link: &mut Link, start: Instant) -> Result<(), Error> {
     Ok(())
 }
 
-/// Opens the session and prints what the router announced. Returns once the link is open.
-fn open(link: &mut Link, start: Instant) -> Result<(), String> {
-    say(&format!("router-ready tcp/{ROUTER}"));
+/// Opens the session and prints what the router announced. Returns once the link is open. The exam holds one
+/// `router-ready` line for the whole run, so only the inbound direction prints it. The outbound direction connects to a
+/// router on the same address, and its handshake line is what shows that a router answered.
+fn open(link: &mut Link, start: Instant, ready: bool) -> Result<(), String> {
+    if ready {
+        say(&format!("router-ready tcp/{ROUTER}"));
+    }
     let handle = link.handle();
-    link.open(handle, now(start)).map_err(|error| format!("the INIT_SYN was not queued: {error:?}"))?;
+    link.open(handle, now(start))
+        .map_err(|error| format!("the INIT_SYN was not queued: {error:?}"))?;
     let deadline = Instant::now() + HANDSHAKE_DEADLINE;
     while link.session().state() != State::Open {
         if Instant::now() > deadline {
@@ -149,7 +159,7 @@ fn text(payload: &[u8]) -> Option<String> {
 fn inbound() -> Result<(), String> {
     let start = Instant::now();
     let mut link = connect()?;
-    open(&mut link, start)?;
+    open(&mut link, start, true)?;
     let handle = link.handle();
     link.declare_subscriber(handle, SUBSCRIPTION, KEY)
         .map_err(|error| format!("the subscription was not queued: {error:?}"))?;
@@ -171,7 +181,9 @@ fn inbound() -> Result<(), String> {
                     ));
                     delivered += 1;
                 }
-                Notice::Closed { reason } => return Err(format!("the link closed with reason {reason}")),
+                Notice::Closed { reason } => {
+                    return Err(format!("the link closed with reason {reason}"));
+                }
                 _ => {}
             }
         }
@@ -191,7 +203,7 @@ fn cdr_string(text: &str) -> Vec<u8> {
 fn outbound() -> Result<(), String> {
     let start = Instant::now();
     let mut link = connect()?;
-    open(&mut link, start)?;
+    open(&mut link, start, false)?;
     let handle = link.handle();
     for number in 0..PUTS {
         let attachment = encode::attachment(number as i64 + 1, 1_000_000_000 + number as i64, &GID)
@@ -217,7 +229,8 @@ fn outbound() -> Result<(), String> {
     while link.send_pending() {
         pump(&mut link, start).map_err(|error| format!("the link failed: {error:?}"))?;
     }
-    link.close(handle, 0).map_err(|error| format!("the close was refused: {error:?}"))?;
+    link.close(handle, 0)
+        .map_err(|error| format!("the close was refused: {error:?}"))?;
     let deadline = Instant::now() + HANDSHAKE_DEADLINE;
     while link.send_pending() && Instant::now() < deadline {
         pump(&mut link, start).map_err(|error| format!("the link failed: {error:?}"))?;
@@ -231,7 +244,9 @@ fn main() -> ExitCode {
     let result = match direction.as_str() {
         "inbound" => inbound(),
         "outbound" => outbound(),
-        other => Err(format!("a direction is `inbound` or `outbound`, not {other:?}")),
+        other => Err(format!(
+            "a direction is `inbound` or `outbound`, not {other:?}"
+        )),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

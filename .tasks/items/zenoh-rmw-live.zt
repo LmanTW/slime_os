@@ -5,6 +5,7 @@ item :: s.Item = (h.task "01a206df-0a4a-7536-be2f-53192d8c9974" "zenoh-rmw-live"
   "A client-role Slime link exchanges samples with a ROS talker and a ROS listener through a live rmw_zenohd"
   "Every exam of the client role replays captured bytes or a scripted stream. No Rust link has met a router. Two host probes ran a client behind `rmw_zenohd` with the Python wire library. They are not fixtures. The MVP's goal is a pinned `rmw_zenoh` peer exchanging bounded topics with a Slime component, and nothing yet shows the library doing that.")
   with {
+    intent = #active;
     owns = {
       "verification/zenoh-live/**";
     };
