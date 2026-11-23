@@ -27,21 +27,24 @@ item :: s.Item = (h.task "01a206df-0a4a-7536-be2f-53192d8c9974" "zenoh-rmw-live"
         "A `demo_nodes_cpp listener` subscribes through the router. The link writes 6 Puts on the chatter key, and the listener prints each as `I heard: [Hello Slime N]`, in order."
         { "zenoh_rmw_live_check"; };
       h.req "the-ros-side-is-the-nodes-own-output"
-        "The transcript's `ros` lines are the listener's stdout, read by the recipe. The program does not write them. The judge refuses a ROS line that is not a listener's."
+        "The checker starts the router and the nodes and reads the listener's stdout. The `ros` lines are what it read. The checker drops any `ros` line the program prints, and the judge refuses a ROS line that is not a listener's."
+        { "zenoh_rmw_live_check"; };
+      h.req "the-run-prints-its-phases-in-order"
+        "The judge refuses a transcript whose lines are out of order, or whose ROS lines follow the close. A run prints the inbound handshake, the subscription, the samples, the outbound handshake, the Puts, the ROS lines and the close, in that order."
         { "zenoh_rmw_live_check"; };
       h.req "controls-are-refused"
-        "The judge refuses 26 corrupted transcripts before it judges the run."
+        "The judge refuses 31 corrupted transcripts before it judges the run."
         { "zenoh_rmw_live_check"; };
     };
     acceptance = {
       h.observedWhere "zenoh_rmw_live_check" {
         h.atLeast "casesObserved" 12;
-        h.count "negativeControlsRefused" 26;
+        h.count "negativeControlsRefused" 31;
       };
     };
     decisions = {
       h.decided "an-operator-signs-the-live-record"
-        "`zenoh_rmw_live_check` is an operator target. The item closes when an operator in `specs/allowed_signers` runs it and signs the record."
+        "`zenoh_rmw_live_check` is to be an operator target. A later process PR adds it to `specs/targets.toml`. The item closes when an operator in `specs/allowed_signers` runs it and signs the record."
         "CI has no router and no ROS packages. A done witness for an item named live must rest on a run that met a router"
         h.agentDefault
         { "link-meets-a-router"; "inbound-samples-are-delivered"; "outbound-puts-are-heard"; };
@@ -50,6 +53,11 @@ item :: s.Item = (h.task "01a206df-0a4a-7536-be2f-53192d8c9974" "zenoh-rmw-live"
         "the pinned ROS packages are not in `flake.nix`, and a path the checker invented would claim an environment nobody pinned"
         h.agentDefault
         { "link-meets-a-router"; };
+      h.decided "the-checker-starts-the-router-and-the-nodes"
+        "The checker starts `rmw_zenohd` and a ROS node for each direction. It runs the program with `inbound` or `outbound`. It kills each process it started by its recorded PID."
+        "the program must not write the ROS side. An implementation PR cannot change grader code, so the checker owns the launcher"
+        h.agentDefault
+        { "the-ros-side-is-the-nodes-own-output"; };
       h.decided "the-program-is-a-crate-outside-the-workspace"
         "The program is `verification/zenoh-live`, with its own `Cargo.toml` and an empty `[workspace]`. It depends on `slime-components` by path."
         "`verification/zenoh-xcheck` does the same, so the program stays out of the product's lockfile, `just deny` and the closures"

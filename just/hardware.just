@@ -133,12 +133,13 @@ zenoh_rmw_router_link_check:
 zenoh_rmw_client_put_check:
     python3 scripts/check/check-zenoh-profile0.py --slice rmw-client-put
 
-# Judges a live exchange between a client-role Slime link and two ROS nodes through rmw_zenohd. The host program in
-# verification/zenoh-live connects the link to the router. A ROS talker publishes on the chatter key and the link delivers
-# its samples, then a ROS listener subscribes and the link writes 6 Puts that it prints. The expectation is
-# scripts/lib/zenoh_rmw_live_exam.py. The operator names the router and the nodes in SLIME_ROS_ENV, SLIME_RMW_ZENOHD,
-# SLIME_ROS_TALKER and SLIME_ROS_LISTENER, because the pinned ROS packages are not in flake.nix. CI does not run it. It is
-# an operator target in specs/targets.toml, and an operator signs its record. It fails until the program exists.
+# Judges a live exchange between a client-role Slime link and two ROS nodes through rmw_zenohd. The checker starts the
+# router and a ROS node for each direction and runs the host program in verification/zenoh-live against them. A ROS talker
+# publishes on the chatter key and the link delivers its samples, then a ROS listener subscribes and the link writes 6 Puts.
+# The checker reads the listener's stdout. The expectation is scripts/lib/zenoh_rmw_live_exam.py. The operator names the
+# router and the nodes in SLIME_ROS_ENV, SLIME_RMW_ZENOHD, SLIME_ROS_TALKER and SLIME_ROS_LISTENER, because the pinned ROS
+# packages are not in flake.nix. CI does not run it. A later process PR lists it as an operator target in
+# specs/targets.toml, and an operator signs its record. It fails until the program exists.
 [group('hardware')]
 zenoh_rmw_live_check:
     python3 scripts/check/check-zenoh-profile0.py --slice rmw-live

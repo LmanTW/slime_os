@@ -112,9 +112,11 @@ import hashlib
 import os as _os
 import re
 import shutil
+import signal as _signal
 import struct
 import subprocess
 import tempfile
+import time as _time
 from collections.abc import Callable
 from typing import NoReturn
 
@@ -2375,22 +2377,86 @@ LIVE_CRATE = ROOT / "verification" / "zenoh-live"
 # The ROS environment is read from the operator's shell, never from a path this checker invents: the pinned packages are
 # not in `flake.nix`, so the operator names them. A missing variable is a refusal, not a skipped run.
 LIVE_ENVIRONMENT = ("SLIME_ROS_ENV", "SLIME_RMW_ZENOHD", "SLIME_ROS_TALKER", "SLIME_ROS_LISTENER")
+LIVE_ROUTER_PORT = 7447
+LIVE_SETTLE_S = 3
+LIVE_PROGRAM_S = 60
+LISTENER_LINE = re.compile(r"I heard: \[(Hello Slime \d+)\]")
 
 
-def run_rmw_live() -> list[str]:
+def live_environment() -> dict[str, str]:
     missing = [name for name in LIVE_ENVIRONMENT if not _os.environ.get(name)]
     if missing:
         fail(f"rmw-live: the operator's environment names no {', '.join(missing)}; a live run needs a router and two ROS nodes")
+    ros = _os.environ["SLIME_ROS_ENV"]
+    return {
+        **_os.environ,
+        "AMENT_PREFIX_PATH": ros,
+        "LD_LIBRARY_PATH": f"{ros}/lib",
+        "RMW_IMPLEMENTATION": "rmw_zenoh_cpp",
+        "ROS_DOMAIN_ID": "0",
+    }
+
+
+def live_start(command: list[str], environment: dict[str, str], pids: list[int], stdout) -> subprocess.Popen:
+    """Starts a process in its own session and records its PID, so every process this checker starts is killed by PID."""
+    process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=stdout, stderr=subprocess.DEVNULL, env=environment, start_new_session=True)
+    pids.append(process.pid)
+    return process
+
+
+def live_stop(pids: list[int]) -> None:
+    for pid in pids:
+        try:
+            _os.killpg(pid, _signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    pids.clear()
+
+
+def run_rmw_live() -> list[str]:
+    environment = live_environment()
     host = subprocess.run(["rustc", "-vV"], capture_output=True, text=True, check=True)
     target = next(line.split(": ", 1)[1] for line in host.stdout.splitlines() if line.startswith("host: "))
-    built = subprocess.run(
-        ["cargo", "run", "--release", "--target", target, "--manifest-path", str(LIVE_CRATE / "Cargo.toml")],
-        cwd=ROOT, capture_output=True, text=True, env={**_os.environ},
-    )
-    if built.returncode != 0:
-        _sys.stderr.write((built.stdout + built.stderr)[-4000:])
-        fail(f"rmw-live: the live program exited {built.returncode}")
-    return [line.removeprefix("[zenoh-live] ") if line.startswith("[zenoh-live] ") else line for line in built.stdout.splitlines() if line.startswith(("[zenoh-live] ", "ros "))]
+    program = ["cargo", "run", "--release", "--target", target, "--manifest-path", str(LIVE_CRATE / "Cargo.toml"), "--"]
+    lines: list[str] = []
+    pids: list[int] = []
+    try:
+        # Inbound: a router and a talker, and the program subscribes. The program prints every line of this direction.
+        live_start([environment["SLIME_RMW_ZENOHD"]], environment, pids, subprocess.DEVNULL)
+        _time.sleep(LIVE_SETTLE_S)
+        live_start([environment["SLIME_ROS_TALKER"]], environment, pids, subprocess.DEVNULL)
+        _time.sleep(LIVE_SETTLE_S)
+        inbound = subprocess.run([*program, "inbound"], cwd=ROOT, capture_output=True, text=True, env=environment, timeout=LIVE_PROGRAM_S)
+        if inbound.returncode != 0:
+            _sys.stderr.write((inbound.stdout + inbound.stderr)[-4000:])
+            fail(f"rmw-live: the live program exited {inbound.returncode} in the inbound direction")
+        lines += [line.removeprefix("[zenoh-live] ") for line in inbound.stdout.splitlines() if line.startswith("[zenoh-live] ")]
+        live_stop(pids)
+        # Outbound: a new router and a listener, and the program writes. The listener's stdout is read here, not by the program.
+        listener_log = ROOT / "build" / "zenoh-live" / "listener.txt"
+        listener_log.parent.mkdir(parents=True, exist_ok=True)
+        live_start([environment["SLIME_RMW_ZENOHD"]], environment, pids, subprocess.DEVNULL)
+        _time.sleep(LIVE_SETTLE_S)
+        with listener_log.open("wb") as sink:
+            live_start([environment["SLIME_ROS_LISTENER"]], environment, pids, sink)
+            _time.sleep(LIVE_SETTLE_S)
+            outbound = subprocess.run([*program, "outbound"], cwd=ROOT, capture_output=True, text=True, env=environment, timeout=LIVE_PROGRAM_S)
+            _time.sleep(LIVE_SETTLE_S)
+        if outbound.returncode != 0:
+            _sys.stderr.write((outbound.stdout + outbound.stderr)[-4000:])
+            fail(f"rmw-live: the live program exited {outbound.returncode} in the outbound direction")
+        lines += [line.removeprefix("[zenoh-live] ") for line in outbound.stdout.splitlines() if line.startswith("[zenoh-live] ")]
+        # The ROS lines are the listener's own, in the order it printed them. They are placed before the close line.
+        heard = [match.group(1) for line in listener_log.read_text(errors="replace").splitlines() if (match := LISTENER_LINE.search(line))]
+        closed = [line for line in lines if line.startswith("live closed ")]
+        lines = [line for line in lines if not line.startswith("live closed ")]
+        lines += [f"ros listener I_heard:_[{text.replace(' ', '_')}]" for text in heard]
+        lines += closed
+    except subprocess.TimeoutExpired:
+        fail(f"rmw-live: the live program did not finish in {LIVE_PROGRAM_S} s")
+    finally:
+        live_stop(pids)
+    return lines
 
 
 def rmw_live_main(controls_only: bool) -> int:

@@ -1,9 +1,11 @@
 """Judge a live exchange between a client-role Slime link and a ROS node through `rmw_zenohd`.
 
-Every other exam of the client role replays captured bytes. This one judges a run against a real router. The host
-program in `verification/zenoh-live` connects a client-role link to `rmw_zenohd`, and a recipe starts the ROS nodes. The
-program prints one `[zenoh-live] ...` line for each thing it did, and the recipe adds one `[ros] ...` line for each
-sample a ROS node printed. This module judges the whole transcript.
+Every other exam of the client role replays captured bytes. This one judges a run against a real router. The checker
+starts `rmw_zenohd` and a ROS node for each direction, runs the host program in `verification/zenoh-live` against them,
+and kills each process it started by its recorded PID. The program prints one `[zenoh-live] ...` line for each thing it
+did. The checker reads the listener's stdout itself and adds one `ros listener ...` line for each line the listener
+printed. The program never writes a `ros` line, and the checker drops any it prints. This module judges the whole
+transcript.
 
 Two directions run one after the other, each against its own router:
 
@@ -14,8 +16,8 @@ Two directions run one after the other, each against its own router:
   prints each as `I heard: [Hello Slime N]`. Every one of the 6 is heard, in order.
 
 The program also prints what the router sent it before the first sample, so a change in the router's handshake is
-seen. The ROS side is read from the nodes' own output, which the program does not write. That is what makes the
-outbound direction an observation and not a claim of the program.
+seen. The ROS side is read by the checker from the node's own output. That is what makes the outbound direction an
+observation and not a claim of the program.
 
 Like the other judges, this one is trusted only after it refuses a mutation of an honest transcript. The controls
 cannot show that a router ran. They show that a transcript is judged for the facts above.
@@ -104,9 +106,27 @@ def parse(lines: list[str]) -> dict:
     return facts
 
 
+# The kinds of line in the order a run prints them. The two directions run one after the other, each against its own
+# router, so the inbound handshake and subscription come first, then the inbound samples, then the outbound handshake,
+# the Puts, the `ros` lines the checker read from the listener, and the close.
+PHASES = ("router-ready", "handshake", "subscribed", "sample", "inbound-done", "handshake", "put", "outbound-done", "ros", "closed")
+
+
+def phases(lines: list[str]) -> list[str]:
+    """The kind of each line, with a run of one kind folded to one entry."""
+    kinds: list[str] = []
+    for line in lines:
+        parts = line.split(" ")
+        kind = parts[0] if parts[0] == "ros" else parts[1]
+        if not kinds or kinds[-1] != kind:
+            kinds.append(kind)
+    return kinds
+
+
 def judge(lines: list[str]) -> tuple[int, int]:
     """Returns (facts judged, 0). The live transcript has no refusal lines: the link either did the exchange or it did not."""
     facts = parse(lines)
+    _need(phases(lines) == list(PHASES), f"live: the lines come in the order {phases(lines)}, a run prints {list(PHASES)}")
     _need(facts["ready"] == "tcp/127.0.0.1:7447", "live: no router was reached on tcp/127.0.0.1:7447")
     _need(len(facts["handshakes"]) == 2, f"live: {len(facts['handshakes'])} handshakes, one for each direction")
     for handshake in facts["handshakes"]:
@@ -163,6 +183,11 @@ def transcript_mutations() -> list[tuple[str, list[str]]]:
         ("a listener that heard the Puts out of order", swapped(index["ros"][0], index["ros"][1])),
         ("a listener that heard a string the link did not write", [good[i].replace("Hello_Slime_5", "Hello_Slime_7") if i == index["ros"][5] else good[i] for i in range(len(good))]),
         ("a ROS line that is not a listener's", [good[i].replace("ros listener", "ros talker", 1) if i == index["ros"][0] else good[i] for i in range(len(good))]),
+        ("both handshakes after the outbound direction began", [line for i, line in enumerate(good) if i != index["handshake"][0]] + [good[index["handshake"][0]]]),
+        ("a handshake printed twice in a row", [*good[: index["handshake"][0] + 1], good[index["handshake"][0]], *good[index["handshake"][0] + 1 :]]),
+        ("the inbound samples after the outbound Puts", [*good[: index["sample"][0]], *good[index["put"][0] : index["outbound-done"][0] + 1], *good[index["sample"][0] : index["put"][0]], *good[index["outbound-done"][0] + 1 :]]),
+        ("the ROS lines before the Puts", [*good[: index["put"][0]], *good[index["ros"][0] : index["ros"][-1] + 1], *good[index["put"][0] : index["ros"][0]], *good[index["ros"][-1] + 1 :]]),
+        ("a ROS line the program printed after the close", [*good, "ros listener I_heard:_[Hello_Slime_0]"]),
         ("a close with another reason", [good[i].replace("reason=0", "reason=1") if i == index["closed"][0] else good[i] for i in range(len(good))]),
         ("no close", [line for i, line in enumerate(good) if i != index["closed"][0]]),
     ]
@@ -193,7 +218,7 @@ def all_controls() -> int:
 # .tasks/terminal. A live run delivers at least `INBOUND_MIN` samples and may deliver more, so the cases are a floor.
 # The controls are exact. While the item is open its stored predicates are compared with these.
 MIN_CASES = 12
-PINNED_CONTROLS = 26
+PINNED_CONTROLS = 31
 
 
 def item_pins() -> tuple[int, int]:
