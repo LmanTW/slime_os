@@ -5,6 +5,7 @@ item :: s.Item = (h.task "01a2095e-8c5f-717f-af72-60abb7f7ed80" "zenoh-rmw-disco
   "`ros2 node list` shows a Slime node that a client-role link declared through a live rmw_zenohd"
   "The client-role link declares liveliness tokens, and its exam judges the bytes. No run has shown that `ros2` builds a graph from them. Probes with the Python wire library listed `/slime_node` and `/chatter`, and the Rust link took no part. The live program exchanges samples and declares no token.")
   with {
+    intent = #active;
     owns = {
       "verification/zenoh-live/**";
     };

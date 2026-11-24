@@ -101,6 +101,12 @@ model of the holder roster writes every line of eight scripted scenarios, with e
 service reclaims a holder whose task the root reports dead, expires a holder that has not detached when the wait ends,
 refuses a reclaimed holder every later request, and serves the other holder throughout. Eighteen wrong services are each
 refused. The server half's exam runs beside it.
+`--slice queries` judges a session that carries queries. Profile 0 refused a queryable declaration, a request
+and a response as unsupported-message. The exam replays the eight batches a stock eclipse-zenoh 1.0.0 queryable
+peer sent while it answered one query, and the six a stock peer sent while it asked one, into sessions of ours;
+checks that the host reference reproduces each message byte for byte; and requires the fifteen variants the
+profile keeps refusing, by name and class. The stock corpus judge, the retained suites and the stock-peer exam
+run beside it, so taking queries cannot move a pinned refusal other than the two the item supersedes.
 
 `--slice composition` judges the derived `sel4-zenoh` composition against the
 demo contract's authority and refuses 15 mutations of an honest one. It is the
@@ -129,6 +135,7 @@ from collections.abc import Callable
 from typing import NoReturn
 
 import devloop_observations
+import zenoh_congestion_exam
 import zenoh_exchange
 import zenoh_rmw_exam
 import zenoh_rmw_graph_exam
@@ -164,6 +171,7 @@ import zenoh_lost_holder_exam
 import zenoh_tls_dependency_exam
 import zenoh_service_arm
 import zenoh_service_component_exam
+import zenoh_service_fault_exam
 import zenoh_service_four_exam
 import zenoh_service_peer_exam
 import zenoh_grants_table_exam
@@ -174,6 +182,7 @@ import zenoh_stack_exam
 import zenoh_qos_exam
 import zenoh_stock_peer
 import zenoh_subscribers_exam
+import zenoh_queries_exam
 import zenoh_undeclare_exam
 import zenoh_wire
 import zutai_cli
@@ -273,16 +282,33 @@ STOCK_RETAINED_TESTS = (*STOCK_DECODER_TESTS, *STOCK_SESSION_TESTS, *STOCK_ENCOD
 # capture and none matches, because the stock peer attaches a QoS extension and a body those
 # vectors do not have. An implementation accepts the shapes the capture shows, and the 19 replays
 # below prove it does.
-STOCK_MAY_CHANGE = frozenset({"transport_keep_alive", "transport_fragment"})
+STOCK_MAY_CHANGE = frozenset({"transport_keep_alive", "transport_fragment", "declare_queryable", "frame_network_request", "frame_network_response"})
 # transport_fragment is the single reliable final fragment `2601aa`. Once the decoder reads a
 # FRAGMENT message it is a valid one, so the row cannot stay refused; it cannot become an accepted
 # row either, for the reason the keep-alive row cannot. The link-limits change removes it
 # (`--slice links` requires fragments to be taken, and the stock slice allows the row to go).
-STOCK_MAY_CHANGE_BYTES = {"transport_keep_alive": "04", "transport_fragment": "2601aa"}
+# declare_queryable, frame_network_request and frame_network_response are the three refused vectors that name a
+# query message. Once the decoder reads a queryable declaration, a request and a response, the first is a valid
+# declaration and the other two are no longer refused as unsupported-message but as truncated, so none can stay
+# as it is; none can become an accepted row either, for the reason the keep-alive row cannot. The queries change
+# removes them, and `--slice queries` requires the messages they stood for to be taken.
+STOCK_MAY_CHANGE_BYTES = {
+    "transport_keep_alive": "04",
+    "transport_fragment": "2601aa",
+    "declare_queryable": "25011e64010003612f62",
+    "frame_network_request": "25011c00",
+    "frame_network_response": "25011b00",
+}
 # The class it is refused with today. While the row stays it keeps its class too: the retained
 # corpus test agrees with whatever the row says, so a class changed in the row and the decoder
 # together would otherwise pass.
-STOCK_MAY_CHANGE_CLASS = {"transport_keep_alive": "unsupported-message", "transport_fragment": "unsupported-message"}
+STOCK_MAY_CHANGE_CLASS = {
+    "transport_keep_alive": "unsupported-message",
+    "transport_fragment": "unsupported-message",
+    "declare_queryable": "unsupported-message",
+    "frame_network_request": "unsupported-message",
+    "frame_network_response": "unsupported-message",
+}
 # The refused vectors that must stay exactly as they were when the exam landed, by name, with a
 # digest of `<name> <class> <bytes>` for each in name order. The checker reads the working tree's
 # corpus and compares; a refused vector may be added, and transport_keep_alive may go, but none of
@@ -291,12 +317,12 @@ STOCK_CORPUS = ROOT / "components" / "lib" / "src" / "zenoh_profile0" / "vectors
 STOCK_FIXED_NAMES = tuple((
     "batch_513_bytes close_extension_present close_reason_unknown close_reserved_flag "
     "close_trailing_byte close_truncated declare_extension_flag declare_interest_flag "
-    "declare_keyexpr_alias declare_queryable declare_reserved_flag declare_token "
+    "declare_keyexpr_alias declare_reserved_flag declare_token "
     "declare_truncated_kind dsub_double_slash dsub_empty_suffix dsub_extension_flag "
     "dsub_id_overflow dsub_invalid_utf8 dsub_key_130_bytes dsub_leading_slash dsub_no_suffix "
     "dsub_nonzero_scope dsub_truncated_suffix dsub_wildcard_double_star dsub_wildcard_star "
     "dsub_wildcard_sub empty_batch frame_best_effort frame_empty frame_extension_present "
-    "frame_network_interest frame_network_oam frame_network_request frame_network_response "
+    "frame_network_interest frame_network_oam "
     "frame_partial_network_message frame_reserved_flag frame_sn_missing frame_sn_overflow "
     "init_ack_cookie_65_bytes init_ack_cookie_empty init_ack_cookie_len_noncanonical "
     "init_ack_cookie_len_over_u16 init_ack_cookie_len_u16_max init_ack_cookie_truncated "
@@ -317,7 +343,7 @@ STOCK_FIXED_NAMES = tuple((
     "usub_missing_wire_expr_ext usub_no_suffix usub_nonzero_scope usub_reserved_header_bit "
     "usub_wildcard usub_wrong_ext_id usub_zbuf_length_132 usub_zbuf_truncated"
 ).split())
-STOCK_FIXED_DIGEST = "4422567dd0966737e41d7e7fb79f0bd66c1fa4c15744ceff4942b36fdaf54987"
+STOCK_FIXED_DIGEST = "c6c2e2f7d49b0600686f6f4052feccff45b062bcfd0ef7d23a378c67b0d3bffd"
 # The accepted batches are the upstream encoder's output and are pinned by name, bytes and
 # summary: replacing one, dropping one or renaming a copy all change the digest.
 STOCK_ACCEPTED_NAMES = tuple((
@@ -1362,6 +1388,14 @@ def stock_controls() -> int:
                 return "\n".join(row if line.startswith("batch transport_fragment ") else line for line in lines)
             return "\n".join([*lines, row])
 
+        def remay(name: str, tail: str) -> str:
+            # As rekeep, for a row the queries change may remove.
+            row = f"batch {name} {tail}"
+            lines = corpus_text.splitlines()
+            if any(line.startswith(f"batch {name} ") for line in lines):
+                return "\n".join(row if line.startswith(f"batch {name} ") else line for line in lines)
+            return "\n".join([*lines, row])
+
         def restream(name: str, position: int, value: str) -> str:
             return "\n".join(
                 " ".join(line.split()[:position] + [value] + line.split()[position + 1 :])
@@ -1427,6 +1461,17 @@ def stock_controls() -> int:
             ("the fragment row refused with another existing class", refragment("refused malformed-message 2601aa")),
             ("the fragment row refused with an invented class", refragment("refused invented-class 2601aa")),
             ("the fragment row turned into an accepted row with the captured bytes", refragment(f"ok {STOCK_MAY_CHANGE_BYTES['transport_fragment']} FRAGMENT;captured")),
+            *[
+                (label, remay(name, tail))
+                for name in ("declare_queryable", "frame_network_request", "frame_network_response")
+                for label, tail in (
+                    (f"the {name} row accepted with invented bytes", "ok 00 invented"),
+                    (f"the {name} row still refused but with other bytes", "refused unsupported-message ff"),
+                    (f"the {name} row refused with another existing class", f"refused malformed-message {STOCK_MAY_CHANGE_BYTES[name]}"),
+                    (f"the {name} row refused with an invented class", f"refused invented-class {STOCK_MAY_CHANGE_BYTES[name]}"),
+                    (f"the {name} row turned into an accepted row with the captured bytes", f"ok {STOCK_MAY_CHANGE_BYTES[name]} QUERY;captured"),
+                )
+            ],
             ("an accepted stock_ row for a captured batch", corpus_text + f"\nbatch stock_init_syn ok {zenoh_stock_peer.batches('connects')[0][1]} INIT_SYN;captured"),
         ]
         for label, mutated in corpus_mutations:
@@ -1834,7 +1879,91 @@ def undeclare_main(controls_only: bool) -> int:
         fail(str(error))
     print(f"[zenoh-profile0] slice=undeclare cases={cases} refusals={refusals} controls={refused_controls}")
     devloop_observations.record(casesObserved=cases + refusals, negativeControlsRefused=refused_controls)
-    print("zenoh profile 0 undeclare check: the session took the undeclaration a stock Zenoh peer sends and refused every variant of it the profile must")
+    print("zenoh profile 0 undeclare check: the session carried the queries a stock Zenoh peer sends and answers, and refused every variant of them the profile must")
+    return 0
+
+
+QUERIES_FILTER = "zenoh_queries::"
+QUERIES_FIXTURES = ROOT / "build" / "zenoh-queries" / "fixtures.zti"
+# The exam's own Rust tests, by name: a filter that matches nothing passes silently.
+QUERIES_TESTS = tuple(f"zenoh_queries::{name}" for name in (
+    "the_constants_are_the_handed_off_record",
+    "the_stock_peer_queries_exam",
+))
+
+
+def run_queries() -> list[str]:
+    # The pinned corpus and the stock-peer exam are judged on this path too: an implementation that
+    # accepts the bare undeclaration by loosening the decoder could otherwise move a pinned refusal or
+    # a stock case while every queries test passes.
+    if not STOCK_CORPUS.is_file():
+        fail(f"{STOCK_CORPUS.relative_to(ROOT)} is missing")
+    judge_stock_corpus(STOCK_CORPUS.read_text())
+    stock_fixtures()
+    STOCK_FIXTURES.parent.mkdir(parents=True, exist_ok=True)
+    STOCK_FIXTURES.write_text(zenoh_stock_peer.fixture_zti())
+    QUERIES_FIXTURES.parent.mkdir(parents=True, exist_ok=True)
+    QUERIES_FIXTURES.write_text(zenoh_queries_exam.fixture_zti())
+    try:
+        zenoh_queries_exam.validate_handoff(QUERIES_FIXTURES.read_text())
+    except zenoh_queries_exam.QueriesError as error:
+        fail(str(error))
+    environment = {**_os.environ, "ZENOH_STOCK_FIXTURES": str(STOCK_FIXTURES), "ZENOH_QUERIES_FIXTURES": str(QUERIES_FIXTURES)}
+    _stdout, retained = cargo_tests(
+        (STOCK_DECODER_FILTER, STOCK_SESSION_FILTER, STOCK_ENCODE_FILTER, STOCK_LINK_FILTER), environment
+    )
+    passed = tests_passed(retained)
+    missing = [name for name in LINKS_RETAINED_TESTS if name not in passed]
+    if missing:
+        fail(f"queries: retained tests did not run and pass ({len(missing)} of {len(LINKS_RETAINED_TESTS)}): {', '.join(missing[:4])}")
+    stock_stdout, stock_output = cargo_tests((STOCK_FILTER,), environment)
+    stock_passed = tests_passed(stock_output)
+    stock_missing = [name for name in LINKS_STOCK_TESTS if name not in stock_passed]
+    if stock_missing:
+        fail(f"queries: the stock-peer exam's tests did not run and pass ({len(stock_missing)} of {len(LINKS_STOCK_TESTS)}): {', '.join(stock_missing[:4])}")
+    judge_stock(exam_lines(stock_stdout))
+    queries_stdout, queries_output = cargo_tests((QUERIES_FILTER,), environment)
+    queries_passed = tests_passed(queries_output)
+    queries_missing = [name for name in QUERIES_TESTS if name not in queries_passed]
+    if queries_missing:
+        fail(f"queries: the exam's tests did not run and pass ({len(queries_missing)} of {len(QUERIES_TESTS)}): {', '.join(queries_missing[:4])}")
+    return exam_lines(queries_stdout)
+
+
+def queries_main(controls_only: bool) -> int:
+    # The stock corpus judge and its mutations run here as a precondition, as they do for `--slice links`:
+    # this gate relies on them to keep the pinned refused vectors where they are, and their refusals
+    # belong to the stock gate's count, not to this one's.
+    stock_controls()
+    sample = "\n".join(f"test {name} ... ok" for name in QUERIES_TESTS[1:])
+    if all(name in tests_passed(sample) for name in QUERIES_TESTS):
+        fail("control: a run with a queries exam test missing was read as complete")
+    try:
+        refused_controls = zenoh_queries_exam.all_controls()
+        item_cases, item_controls = zenoh_queries_exam.item_pins()
+        positive, refusals = zenoh_queries_exam.judge(zenoh_queries_exam.good_lines())
+    except zenoh_queries_exam.QueriesError as error:
+        fail(str(error))
+    if positive + refusals != zenoh_queries_exam.PINNED_CASES:
+        fail(f"queries: an honest transcript is {positive + refusals} cases, the checker pins {zenoh_queries_exam.PINNED_CASES}")
+    if refused_controls != zenoh_queries_exam.PINNED_CONTROLS:
+        fail(f"queries: {refused_controls} controls, the checker pins {zenoh_queries_exam.PINNED_CONTROLS}")
+    # While the item is an active work item, its stored body must say the same. A retired item has no
+    # body here, so this comparison is skipped and the pins above are the whole guard.
+    if item_cases and item_cases != zenoh_queries_exam.PINNED_CASES:
+        fail(f"queries: the admitted item fixes {item_cases} cases, the checker pins {zenoh_queries_exam.PINNED_CASES}")
+    if item_controls and item_controls != zenoh_queries_exam.PINNED_CONTROLS:
+        fail(f"queries: the admitted item requires {item_controls} controls, the checker pins {zenoh_queries_exam.PINNED_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 queries judge: refused {refused_controls} corrupted records")
+        return 0
+    try:
+        cases, refusals = zenoh_queries_exam.judge(run_queries())
+    except zenoh_queries_exam.QueriesError as error:
+        fail(str(error))
+    print(f"[zenoh-profile0] slice=queries cases={cases} refusals={refusals} controls={refused_controls}")
+    devloop_observations.record(casesObserved=cases + refusals, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 queries check: the session carried the queries a stock Zenoh peer sends and answers, and refused every variant of them the profile must")
     return 0
 
 
@@ -2501,7 +2630,8 @@ def discover_names(ros2: str, environment: dict[str, str], kind: str) -> str:
     if done.returncode != 0:
         _sys.stderr.write((done.stdout + done.stderr)[-2000:])
         fail(f"rmw-discover: `ros2 {kind} list` exited {done.returncode}")
-    return zenoh_rmw_discover_exam.names([line.strip() for line in done.stdout.splitlines() if line.strip()])
+    # `ros2` can write a zenoh log line to stdout before its list. A ROS name starts with `/`, and a log line does not.
+    return zenoh_rmw_discover_exam.names([line.strip() for line in done.stdout.splitlines() if line.strip().startswith("/")])
 
 
 def discover_listings(ros2: str, environment: dict[str, str], when: str) -> list[str]:
@@ -3060,6 +3190,42 @@ def liveliness_main(controls_only: bool) -> int:
     print(f"[zenoh-profile0] slice=liveliness cases={cases} refusals={refusals} controls={refused_controls}")
     devloop_observations.record(casesObserved=cases + refusals, negativeControlsRefused=refused_controls)
     print("zenoh profile 0 liveliness check: a client-role session answers a token interest, and a listener admits a client only when configured to")
+
+
+CONGESTION_FILTER = "zenoh_congestion::"
+# The exam's own Rust test, by name: a filter that matches nothing passes silently.
+CONGESTION_TESTS = ("zenoh_congestion::the_congestion_exam",)
+
+
+def run_congestion() -> list[str]:
+    stdout, output = cargo_tests((CONGESTION_FILTER,), {**_os.environ})
+    missing = [name for name in CONGESTION_TESTS if name not in tests_passed(output)]
+    if missing:
+        fail(f"congestion: the exam's tests did not run and pass ({len(missing)} of {len(CONGESTION_TESTS)}): {', '.join(missing)}")
+    return exam_lines(stdout)
+
+
+def congestion_main(controls_only: bool) -> int:
+    neighbour_controls(subscribers=False)
+    try:
+        refused_controls = zenoh_congestion_exam.all_controls()
+        positive, refusals = zenoh_congestion_exam.judge(zenoh_congestion_exam.good_lines())
+    except zenoh_congestion_exam.CongestionError as error:
+        fail(str(error))
+    if positive + refusals != zenoh_congestion_exam.PINNED_CASES:
+        fail(f"congestion: an honest transcript is {positive + refusals} cases, the checker pins {zenoh_congestion_exam.PINNED_CASES}")
+    if refused_controls != zenoh_congestion_exam.PINNED_CONTROLS:
+        fail(f"congestion: {refused_controls} controls, the checker pins {zenoh_congestion_exam.PINNED_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 congestion judge: refused {refused_controls} corrupted records")
+        return 0
+    try:
+        cases, refusals = zenoh_congestion_exam.judge(run_congestion())
+    except zenoh_congestion_exam.CongestionError as error:
+        fail(str(error))
+    print(f"[zenoh-profile0] slice=congestion cases={cases} refusals={refusals} controls={refused_controls}")
+    devloop_observations.record(casesObserved=cases + refusals, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 congestion check: a Drop publication is discarded and counted when the send slot is busy, and a Block one is refused as before")
     return 0
 
 
@@ -3649,6 +3815,45 @@ def service_four_main(controls_only: bool) -> int:
     return 0
 
 
+SERVICE_FAULT_CONTROLS = 66
+FAULT_LINE = re.compile(r"^\[(?:zenoh-service|zenoh-peer|victim|zenoh-supervisor)\] ")
+
+
+def service_fault_main(controls_only: bool) -> int:
+    """The composition with a holder that faults. The facts are read first. The arm then boots the image under QEMU, and the
+    judge reads the lines of the service, the peer, the victim and the supervisor."""
+    exam = zenoh_service_fault_exam
+    try:
+        refusals = exam.fact_controls() + exam.controls()
+        if refusals != SERVICE_FAULT_CONTROLS:
+            fail(f"service-fault: {refusals} controls, the checker pins {SERVICE_FAULT_CONTROLS}")
+        if controls_only:
+            print(f"zenoh profile 0 service-fault judge: refused {refusals} corrupted inputs")
+            return 0
+        cases = exam.check_facts()
+    except exam.FaultExamError as error:
+        fail(f"service-fault: {error}")
+    with tempfile.TemporaryDirectory() as scratch:
+        transcript = _Path(scratch) / "transcript.txt"
+        arm = subprocess.run(
+            [_sys.executable, str(ROOT / "scripts" / "check" / "check-sel4-io-network-plane.py"), "--arm", "zenoh-service-fault", "--transcript", str(transcript)],
+            cwd=ROOT, capture_output=True, text=True, env={**_os.environ},
+        )
+        if arm.returncode != 0:
+            _sys.stderr.write((arm.stdout + arm.stderr)[-4000:])
+            fail(f"service-fault: the zenoh-service-fault arm exited {arm.returncode}")
+        lines = [line.strip() for line in transcript.read_text(encoding="utf-8").splitlines() if FAULT_LINE.match(line.strip())]
+    try:
+        published, denied, received = exam.judge(lines)
+    except exam.FaultExamError as error:
+        fail(f"service-fault: {error}")
+    observed = cases + published + denied + received
+    print(f"[zenoh-profile0] slice=service-fault cases={observed} refusals={refusals} controls={refusals}")
+    devloop_observations.record(casesObserved=observed, negativeControlsRefused=refusals)
+    print("zenoh profile 0 service-fault check: the service reclaimed a holder that faulted and served the others")
+    return 0
+
+
 GRANTS_TABLE_TEST = "every_table_decodes_to_its_rows_or_is_refused"
 TABLE_LINE = re.compile(r"\[zenoh-exam\] (grantstable .*)$")
 
@@ -4108,7 +4313,7 @@ def lost_holder_main(controls_only: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "liveliness", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-client", "rmw-router-link", "rmw-client-put", "rmw-token", "rmw-live", "rmw-discover", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "qos", "lanes", "link-limits-v3", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service-peer", "service-four", "service", "service-link", "holder-fault", "service-stack", "link-v3-reader", "lost-holder", "tls-dependency"), required=True)
+    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "liveliness", "queries", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-client", "rmw-router-link", "rmw-client-put", "rmw-token", "rmw-live", "rmw-discover", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "qos", "congestion", "lanes", "link-limits-v3", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service-peer", "service-four", "service-fault", "service", "service-link", "holder-fault", "service-stack", "link-v3-reader", "lost-holder", "tls-dependency"), required=True)
     parser.add_argument("--controls-only", action="store_true")
     arguments = parser.parse_args()
     if arguments.slice == "composition":
@@ -4149,6 +4354,8 @@ def main() -> int:
         return rmw_graph_main(arguments.controls_only)
     if arguments.slice == "rmw-link":
         return rmw_link_main(arguments.controls_only)
+    if arguments.slice == "queries":
+        return queries_main(arguments.controls_only)
     if arguments.slice == "subscribers":
         return subscribers_main(arguments.controls_only)
     if arguments.slice == "liveliness":
@@ -4159,6 +4366,8 @@ def main() -> int:
         return link_limits_v3_main(arguments.controls_only)
     if arguments.slice == "qos":
         return qos_main(arguments.controls_only)
+    if arguments.slice == "congestion":
+        return congestion_main(arguments.controls_only)
     if arguments.slice == "grants":
         return grants_main(arguments.controls_only)
     if arguments.slice == "client":
@@ -4183,6 +4392,8 @@ def main() -> int:
         return service_component_main(arguments.controls_only)
     if arguments.slice == "service-booted":
         return service_booted_main(arguments.controls_only)
+    if arguments.slice == "service-fault":
+        return service_fault_main(arguments.controls_only)
     if arguments.slice == "service-four":
         return service_four_main(arguments.controls_only)
     if arguments.slice == "service-peer":

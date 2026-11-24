@@ -1,0 +1,50 @@
+{
+  formatVersion = 1;
+  name = "zenoh-supervisor";
+  componentType = "application";
+  version = "1.0.0";
+  owner = "root";
+  purpose = "Owns the Zenoh service composition. It spawns the holders and the service, passes the service a supervision handle for the victim, and reads each exit.";
+  implementation = {
+    provider = "workspace";
+    binary = "zenoh-supervisor";
+    contentHash = "";
+  };
+  provides = [];
+  requires = [ "executable"; ];
+  interfaces = [];
+  dependencies = [ "zenoh-service"; "network-service"; ];
+  communication = { semantic = "none"; qos = []; };
+  configuration = [];
+  lifecycle = [ "Initialize"; "Start"; "Running"; "Error"; ];
+  runtime = {
+    executionEnvironment = "aarch64-sel4-qemu-virt";
+    resource = {
+      stackBytes = 16384;
+      spawnBudget = 6;
+      extraThreads = 0;
+      bufferBytePages = 0;
+      bufferCount = 0;
+      mappingCount = 0;
+      loanCount = 0;
+      privatePageQuota = 0;
+    };
+    devices = [];
+  };
+  health = "required";
+  lifetime = "bounded";
+  compatibility = {
+    platform = "aarch64-sel4-qemu-virt";
+    interface = "contracts/interface-schema/v1";
+    dependency = "exact";
+    resource = "atMost";
+    runtime = "exact";
+    qos = "none";
+  };
+  test = {
+    testCondition = "the zenoh_service_fault_check gate boots the sel4-zenoh-service-fault composition";
+    expectedResult = "the supervisor reads the fault of the victim, spawns the publisher after it, and reads a clean exit from every survivor";
+    passFailCriteria = "zenoh profile 0 service-fault check";
+    requiredTestEnvironment = "zenoh_service_fault_check";
+  };
+}

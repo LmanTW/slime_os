@@ -318,6 +318,7 @@ Semantics not visible in the table:
 | Capabilities per IPC message | `MAX_CAPS_PER_MSG = 1` | seL4 carries one per IPC; checked in `sel4_transport` and `slime-root/src/ipc.rs` |
 | Payload bytes per message | `MAX_MESSAGE_BYTES = 64` | `slime-root/src/ipc.rs` |
 | Live tasks | `MAX_TASKS = 48` | `slime-root/src/task.rs`; `SpawnError::TooManyTasks` |
+| Export table entries per sender / in total | `MAX_EXPORTS_PER_SENDER = 4`, `MAX_CAPABILITY_EXPORTS = MAX_TASKS * 4 = 192` | `CapabilityExports::admit` in `slime-root/src/graph_runtime/state.rs`; `IpcError::DestinationSlotsExhausted` |
 | Supervised task records | `MAX_SUPERVISED_TASKS = 64`, `MAX_RECORDS = MAX_TASKS` | `slime-root/src/{fault,supervision}.rs` |
 | Live children per spawner | manifest `spawnBudget <= 32` | `MAX_SPAWN_BUDGET`; `SpawnError::BudgetExhausted` |
 | Declared native Endpoints per task | `CHILD_NATIVE_REGION_SLOTS = 31` | child CSpace regions in `slime-root/src/task.rs` |

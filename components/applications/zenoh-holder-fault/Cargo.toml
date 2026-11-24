@@ -1,0 +1,22 @@
+[package]
+name = "slime-component-zenoh-holder-fault"
+version = "0.1.0"
+edition = "2024"
+publish = false
+rust-version = "1.96"
+build = "build.rs"
+
+[[bin]]
+name = "zenoh-holder-fault"
+path = "src/main.rs"
+test = false
+
+[dependencies]
+slime-components = { path = "../../lib" }
+slime-rt = { path = "../../runtime" }
+
+[build-dependencies]
+slime-build-support = { path = "../../build-support" }
+
+[lints]
+workspace = true

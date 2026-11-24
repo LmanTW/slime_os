@@ -75,6 +75,47 @@ The capability-transfer protocol is declared under
 `contracts/capability-transfer/v1/`. Transferability and every rights ceiling are
 checked against the vocabulary generated from `contracts/generation/v5/`.
 
+### The export table
+
+The root holds every export in one table until the export leaves it.
+`CapabilityExports` in `slime-root/src/graph_runtime/state.rs` owns the table.
+
+| Event | What the root does |
+|---|---|
+| The receiver imports a finalized logical export. | It installs the capability in the receiver's table and counts one import. |
+| The sender cancels before finalize. | It removes the export and counts one cancel. |
+| The sender or the receiver retires. | It removes the export and its ticket, and prints `SLIME_GRAPH exports released task=N count=M`. |
+| The graph drains. | It removes each finalized export that is left, and reports the rest as outstanding. |
+
+A sender holds at most 4 entries, `MAX_EXPORTS_PER_SENDER`. The table holds one
+share for each of the 48 tasks, 192 entries. A full share therefore takes no
+entry of another sender. The root refuses the next export of a sender with a
+full share, and the runtime returns `ERR_OUT_OF_MEMORY`.
+
+A native Endpoint export keeps its entry after the rendezvous. The entry holds
+the root's ticket and the mirror of that ticket in the sender's CNode. It counts
+toward the share of its sender until the sender or the receiver retires.
+
+The `Arena` phase of a retirement releases every export that names the task as
+sender or as receiver. It releases on each attempt, before it reclaims the task.
+The task leaves the task table in the attempt that succeeds, so no later export
+can name it.
+
+The release line counts the exports that no receiver received. A finalized
+Endpoint export counts as one import instead, at a retirement and at the drain.
+The kernel delivered its capability at the rendezvous.
+
+A release returns nothing to a task that lives:
+
+- It does not return a consumed logical capability to its sender.
+- It must not end the Endpoint capability of a receiver. It deletes the root's
+  ticket and the mirror. The ticket carries the badge of its source, and the
+  pinned kernel treats such a capability as not revocable.
+
+A receiver that lives and never imports holds up to one share of each sender
+that exports to it. Cancel is allowed only before finalize, so only a retirement
+frees those entries.
+
 ## Checked rights algebra
 
 The normative [bounded model](../../contracts/capability-rights/model/capability-rights.zt)
@@ -170,9 +211,15 @@ private allocation has no object identity or transfer semantics. See
 The authoritative numbers remain in the capability matrix. Key current limits
 are one capability and 64 payload bytes per IPC message, 64 logical capability
 slots per task, 32 live shared buffers, 256 shared-buffer pages, 64 mappings, and
-64 loans.
+64 loans. The export table holds 4 entries per sender and 192 entries in total.
 
 Narrow behavior gates include `just sel4_channel_check`,
 `just sel4_crossing_check`, `just sel4_sample_check`, and
 `just fabric_authority_check`. `just sel4_gate_control_check` proves that the
 marker gates reject missing, reordered, and explicit failure evidence.
+
+`just sel4_export_share_check` judges the share, the release, and the import
+count on the loan plane. Two host tests under `just test_sel4_root` hold the
+share of every sender and the release of one task's exports. No gate has a
+sender that retires while its receiver still uses a delivered Endpoint. No gate
+makes an `Arena` phase fail.

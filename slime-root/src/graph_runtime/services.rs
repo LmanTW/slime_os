@@ -154,6 +154,11 @@ pub(super) fn serve_instance_graph(
                     .map(|task| VSpaceCap(task.vspace.vspace.bits() as usize))
                     .is_some_and(|vspace| reclaim_dead_task(buffers, allocator, id, vspace)),
                 supervision::RetirementPhase::Arena => {
+                    // Released on every attempt, while the task's CNode
+                    // exists. The root serves requests between two attempts,
+                    // and an export may name the task until this phase
+                    // removes it.
+                    release_task_exports(allocator, tasks, id);
                     if reclaim_task_objects(
                         generation,
                         launched,
@@ -1881,7 +1886,9 @@ pub(super) fn serve_instance_graph(
     for slot in &mut exports.entries {
         let Some(export) = slot.take() else { continue };
         if export.finalized {
-            exports.imported = exports.imported.saturating_add(1);
+            // Only an endpoint export reached its receiver without an import
+            // request: the kernel delivered it at the rendezvous.
+            exports.imported += usize::from(export.ticket.is_some());
             cleanup_export_ticket(allocator, tasks, export);
         } else {
             *slot = Some(export);

@@ -1,0 +1,65 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a20cfb-a941-7973-b0ac-73ed3d441495" "nix-cache-keeps-zutai-toolchain" "quality"
+  "Both Nix cache entries keep the zutai-toolchain output, so no job that runs slime-env builds it again"
+  "slime-env saves one Nix cache entry per runner architecture. The ARM64 entry serves the CI seL4 jobs and the aarch64 Evidence jobs. The X64 entry serves the x86-64 Evidence jobs and the spec judge. Before cache-nix-action saves the Nix store, it collects garbage down to 5 GB. `nix develop` registers no garbage collector root, so the collection may delete the dev shell and zutai-toolchain. The ARM64 entry saved on 2026-11-23 at 15:11:35 UTC came from an 8.1 GB store that this collection cut to 5.3 GB. Every job that restores it builds zutai-toolchain from source: in main run 1626 the step `Enter the dev shell` took 109 to 121 s, and that build took 95 to 103 s of it. The X64 entry held the toolchain in Evidence run 45346660799, but the collection decides that again at each save. A primary-key hit saves nothing, so every job restores an entry until its key changes.")
+  with {
+    intent = #planned;
+    owns = {
+      ".github/actions/slime-env/**";
+      ".github/workflows/**";
+    };
+    nonGoals = {
+      h.nonGoal "Changing the build-output caches, the Zutai evaluation stores, or the Kani, MyQue, projection or rust-cache caches." h.agentDefault;
+      h.nonGoal "Changing what any check asserts, or removing a job's restore of the Nix store." h.agentDefault;
+      h.nonGoal "The `spec` shell and the shared tool environment, which jobs enter without slime-env's default dev shell." h.agentDefault;
+      h.nonGoal "Changing the bounds of ci-cache-budget. That item judges the total cache size and the slime-env time." h.agentDefault;
+    };
+    requirements = {
+      h.req "checks-unchanged"
+        "Every target that ci_critical_path_check depends on passes with the changed slime-env action."
+        { "ci_critical_path_check"; };
+      h.req "toolchain-survives-save"
+        "A job that restores the saved ARM64 or X64 Nix cache entry enters the dev shell without building a zutai-toolchain derivation."
+        { "nix-cache-observed"; };
+      h.req "dev-shell-time"
+        "In every job that runs slime-env and restores the saved Nix cache entry of its architecture, the step `Enter the dev shell` takes at most 40 s."
+        { "nix-cache-observed"; };
+      h.req "entry-size"
+        "The saved ARM64 and X64 Nix cache entries together are at most 5400 MB."
+        { "nix-cache-observed"; };
+      h.req "old-entries-unused"
+        "After the first main run that saves a new Nix cache entry for an architecture, no main job restores an entry of that architecture created before the implementation merged."
+        { "nix-cache-observed"; };
+    };
+    acceptance = {
+      h.observed "ci_critical_path_check";
+      h.human "nix-cache-observed"
+        "Reading the main-branch runs after the implementation merged, count only runs after the first one that saved a new Nix cache entry for the architecture read. Take 3 consecutive CI runs with the seL4 jobs succeeded, and 3 consecutive Evidence runs with an x86_64 record job succeeded. None may be cancelled or change a Nix cache key input since the preceding counted run. In each of these runs, did no job log a line that builds a zutai-toolchain derivation? Did every job that ran slime-env take at most 40 s in `Enter the dev shell`? Did no job restore an entry created before the merge? After the last of them, did the ARM64 and X64 entries together total at most 5400 MB? Note the last counted CI run's URL and the last counted Evidence run's URL.";
+    };
+    decisions = {
+      h.decided "both-architectures"
+        "The item covers the ARM64 and the X64 Nix cache entry"
+        "one slime-env change replaces the key of both entries, and the x86-64 Evidence jobs and the spec judge enter the default dev shell through slime-env"
+        (h.acceptedDefault "Claude Code session, 2026-11-24: the owner accepted the proposed option of two, which were to cover both runner.arch entries or the ARM64 entry only")
+        { "toolchain-survives-save"; "dev-shell-time"; "entry-size"; "old-entries-unused"; };
+      h.decided "replace-by-key"
+        "The implementation replaces the current Nix cache entries by changing their key, and no person deletes a cache entry by hand"
+        "a primary-key hit saves nothing, so a fixed save step never runs while the current key exists; a key change needs no destructive action, and GitHub removes an unused entry after 7 days without access"
+        h.agentDefault
+        { "old-entries-unused"; };
+      h.decided "size-bound"
+        "The two saved Nix cache entries are bounded at 5400 MB together"
+        "the ARM64 entry is 2398 MB and the X64 entry was 2660 MB in Evidence run 45346660799, 5058 MB together; whether the repository's total fits ci-cache-budget's 9000 MB bound is that item's question"
+        h.agentDefault
+        { "entry-size"; };
+      h.decided "time-bound"
+        "The step `Enter the dev shell` is bounded at 40 s"
+        "without the zutai-toolchain build the step spent 13 to 18 s on ARM64 in run 1626, and 19 s on x86-64 in Evidence run 45346660799; 40 s leaves room for runner variance"
+        h.agentDefault
+        { "dev-shell-time"; };
+    };
+  };
+
+item

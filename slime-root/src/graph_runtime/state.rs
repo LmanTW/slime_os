@@ -70,7 +70,10 @@ pub(super) fn init_launch_tables() -> (
     }
 }
 
-pub(super) const MAX_CAPABILITY_EXPORTS: usize = 64;
+/// Exports one sender may hold that no receiver has imported yet.
+pub(super) const MAX_EXPORTS_PER_SENDER: usize = 4;
+/// Room for every task's share, so no sender can take another sender's.
+pub(super) const MAX_CAPABILITY_EXPORTS: usize = MAX_TASKS * MAX_EXPORTS_PER_SENDER;
 #[derive(Clone, Copy)]
 pub(super) struct CapabilityExport {
     pub(super) id: u32,
@@ -100,6 +103,27 @@ impl CapabilityExports {
             cancelled: 0,
             finalized: 0,
         }
+    }
+    /// A free entry for `sender`, or none once it holds its share.
+    pub(super) fn admit(&self, sender: TaskId) -> Option<usize> {
+        let held = self
+            .entries
+            .iter()
+            .flatten()
+            .filter(|entry| entry.sender == sender);
+        if held.count() >= MAX_EXPORTS_PER_SENDER {
+            return None;
+        }
+        self.entries.iter().position(Option::is_none)
+    }
+    /// Take one export that names `task` as its sender or as its receiver.
+    pub(super) fn take_of(&mut self, task: TaskId) -> Option<CapabilityExport> {
+        self.entries
+            .iter_mut()
+            .find(|entry| {
+                entry.is_some_and(|entry| entry.sender == task || entry.receiver == task)
+            })?
+            .take()
     }
     pub(super) fn len(&self) -> usize {
         self.entries.iter().filter(|entry| entry.is_some()).count()
@@ -196,4 +220,66 @@ pub(super) fn declared_private_memory_pages(
     budget
         .quota_for(&private_memory_budget::holder_identity(component))
         .map_or(0, |quota| quota.page_quota as usize)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn export(id: u32, sender: u32, receiver: u32, finalized: bool) -> CapabilityExport {
+        CapabilityExport {
+            id,
+            sender: TaskId(sender),
+            receiver: TaskId(receiver),
+            capability: graph::CapabilityEntry::buffer_factory(RIGHT_TRANSFER).unwrap(),
+            ticket: None,
+            sender_ticket_slot: None,
+            retain: true,
+            finalized,
+        }
+    }
+
+    /// Store one export of `sender` the way `serve_capability_export` does:
+    /// in the entry that `admit` chose.
+    fn store(exports: &mut CapabilityExports, sender: u32, receiver: u32, finalized: bool) -> bool {
+        let Some(index) = exports.admit(TaskId(sender)) else {
+            return false;
+        };
+        let id = exports.next_id;
+        exports.next_id += 1;
+        exports.entries[index] = Some(export(id, sender, receiver, finalized));
+        true
+    }
+
+    #[test]
+    fn a_full_share_refuses_its_sender_and_takes_no_entry_of_another() {
+        let mut exports = CapabilityExports::new();
+        for sender in 0..MAX_TASKS as u32 {
+            for _ in 0..MAX_EXPORTS_PER_SENDER {
+                assert!(store(&mut exports, sender, sender + 1, false));
+            }
+            assert!(!store(&mut exports, sender, sender + 1, false));
+        }
+        assert_eq!(exports.len(), MAX_TASKS * MAX_EXPORTS_PER_SENDER);
+    }
+
+    #[test]
+    fn retirement_takes_exactly_the_exports_that_name_the_task() {
+        let mut exports = CapabilityExports::new();
+        // Task 1 sent a finalized export and one it never finalized, and it is
+        // the receiver of a third. The fourth export names it nowhere.
+        assert!(store(&mut exports, 1, 2, true));
+        assert!(store(&mut exports, 1, 3, false));
+        assert!(store(&mut exports, 3, 1, true));
+        assert!(store(&mut exports, 2, 3, true));
+        let mut released = 0;
+        while let Some(export) = exports.take_of(TaskId(1)) {
+            assert!(export.sender == TaskId(1) || export.receiver == TaskId(1));
+            released += 1;
+        }
+        assert_eq!(released, 3);
+        assert_eq!(exports.len(), 1);
+        let left = exports.entries.iter().flatten().next().unwrap();
+        assert_eq!((left.sender, left.receiver), (TaskId(2), TaskId(3)));
+    }
 }

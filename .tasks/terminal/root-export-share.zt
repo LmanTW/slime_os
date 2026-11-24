@@ -5,7 +5,7 @@ item :: s.Item = (h.bug "01a207ed-7d10-7968-a939-be290a4ee018" "root-export-shar
   "The root's export table gives each sender a share and releases a retired task's exports"
   "The root keeps every capability export that no receiver has imported in one table of 64 entries. It bounds no sender, and the retirement of a task removes none of its entries. On main at 47acd9e2 a sample-lender that made 70 retained exports and finalized none had 64 admitted. The root refused the 65th with ERR_OUT_OF_MEMORY, and the delegation of that lender then failed. The table is global, so the root refuses every later export of every component. An entry also stays when its sender exits before it finalizes the export, and when its receiver exits without an import. The comment on reclaim_dead_task says that retirement settles in-flight capabilities. No code does.")
   with {
-    intent = #planned;
+    intent = #active;
     owns = {
       "slime-root/src/**";
       "components/lib/src/loan_plane.rs";

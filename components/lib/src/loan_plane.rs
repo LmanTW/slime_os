@@ -228,17 +228,25 @@ pub fn drive_loan_plane() {
     // reclaims the buffer itself.
     let abandoned = slime_rt::shared_buffer_create(resolve_buffer_factory(), 1, true)
         .unwrap_or_else(|_| fail_loan(b"create abandoned export source"));
-    if slime_rt::capability_delegate(
-        console_send_slot(),
-        abandoned.slot,
-        CapabilityDisposition::Retain,
-        slime_proto::capability_transfer::OBJECT_KIND_SHARED_BUFFER,
-        RIGHT_TRANSFER,
-        &[b'x'; 64],
-    ) != slime_rt::ERR_SUCCESS
-    {
-        fail_loan(b"leave export ticket");
+    let leave = || {
+        slime_rt::capability_delegate(
+            console_send_slot(),
+            abandoned.slot,
+            CapabilityDisposition::Retain,
+            slime_proto::capability_transfer::OBJECT_KIND_SHARED_BUFFER,
+            RIGHT_TRANSFER,
+            &[b'x'; 64],
+        )
+    };
+    for _ in 0..4 {
+        if leave() != slime_rt::ERR_SUCCESS {
+            fail_loan(b"leave export ticket");
+        }
     }
+    if leave() != slime_rt::ERR_OUT_OF_MEMORY {
+        fail_loan(b"export share did not bite");
+    }
+    slime_rt::debug_write(b"[init] export share refused\n");
     if slime_rt::send(console_send_slot(), b"SLIME.CONSOLE.CLOSE", &[]) != slime_rt::ERR_SUCCESS {
         fail_loan(b"close console");
     }

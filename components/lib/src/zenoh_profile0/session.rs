@@ -26,7 +26,7 @@ use super::reassembly::{Progress, Run};
 use super::tables::{InsertError, Keys, SlotTable};
 use super::{
     Bounds, Frame, MAX_BATCH_BYTES, MAX_COOKIE_BYTES, MAX_KEY_BYTES, Mapping, Message, Network,
-    Refusal, STREAM_LENGTH_BYTES, decode_batch_client, decode_batch_qos, decode_batch_with,
+    Qos, Refusal, STREAM_LENGTH_BYTES, decode_batch_client, decode_batch_qos, decode_batch_with,
     frame_of,
 };
 use slime_proto::zenoh_profile as p;
@@ -1974,17 +1974,45 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
         payload: &[u8],
         out: &mut [u8],
     ) -> Result<Outcome<'a, E>, SessionError> {
-        self.check_put(key, attachment, payload.len(), true)?;
-        if self.state == State::Open && !self.put_fits_one_frame(key, attachment, payload.len()) {
+        self.send_put_qos(key, attachment, payload, Qos::default(), out)
+    }
+
+    /// [`send_put`](Self::send_put) with the QoS the PUSH states. The default QoS writes no extension.
+    pub fn send_put_qos<'a>(
+        &mut self,
+        key: &str,
+        attachment: &[u8],
+        payload: &[u8],
+        qos: Qos,
+        out: &mut [u8],
+    ) -> Result<Outcome<'a, E>, SessionError> {
+        self.check_whole_put(key, attachment, payload.len())?;
+        self.send_frame(out, |frame| {
+            frame.push_put_qos(Mapping::Sender, key, qos, attachment, payload)
+        })
+    }
+
+    /// What `send_put` checks before it builds a frame, and nothing more: that the session is open, the Put's key,
+    /// attachment and size, and that it travels in one FRAME. It changes nothing, so a caller that is about to
+    /// discard the Put refuses the same Puts `send_put` refuses.
+    pub fn check_whole_put(
+        &self,
+        key: &str,
+        attachment: &[u8],
+        payload_len: usize,
+    ) -> Result<(), SessionError> {
+        self.check_put(key, attachment, payload_len, true)?;
+        if self.state != State::Open {
+            return Err(SessionError::NotOpen);
+        }
+        if !self.put_fits_one_frame(key, attachment, payload_len) {
             return Err(if self.params.fragments {
                 SessionError::NeedsFragments
             } else {
                 SessionError::Decode(Refusal::OverBound)
             });
         }
-        self.send_frame(out, |frame| {
-            frame.push_put(Mapping::Sender, key, attachment, payload)
-        })
+        Ok(())
     }
 
     /// Writes the next FRAGMENT of a Put that does not fit one frame, starting at byte `at` of the

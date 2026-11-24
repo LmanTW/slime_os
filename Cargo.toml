@@ -697,3 +697,13 @@ debug = false
 opt-level = "s"
 codegen-units = 1
 debug = false
+
+[profile.release.package.slime-component-zenoh-supervisor]
+opt-level = "s"
+codegen-units = 1
+debug = false
+
+[profile.release.package.slime-component-zenoh-holder-fault]
+opt-level = "s"
+codegen-units = 1
+debug = false

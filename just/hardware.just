@@ -204,6 +204,15 @@ zenoh_rmw_peer_check:
 zenoh_rmw_link_check:
     python3 scripts/check/check-zenoh-profile0.py --slice rmw-link
 
+# A Zenoh Profile 0 session carrying queries: the sessions a stock eclipse-zenoh 1.0.0 queryable peer and
+# a stock peer that asks sent, replayed into sessions of ours, with the host reference reproducing each
+# queryable declaration, request, response and final response byte for byte
+# (scripts/lib/zenoh_queries_exam.py, contracts/zenoh-stock-queries/v1), and fifteen variants refused by
+# name and class. Nothing here needs a registry. Fails until the session takes queries.
+[group('hardware')]
+zenoh_queries_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice queries
+
 # Judges a Zenoh Profile 0 session that holds several subscriptions of its own. The session refused
 # a second one as subscriber-limit, whatever its parameters said. Params.local now says how many it
 # holds. The links exam and the stock-peer exam run beside it, because both pin the subscriber limit.
@@ -242,6 +251,15 @@ zenoh_link_limits_v3_check: (zenoh_link_v3_limits_gen "--check")
 [group('hardware')]
 zenoh_qos_check:
     python3 scripts/check/check-zenoh-profile0.py --slice qos
+
+# Judges congestion control on a Zenoh publication. With the link's send slot busy, a Drop publication is
+# discarded and counted and spends no sequence number, and a Block publication is refused as SendBusy, as it
+# is today. The host reference scripts/lib/zenoh_wire.py reproduces both frames byte for byte; the expectation
+# is scripts/lib/zenoh_congestion_exam.py. Nothing here needs a registry. The recipe fails until the Rust
+# tests land.
+[group('hardware')]
+zenoh_congestion_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice congestion
 
 # Judges the answer a client-role Zenoh Profile 0 session gives a router's INTEREST for tokens: a
 # DECLARE_TOKEN for each token it holds whose key the INTEREST selects, each carrying the interest id, then a
@@ -421,6 +439,15 @@ zenoh_service_link_check:
 [group('hardware')]
 zenoh_service_stack_check:
     python3 scripts/check/check-zenoh-profile0.py --slice service-stack
+
+# Judges the composition that runs the Zenoh service with a holder that faults under a supervisor, and boots it. The judge
+# requires the system spec, the manifest, the inventory row, the arm of the network plane checker and the two components,
+# and then runs the `zenoh-service-fault` arm. The victim attaches and faults, and the supervisor reads the fault. The
+# service must reclaim the victim once with the cause `dead`, and `alpha` and `beta` must exchange four samples after it.
+# The expectation is scripts/lib/zenoh_service_fault_exam.py. The recipe is in no aggregate. It fails until the composition lands.
+[group('hardware')]
+zenoh_service_fault_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice service-fault
 
 # Judges that the Zenoh service builds its session parameters from a configuration of `contracts/zenoh-link-limits/v3`. The judge
 # requires the link type with 2 aliases, the module of the reader, and the service's call of it, and requires the literal

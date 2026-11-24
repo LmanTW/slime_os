@@ -19,7 +19,7 @@ Provenance, all on one x86_64 Linux host, one run each:
 * `listens`: the stock peer listened with a subscriber on the demo key. We connected, waited
   for its subscriber declaration, and published the four samples.
 * `refuse`: batches a stock peer sent that a bounded profile must keep refusing: a client and
-  a router `INIT_SYN`, a queryable declaration, a `get` request, a wildcard key declaration,
+  a router `INIT_SYN`, a queryable declaration, a `get` request (the exam now takes the declaration and refuses the request by session state), a wildcard key declaration,
   and a wildcard declared as a suffix of a declared alias. Six more are built from captured
   batches (and, for the last, an accepted corpus row) by `wrong_position_qos`: the QoS extension the peer sends on an OAM or declaration,
   added to a FRAME header, a PUSH, a Put, the inner header of a subscriber declaration, a
@@ -247,12 +247,17 @@ OK_SCENARIOS = (
     # value is not the PUSH default), so a session takes the batch and delivers its sample. The row keeps
     # its name and bytes because the fixtures contract fixes the group at 15 rows.
     "qos-on-push-is-taken",
+    # The `refuse` group still holds refuse-queryable, a captured DeclareKeyExpr for `slime/demo/q` and a
+    # DeclareQueryable through its alias. A queryable on an exact key is valid, so a session takes the
+    # declaration and holds the queryable. The row keeps its name and bytes because the fixtures contract
+    # fixes the group at 15 rows.
+    "queryable-declaration-is-taken",
 )
 REFUSED_SCENARIOS = (
     ("refuse-client", "unsupported-whatami"),
     ("refuse-router", "unsupported-whatami"),
-    ("refuse-queryable", "unsupported-message"),
-    ("refuse-request", "unsupported-message"),
+    # A request for a key no queryable of ours holds. The decoder reads it, and the session refuses it.
+    ("refuse-request", "undeclared-key"),
     ("refuse-wildcard", "wildcard-keyexpr"),
     ("alias-undeclared", "invalid-keyexpr"),
     ("alias-second", "over-bound"),

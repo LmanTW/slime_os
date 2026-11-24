@@ -9,10 +9,16 @@
 //!   it has printed `SAMPLES` of them or `DEADLINE` passes.
 //! * `outbound`: the link writes `PUTS` Puts on the chatter key, one every `PUT_GAP`, and closes. A ROS `listener`
 //!   prints each. This program never learns whether the listener heard one, because the router writes nothing back.
+//! * `discover`: the link declares the liveliness tokens of the node `slime_node` and of its publisher on the chatter
+//!   topic, and holds the session open until a line arrives on stdin. The checker runs `ros2` while the session is open
+//!   and then writes that line. The link then closes without withdrawing a token. This program never learns what `ros2`
+//!   listed. `scripts/lib/zenoh_rmw_discover_exam.py` judges that.
 
-use std::io::{ErrorKind, Read, Write};
+use std::io::{BufRead, ErrorKind, Read, Write};
 use std::net::TcpStream;
 use std::process::ExitCode;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use slime_components::zenoh_link::{ByteLink, Error, LinkError, LinkOf, Notice};
@@ -37,8 +43,15 @@ const PUTS: usize = 6;
 const PUT_GAP: Duration = Duration::from_millis(500);
 const HANDSHAKE_DEADLINE: Duration = Duration::from_secs(10);
 const DEADLINE: Duration = Duration::from_secs(30);
+/// How long `discover` waits for the checker's release line: two `ros2` listings run in that time.
+const RELEASE_DEADLINE: Duration = Duration::from_secs(120);
+/// The longest key a token carries: a publisher token's key is 186 bytes, over the first release's bound.
+const TOKEN_KEY_BYTES: usize = 253;
+const NODE_TOKEN: u32 = 10;
+const PUBLISHER_TOKEN: u32 = 11;
 
 type Link = LinkOf<Tcp, FRAMED, 1, 2, MAX_KEY_BYTES, PAYLOAD, NOTICES, MAX_EVENTS>;
+type TokenLink = LinkOf<Tcp, FRAMED, 1, 2, TOKEN_KEY_BYTES, PAYLOAD, NOTICES, MAX_EVENTS>;
 
 /// A non-blocking TCP stream as the link's byte stream.
 struct Tcp {
@@ -76,14 +89,20 @@ fn say(text: &str) {
     println!("[zenoh-live] live {text}");
 }
 
-fn params() -> Params {
+fn params(key: usize) -> Params {
     let mut params = Params::DEMO;
+    params.bounds.key = key;
     params.bounds.payload = PAYLOAD;
     params.samples = NOTICES / 2;
     params
 }
 
 fn connect() -> Result<Link, String> {
+    connect_with::<MAX_KEY_BYTES>()
+}
+
+fn connect_with<const K: usize>()
+-> Result<LinkOf<Tcp, FRAMED, 1, 2, K, PAYLOAD, NOTICES, MAX_EVENTS>, String> {
     let stream =
         TcpStream::connect(ROUTER).map_err(|error| format!("no router on {ROUTER}: {error}"))?;
     stream
@@ -99,9 +118,15 @@ fn connect() -> Result<Link, String> {
         cookie: &[],
     };
     let io = Tcp { stream, eof: false };
-    Link::with_params(io, Role::Connector, &config, params(), 1)
-        .and_then(Link::with_client_role)
-        .map_err(|error| format!("the link refused its configuration: {error:?}"))
+    LinkOf::<Tcp, FRAMED, 1, 2, K, PAYLOAD, NOTICES, MAX_EVENTS>::with_params(
+        io,
+        Role::Connector,
+        &config,
+        params(K),
+        1,
+    )
+    .and_then(LinkOf::with_client_role)
+    .map_err(|error| format!("the link refused its configuration: {error:?}"))
 }
 
 fn now(start: Instant) -> u64 {
@@ -109,7 +134,10 @@ fn now(start: Instant) -> u64 {
 }
 
 /// Pumps the link once and gives the stream a moment, so a loop does not spin.
-fn pump(link: &mut Link, start: Instant) -> Result<(), Error> {
+fn pump<const K: usize>(
+    link: &mut LinkOf<Tcp, FRAMED, 1, 2, K, PAYLOAD, NOTICES, MAX_EVENTS>,
+    start: Instant,
+) -> Result<(), Error> {
     let handle = link.handle();
     link.pump(handle, now(start))?;
     std::thread::sleep(Duration::from_millis(5));
@@ -117,9 +145,13 @@ fn pump(link: &mut Link, start: Instant) -> Result<(), Error> {
 }
 
 /// Opens the session and prints what the router announced. Returns once the link is open. The exam holds one
-/// `router-ready` line for the whole run, so only the inbound direction prints it. The outbound direction connects to a
-/// router on the same address, and its handshake line is what shows that a router answered.
-fn open(link: &mut Link, start: Instant, ready: bool) -> Result<(), String> {
+/// `router-ready` line for each run, so `inbound` and `discover` print it and `outbound` does not. The outbound direction
+/// connects to a router on the same address, and its handshake line is what shows that a router answered.
+fn open<const K: usize>(
+    link: &mut LinkOf<Tcp, FRAMED, 1, 2, K, PAYLOAD, NOTICES, MAX_EVENTS>,
+    start: Instant,
+    ready: bool,
+) -> Result<(), String> {
     if ready {
         say(&format!("router-ready tcp/{ROUTER}"));
     }
@@ -239,13 +271,88 @@ fn outbound() -> Result<(), String> {
     Ok(())
 }
 
+fn zid_hex() -> String {
+    ZID.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// The token of the node, in the form `rmw_zenoh_cpp` names it: `@ros2_lv/<domain>/<zid>/<nid>/<id>/<kind>/...`. The
+/// enclave and the namespace are `/`, which a key writes as `%`.
+fn node_key() -> String {
+    format!("@ros2_lv/0/{}/0/0/NN/%/%/slime_node", zid_hex())
+}
+
+/// The token of the node's publisher on the chatter topic, with the type hash taken from the chatter key.
+fn publisher_key() -> String {
+    let hash = KEY.rsplit('/').next().unwrap_or_default();
+    format!(
+        "@ros2_lv/0/{}/0/1/MP/%/%/slime_node/%chatter/std_msgs::msg::dds_::String_/{hash}/::,:,:,:,,",
+        zid_hex()
+    )
+}
+
+/// Pumps until the stream took the batch in the send slot.
+fn flush(link: &mut TokenLink, start: Instant) -> Result<(), String> {
+    let deadline = Instant::now() + HANDSHAKE_DEADLINE;
+    while link.send_pending() {
+        if Instant::now() > deadline {
+            return Err(String::from("the send slot did not empty"));
+        }
+        pump(link, start).map_err(|error| format!("the link failed: {error:?}"))?;
+    }
+    Ok(())
+}
+
+fn discover() -> Result<(), String> {
+    let start = Instant::now();
+    let mut link = connect_with::<TOKEN_KEY_BYTES>()?;
+    open(&mut link, start, true)?;
+    let handle = link.handle();
+    link.declare_token(handle, NODE_TOKEN, &node_key())
+        .map_err(|error| format!("the node token was refused: {error:?}"))?;
+    flush(&mut link, start)?;
+    say(&format!("token-declared node id={NODE_TOKEN}"));
+    link.declare_token(handle, PUBLISHER_TOKEN, &publisher_key())
+        .map_err(|error| format!("the publisher token was refused: {error:?}"))?;
+    flush(&mut link, start)?;
+    say(&format!("token-declared publisher id={PUBLISHER_TOKEN}"));
+    // The checker writes one line when it has read what `ros2` lists. The session stays open and the link keeps pumping
+    // until then, so its lease holds.
+    let released = Arc::new(AtomicBool::new(false));
+    let flag = released.clone();
+    std::thread::spawn(move || {
+        let mut line = String::new();
+        let _ = std::io::stdin().lock().read_line(&mut line);
+        flag.store(true, Ordering::SeqCst);
+    });
+    let deadline = Instant::now() + RELEASE_DEADLINE;
+    while !released.load(Ordering::SeqCst) {
+        if Instant::now() > deadline {
+            return Err(String::from("the checker did not release the session"));
+        }
+        pump(&mut link, start).map_err(|error| format!("the link failed: {error:?}"))?;
+        while let Some(notice) = link.next_notice() {
+            if let Notice::Closed { reason } = notice {
+                return Err(format!("the link closed with reason {reason}"));
+            }
+        }
+    }
+    // A pump can leave a keep-alive in the send slot, and a close is refused while the slot is busy.
+    flush(&mut link, start)?;
+    link.close(handle, 0)
+        .map_err(|error| format!("the close was refused: {error:?}"))?;
+    flush(&mut link, start)?;
+    say("closed reason=0");
+    Ok(())
+}
+
 fn main() -> ExitCode {
     let direction = std::env::args().nth(1).unwrap_or_default();
     let result = match direction.as_str() {
         "inbound" => inbound(),
         "outbound" => outbound(),
+        "discover" => discover(),
         other => Err(format!(
-            "a direction is `inbound` or `outbound`, not {other:?}"
+            "a direction is `inbound`, `outbound` or `discover`, not {other:?}"
         )),
     };
     match result {

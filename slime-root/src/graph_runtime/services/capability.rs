@@ -94,7 +94,7 @@ pub(super) fn serve_capability_export(
     };
 
     let exports = unsafe { &mut *ptr::addr_of_mut!(CAPABILITY_EXPORTS) };
-    let Some(slot_index) = exports.entries.iter().position(Option::is_none) else {
+    let Some(slot_index) = exports.admit(sender) else {
         return Response::error(IpcError::DestinationSlotsExhausted);
     };
     if tasks.get(receiver).is_none() {
@@ -235,6 +235,33 @@ pub(super) fn cleanup_export_ticket(
         let _ = ticket.revoke();
         let _ = ticket.delete();
         allocator.release_slot(bits as usize);
+    }
+}
+
+/// Retire every export a dead task sent or was to receive. No request can
+/// settle one of them: only its sender cancels, and only its receiver imports.
+///
+/// A finalized endpoint export is an import, not a release. The kernel moved
+/// its capability to the receiver at the rendezvous. The entry only holds the
+/// root's ticket and its mirror in the sender's CNode until their slots return.
+pub(super) fn release_task_exports(
+    allocator: &mut ObjectAllocator,
+    tasks: &TaskTable<MAX_TASKS>,
+    task: TaskId,
+) {
+    let exports = unsafe { &mut *ptr::addr_of_mut!(CAPABILITY_EXPORTS) };
+    let mut released = 0usize;
+    while let Some(export) = exports.take_of(task) {
+        let delivered = export.finalized && export.ticket.is_some();
+        exports.imported += usize::from(delivered);
+        released += usize::from(!delivered);
+        cleanup_export_ticket(allocator, tasks, export);
+    }
+    if released != 0 {
+        crate::diagnostic_println!(
+            "SLIME_GRAPH exports released task={} count={released}",
+            task.0
+        );
     }
 }
 

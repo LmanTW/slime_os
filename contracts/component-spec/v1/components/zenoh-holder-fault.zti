@@ -1,0 +1,50 @@
+{
+  formatVersion = 1;
+  name = "zenoh-holder-fault";
+  componentType = "application";
+  version = "1.0.0";
+  owner = "root";
+  purpose = "Attaches to the Zenoh service and then faults on purpose, so that the service observes a death it did not ask for.";
+  implementation = {
+    provider = "workspace";
+    binary = "zenoh-holder-fault";
+    contentHash = "";
+  };
+  provides = [];
+  requires = [ "endpoint"; ];
+  interfaces = [];
+  dependencies = [ "zenoh-service"; ];
+  communication = { semantic = "none"; qos = []; };
+  configuration = [];
+  lifecycle = [ "Initialize"; "Start"; "Running"; "Error"; ];
+  runtime = {
+    executionEnvironment = "aarch64-sel4-qemu-virt";
+    resource = {
+      stackBytes = 16384;
+      spawnBudget = 0;
+      extraThreads = 0;
+      bufferBytePages = 0;
+      bufferCount = 0;
+      mappingCount = 2;
+      loanCount = 2;
+      privatePageQuota = 0;
+    };
+    devices = [];
+  };
+  health = "required";
+  lifetime = "bounded";
+  compatibility = {
+    platform = "aarch64-sel4-qemu-virt";
+    interface = "contracts/interface-schema/v1";
+    dependency = "exact";
+    resource = "atMost";
+    runtime = "exact";
+    qos = "none";
+  };
+  test = {
+    testCondition = "the zenoh_service_fault_check gate boots the sel4-zenoh-service-fault composition";
+    expectedResult = "the holder attaches, prints one line and faults, and the service reclaims its session";
+    passFailCriteria = "zenoh profile 0 service-fault check";
+    requiredTestEnvironment = "zenoh_service_fault_check";
+  };
+}
