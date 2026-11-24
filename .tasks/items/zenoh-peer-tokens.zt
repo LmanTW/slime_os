@@ -77,9 +77,6 @@ item :: s.Item = (h.task "01a20e0a-ffa7-7721-a468-30b0e8c47190" "zenoh-peer-toke
       h.knownLimit "zenoh_xcheck_check"
         "The upstream comparison covers the plain DECLARE and the form behind the network QoS extension, on the plain demo keys and ids across every LEB128 width. It shows no rmw_zenoh or router traffic and no capture of a stock peer sending an INTEREST."
         h.agentDefault;
-      h.knownLimit "zenoh_session_check"
-        "The exam of the session's tables is not written. The planning pull request that lands this item must add it, with its negative controls, before the item can leave #planned."
-        h.agentDefault;
     };
   };
 
