@@ -331,6 +331,16 @@ cause is not isolated. In one boot of this composition `alpha` published four sa
 received each once. The service refused `beta`'s publish once, and every instance exited with status 0.
 `just zenoh_service_four_check` judges it.
 
+The composition `sel4-zenoh-service-fault` (generation 175) runs a holder that faults. A supervision handle must come from the
+instance that owns the holder, and `root` is not an instance a binding can name. A component `zenoh-supervisor` therefore owns
+the service, the peer, the network service and three holders: `alpha`, `beta` and `victim`. It derives a handle for `victim` and
+passes it to the service at spawn, where the generation declares it as the minted binding `victim-supervision`. `victim`
+attaches and writes through a null pointer. The supervisor reads the fault, and then spawns `alpha`. The service prints
+`holder reclaimed holder=victim cause=dead`. In three boots of this composition `alpha` then published four samples. Each reached
+2 holders, because the core counts rows and not sessions, so the dead holder's row stays in the reach. `beta` was delivered all
+four, the peer received each once, and `beta` was refused once. Every survivor exited with status 0. The supervisor's line came
+before the service's line in each boot, and the judge requires that order. `just zenoh_service_fault_check` judges it.
+
 What is shown on the host only: a host test of the server half runs a second server, core and link after the first run ended.
 It also sends 28 malformed requests and stalls the link. A second run repeats the first. A malformed request changes no ring,
 session or stream byte. A publication that the stream does not take is answered `link-closed`. A stream that takes one byte in
@@ -342,8 +352,9 @@ The declared stack is 32768 bytes. The measured depth of the call path varies by
 bounds it and does not pin it. The measurement is a debug build on x86_64 and covers the frames of the core, the link, the
 server and the arrays of `main`.
 
-What is not shown: a second boot, a boot with more than four holders, a malformed request from a holder component, or a stalled link under QEMU. No boot has a
-holder that faults, because the composition declares no supervision binding for a holder. The release of a reclaimed holder's
+What is not shown: a second boot, a boot with more than four holders, a malformed request from a holder component, or a stalled
+link under QEMU. No boot has a holder that faults during an exchange, because the supervisor spawns `alpha` after it has read the
+fault. No boot has a fault of another kind than a null write. The release of a reclaimed holder's
 loans, ring and data page is not graded. The stack depth on seL4 is not measured, and neither is the stack of the network
 attachment, `holders::serve` or `holders::drive`.
 
