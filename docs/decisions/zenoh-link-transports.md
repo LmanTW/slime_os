@@ -13,9 +13,10 @@ writes a `ByteLink`, and `StreamFramerOf` cuts the 2-byte length prefix. The
 
 Two facts about the repository bound this decision.
 
-- **A serial driver exists, and it only writes.** `components/services/uart16550-driver` and
-  `components/lib/src/uart16550.rs` drive a 16550 UART with bounded polled transmit. The `serial-device/v1` contract has
-  one operation, `OP_WRITE`, with at most 52 payload bytes. Nothing reads a byte from a line.
+- **A serial driver exists, and it neither reads nor fits the Zenoh platform.** `components/services/uart16550-driver` and
+  `components/lib/src/uart16550.rs` drive a 16550 UART through a mapped MMIO page, with bounded polled transmit. The
+  `serial-device/v1` contract has one operation, `OP_WRITE`, with at most 52 payload bytes. Nothing reads a byte from a
+  line. The driver's `line.rs` names no line, so it answers `STATUS_NO_DEVICE` on every platform.
 - **No TLS stack exists.** [`network-data-plane.md`](../plans/network-data-plane.md) states that its obligations do not qualify TLS.
 
 ## What upstream eclipse-zenoh 1.0.0 does
@@ -75,6 +76,9 @@ failed TLS check. The owner dropped vsock: this record plans no vsock link.
 
 ### Serial
 
+- **The platform is `aarch64 virt`, with a new PL011 driver.** The owner did not answer the platform question, so this is
+  an agent default. QEMU 11.0.1 gives that machine two PL011 UARTs, one for the console and one for the link. The
+  existing driver does not fit it, because PL011 has another register layout. The Raspberry Pi 5 pin also names a PL011.
 - **The read path is new.** The UART driver must receive bytes into a bounded ring. A receive overrun is counted and the
   affected frame is dropped by the framer. The driver never waits without a deadline, as `uart16550.rs` already holds for transmit.
 - **The line is a capability, not ambient.** A composition grants one holder one serial device with `read` and `write`
@@ -137,9 +141,20 @@ results on 2026-11-23.
 `rustls` 0.23.46 clears the five `rustls` advisories. The probe's lockfile still held `rustls-webpki` 0.102.8, `rsa` 0.9.10
 and `crypto-bigint` 0.5.5, each with an open advisory. The probe did not try to resolve newer versions of them.
 
+## What a QEMU probe observed
+
+`info qtree` on the pinned QEMU 11.0.1, with two `-serial` options, listed these serial devices.
+
+| Machine | Serial devices | Fits `uart16550-driver` |
+| --- | --- | --- |
+| `aarch64 virt` | Two PL011, MMIO | No: another register layout |
+| `riscv64 virt` | One `serial-mm` 16550, MMIO | Yes, but it is the console UART |
+| `x86_64 q35` | Two ISA 16550 at I/O ports `0x3f8` and `0x2f8` | No: the driver maps MMIO, and these are port I/O |
+
 ## Not observed
 
 - No exam has run for either slice.
+- Whether the root can bind a second UART on `aarch64 virt` was not checked. Nor was x86 port I/O authority.
 - The `is_reliable` value that upstream returns for `serial` was not read, so the effect of a lossy line on `FRAME`
   reliability is unresolved. The serial work item must settle it before any claim about delivery.
 - Whether `zenoh` 1.0.0 with `transport_serial` accepts a pseudo-terminal that QEMU exposes was not tried.
