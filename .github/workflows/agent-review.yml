@@ -76,6 +76,10 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Without this input the action skips a pull request from a fork and
+          # returns no structured result. The job checks out only `main` and
+          # runs no code of the pull request.
+          allow_fork_prs: "true"
           # The review rules live in .agents/skills/pr-review/SKILL.md and
           # .agents/skills/spec-review/SKILL.md. This prompt only routes to
           # them and fixes the shape of the result.
