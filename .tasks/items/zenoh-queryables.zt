@@ -14,6 +14,9 @@ item :: s.Item = (h.task "01a208f8-8fee-75a7-a7db-ea499dafbd6a" "zenoh-queryable
       "components/lib/src/zenoh_profile0.rs";
       "components/lib/src/zenoh_profile0/**";
       "components/lib/src/zenoh_stock*";
+      "components/lib/src/zenoh_link.rs";
+      "components/lib/src/zenoh_subscribers.rs";
+      "components/lib/src/zenoh_undeclare.rs";
       "components/lib/src/zenoh_queries.rs";
       "components/lib/src/zenoh_queries/**";
       "components/lib/src/lib.rs";
@@ -21,6 +24,7 @@ item :: s.Item = (h.task "01a208f8-8fee-75a7-a7db-ea499dafbd6a" "zenoh-queryable
       "contracts/zenoh-profile/v1/**";
       "contracts/zenoh-stock-queries/v1/gen_rust.zt";
       "scripts/generate/generate-zenoh-queries-bindings.py";
+      "just/generate.just";
     };
     nonGoals = {
       h.nonGoal "Wildcard key expressions in a queryable, a request or a response; each stays refused as wildcard-keyexpr." h.agentDefault;
