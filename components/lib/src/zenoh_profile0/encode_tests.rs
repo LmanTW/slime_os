@@ -164,6 +164,7 @@ fn network_summary(message: &Network<'_>) -> String {
             key,
             attachment,
             payload,
+            ..
         } => format!(
             "PUSH_PUT:mapping={},key={key},att={},payload={}",
             mapping_name(*mapping),
