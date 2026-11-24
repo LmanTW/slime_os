@@ -2621,7 +2621,8 @@ def discover_names(ros2: str, environment: dict[str, str], kind: str) -> str:
     if done.returncode != 0:
         _sys.stderr.write((done.stdout + done.stderr)[-2000:])
         fail(f"rmw-discover: `ros2 {kind} list` exited {done.returncode}")
-    return zenoh_rmw_discover_exam.names([line.strip() for line in done.stdout.splitlines() if line.strip()])
+    # `ros2` can write a zenoh log line to stdout before its list. A ROS name starts with `/`, and a log line does not.
+    return zenoh_rmw_discover_exam.names([line.strip() for line in done.stdout.splitlines() if line.strip().startswith("/")])
 
 
 def discover_listings(ros2: str, environment: dict[str, str], when: str) -> list[str]:
