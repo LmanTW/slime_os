@@ -2,8 +2,8 @@
 
 """Render the stock peers' query sessions as the Rust constants the `zenoh_queries::` tests read.
 
-The captured bytes live in `scripts/lib/zenoh_queries_exam.py`, which the undeclare exam
-(`check-zenoh-profile0.py --slice undeclare`) also pins. This script writes them as one record of
+The captured bytes live in `scripts/lib/zenoh_queries_exam.py`, which the queries exam
+(`check-zenoh-profile0.py --slice queries`) also pins. This script writes them as one record of
 `contracts/zenoh-stock-queries/v1`, lets that contract's `gen_rust.zt` decode and render it, and
 formats the result, so the tests and the exam cannot disagree about a byte.
 """

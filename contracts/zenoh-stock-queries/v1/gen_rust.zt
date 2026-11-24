@@ -88,8 +88,8 @@ main :: { write : FsWrite; env : Env; load : Load; } -> Unit ! { * fs.WholeWrite
     match s.decodeSession (load.zti caps.load input) {
       | #valid { value = c; } => if sessionOk c
         then fs.writeAll caps.write out (render c)
-        else fs.writeAll caps.write out "INVALID_ZENOH_UNDECLARE_FIXTURES";
-      | #invalid { errors = _; } => fs.writeAll caps.write out "INVALID_ZENOH_UNDECLARE_FIXTURES";
+        else fs.writeAll caps.write out "INVALID_ZENOH_QUERIES_FIXTURES";
+      | #invalid { errors = _; } => fs.writeAll caps.write out "INVALID_ZENOH_QUERIES_FIXTURES";
     }
   ];
 

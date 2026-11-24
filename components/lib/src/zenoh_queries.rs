@@ -284,10 +284,13 @@ fn stock_queryable_answers_our_query() {
     );
     assert_eq!(ours.own_request(), Some(1));
 
-    for (name, payload) in [
+    for (number, (name, payload)) in [
         ("answers-04-response-1", REPLIES[0]),
         ("answers-05-response-2", REPLIES[1]),
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let (_, events) = step(&mut ours, name);
         assert_eq!(
             events,
@@ -296,9 +299,10 @@ fn stock_queryable_answers_our_query() {
                 payload: payload.to_vec()
             }]
         );
-    }
-    for (number, payload) in REPLIES.iter().enumerate() {
-        line(&format!("delivered {} {}", number + 1, hex(payload)));
+        let [Ev::Reply { payload: seen, .. }] = events.as_slice() else {
+            unreachable!("the assertion above holds one reply");
+        };
+        line(&format!("delivered {} {}", number + 1, hex(seen)));
     }
     let (_, events) = step(&mut ours, "answers-06-response-final");
     assert_eq!(events, [Ev::Finished(1)]);
