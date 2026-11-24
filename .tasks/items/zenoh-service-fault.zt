@@ -5,6 +5,7 @@ item :: s.Item = (h.task "01a20cf3-fcd2-743e-b929-8a638498d10b" "zenoh-service-f
   "A booted composition shows the Zenoh service reclaiming a holder that faults"
   "The Zenoh service polls a supervision handle for each holder and reclaims a holder whose task the root reports dead. A host test replays that on the server half and the roster. No boot has a holder that faults. A supervision handle must come from the owner of the holder. Every Zenoh composition gives its holders the owner `root`, so none of them can declare one.")
   with {
+    intent = #active;
     owns = {
       "components/applications/zenoh-supervisor/**";
       "components/applications/zenoh-holder-fault/**";
