@@ -4292,8 +4292,8 @@ def holder_fault_main(controls_only: bool) -> int:
     return 0
 
 
-SERIAL_FRAME_CASES = 65
-SERIAL_FRAME_CONTROLS = 227
+SERIAL_FRAME_CASES = 68
+SERIAL_FRAME_CONTROLS = 239
 SERIAL_FRAME_FILTER = "zenoh_serial::"
 # The exam's own Rust test, by name: a filter that matches nothing passes silently.
 SERIAL_FRAME_TESTS = ("zenoh_serial::the_frame_exam",)

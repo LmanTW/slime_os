@@ -25,22 +25,22 @@ item :: s.Item = (h.task "01a20dc1-d977-7470-98cf-3175b7529a16" "zenoh-serial-fr
         "The Rust reader returns the same data for each wire the stock reader took and refuses each wire the stock reader refused. It names the class the exam gives: `cobs`, `crc`, `length`, `short` or `size`."
         { "zenoh_serial_frame_check"; };
       h.req "refuses-over-1500-bytes"
-        "The Rust writer refuses a payload of 1501 bytes as `size`. The Rust reader refuses a frame whose length field names more than 1500 bytes, as `size`, even where the stock reader takes it."
+        "The Rust writer refuses a payload of 1501 bytes as `size`. The Rust reader refuses a frame whose length field names more than 1500 bytes, as `size`. It tests that bound before it compares the length with the body. It does so even where the stock reader takes the frame."
         { "zenoh_serial_frame_check"; };
       h.req "the-crc-is-the-stock-crc"
         "The Rust CRC equals the stock CRC and differs from the standard CRC-32 on the same data. A frame that carries the standard CRC-32 is refused as `crc`."
         { "zenoh_serial_frame_check"; };
       h.req "a-receiver-resynchronizes"
-        "A receiver fed bytes in chunks delivers each good frame and counts each drop once. It resynchronizes after a bad frame, after leading zero bytes and after a run of 1516 bytes with no zero byte."
+        "A receiver fed bytes in chunks delivers each good frame and counts each drop once. It delivers a frame of 1500 data bytes, whole or in 64-byte chunks, and a small frame after it. It resynchronizes after a bad frame and after a run of non-zero bytes that does not decode. Each of two leading zero bytes counts as one drop."
         { "zenoh_serial_frame_check"; };
       h.req "controls-are-refused"
-        "The judge refuses 227 inputs. 220 corrupt an honest transcript, 6 corrupt the vector file and 1 removes the declaration of the module."
+        "The judge refuses 239 inputs. 232 corrupt an honest transcript, 6 corrupt the vector file and 1 removes the declaration of the module."
         { "zenoh_serial_frame_check"; };
     };
     acceptance = {
       h.observedWhere "zenoh_serial_frame_check" {
-        h.count "casesObserved" 65;
-        h.count "negativeControlsRefused" 227;
+        h.count "casesObserved" 68;
+        h.count "negativeControlsRefused" 239;
       };
     };
     decisions = {

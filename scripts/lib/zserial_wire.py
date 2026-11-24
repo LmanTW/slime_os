@@ -8,9 +8,10 @@ CRC-32. It runs the polynomial 0x04C11DB7 through a reflected loop and inverts t
 proves this module against every one before any gate uses it to judge the Rust framer. Nothing here is derived from the
 Rust framer.
 
-The stock reader takes more than the stock writer writes. The writer refuses a payload over 1500 bytes. The reader decodes
-frames of up to 1512 data bytes, because it bounds only the wire at 1516 bytes. This module pins both directions to the
-writer's bound: `MAX_DATA` is 1500, and `decode` refuses a longer payload.
+The stock decoder takes more than the stock writer writes. The writer refuses a payload over 1500 bytes. `deserialize_into`
+decoded every frame the vector file tries, up to 1512 data bytes. The stock read loop stops after 1516 wire bytes with no
+sentinel. A frame of more than 1508 data bytes always exceeds that, so the stock reader never delivers one. This module pins
+both directions to the writer's bound: `MAX_DATA` is 1500, and `decode` refuses a longer payload.
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ SENTINEL = 0
 MAX_DATA = 1500
 LENGTH_BYTES = 2
 CRC_BYTES = 4
-# The stock reader stops after this many bytes with no sentinel (`COBS_BUF_SIZE`).
+# The stock read loop stops after this many bytes with no sentinel (`COBS_BUF_SIZE`). `deserialize_into` has no such bound.
 MAX_WIRE = 1516
 VECTORS = Path(__file__).with_name("zserial_vectors.txt")
 
@@ -117,10 +118,10 @@ def decode(wire: bytes) -> bytes:
     if len(body) < LENGTH_BYTES + CRC_BYTES:
         raise ZSerialError("short", "read: a body smaller than a length and a CRC")
     length = int.from_bytes(body[:LENGTH_BYTES], "little")
-    if LENGTH_BYTES + length + CRC_BYTES != len(body):
-        raise ZSerialError("length", "read: the length does not match the body")
     if length > MAX_DATA:
         raise ZSerialError("size", f"read: {length} data bytes, the exam takes at most {MAX_DATA}")
+    if LENGTH_BYTES + length + CRC_BYTES != len(body):
+        raise ZSerialError("length", "read: the length does not match the body")
     data = body[LENGTH_BYTES : LENGTH_BYTES + length]
     if int.from_bytes(body[LENGTH_BYTES + length :], "little") != crc(data):
         raise ZSerialError("crc", "read: the CRC does not match")

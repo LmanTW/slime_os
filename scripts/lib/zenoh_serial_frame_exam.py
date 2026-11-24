@@ -30,6 +30,8 @@ _GOOD = wire.encode(bytes([0x11, 0x22, 0x00, 0x33]))
 _OTHER = wire.encode(bytes([0x00, 0x11, 0x00]))
 _BAD_CRC = bytearray(_GOOD)
 _BAD_CRC[-2] ^= 0x01
+# A frame of the largest payload is 1513 wire bytes. A receiver that cannot hold 1512 bytes before the sentinel drops it.
+_MAX = wire.encode(bytes([1]) * wire.MAX_DATA)
 STREAMS = (
     ("whole", [_GOOD]),
     ("byte-at-a-time", [bytes([b]) for b in _GOOD]),
@@ -39,6 +41,9 @@ STREAMS = (
     ("overrun-then-frame", [bytes([1]) * 1600 + b"\x00" + _GOOD]),
     ("leading-sentinels", [b"\x00\x00" + _GOOD]),
     ("bad-crc-then-good", [bytes(_BAD_CRC) + _GOOD]),
+    ("max-frame-whole", [_MAX]),
+    ("max-frame-64-byte-chunks", [_MAX[i : i + 64] for i in range(0, len(_MAX), 64)]),
+    ("max-frame-then-small", [_MAX + _GOOD]),
 )
 
 
