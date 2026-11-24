@@ -79,10 +79,12 @@ failed TLS check. The owner dropped vsock: this record plans no vsock link.
 - **The platform is `aarch64 virt`, with a new PL011 driver.** The owner chose it. QEMU 11.0.1 gives that machine two
   PL011 UARTs, one for the console and one for the link. The existing driver does not fit it, because PL011 has another
   register layout. The Raspberry Pi 5 pin also names a PL011.
-- **The second port has an exam and no implementation.** `specs/product.zt` holds six planned requirements for a second
+- **The second port has an exam and no implementation.** `specs/product.zt` holds five planned requirements for a second
   serial port, bound to `sel4_serial_graph_check`, and `check-sel4-component-graph.py` has its `sel4-serial` arm. No
   `pl011-driver`, no `serial-probe` and no `sel4-serial` composition exist. `serial-device/v1` has no read operation.
-  The link reuses that exam and does not write a second one.
+  That exam grades the port and the driver. It excludes framing and receive buffering beyond one reply per read. The
+  serial slice reuses it for the port and writes its own exams for the framer, the receive ring and the stock peer.
+  This split is an agent default.
 - **The read path is new, and the PL011 driver owns it.** The PL011 driver must receive bytes into a bounded ring. A
   receive overrun is counted and the affected frame is dropped by the framer. The driver never waits without a deadline,
   as `uart16550.rs` already holds for transmit.
