@@ -252,6 +252,15 @@ zenoh_link_limits_v3_check: (zenoh_link_v3_limits_gen "--check")
 zenoh_qos_check:
     python3 scripts/check/check-zenoh-profile0.py --slice qos
 
+# Judges congestion control on a Zenoh publication. With the link's send slot busy, a Drop publication is
+# discarded and counted and spends no sequence number, and a Block publication is refused as SendBusy, as it
+# is today. The host reference scripts/lib/zenoh_wire.py reproduces both frames byte for byte; the expectation
+# is scripts/lib/zenoh_congestion_exam.py. Nothing here needs a registry. The recipe fails until the Rust
+# tests land.
+[group('hardware')]
+zenoh_congestion_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice congestion
+
 # Judges what the Zenoh service may do for each holder. The decoder of
 # contracts/zenoh-service-grants/v1 takes the declarations it must take and refuses the ones it must
 # refuse. Each limit is held on both sides of its bound. Each check is removed in turn, and the

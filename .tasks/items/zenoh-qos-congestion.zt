@@ -1,0 +1,61 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a20d1f-2dcf-742f-ba3b-fe1fce39d685" "zenoh-qos-congestion" "zenoh-transport"
+  "A Profile 0 link acts on the congestion control of a publication"
+  "A Profile 0 PUSH states Drop or Block, and the decoder keeps it as Qos::block. The link ignores the value: Link::publish refuses every publication with SendBusy while the link's one send slot holds a batch, and an owner that gets SendBusy cannot tell a publication it may lose from one it must keep. eclipse-zenoh 1.0.0 drops a Drop message when its queue is full and waits for a Block one. The change adds Link::publish_qos. With the slot busy, a Drop publication is discarded and counted, and no frame is built, so the session spends no sequence number. A Block publication is refused as SendBusy as today.")
+  with {
+    intent = #planned;
+    owns = {
+      "components/lib/src/zenoh_link.rs";
+      "components/lib/src/zenoh_link/**";
+      "components/lib/src/zenoh_congestion*";
+      "components/lib/src/zenoh_profile0/session.rs";
+      "components/lib/src/lib.rs";
+      "docs/architecture/zenoh-transport.md";
+    };
+    nonGoals = {
+      h.nonGoal "A queue. The link keeps its one send slot, so a Drop publication that finds it busy is lost, not held. A queue per priority is the item zenoh-qos-priorities." h.agentDefault;
+      h.nonGoal "Dropping a fragmented Put, a declaration, a keep-alive or any message but a whole-frame PUSH. Fragments and declarations are reliable, and publish_part keeps its behaviour." h.agentDefault;
+      h.nonGoal "Any change to Link::publish. It keeps its signature and refuses a busy slot as SendBusy, so the existing nodes and the Zenoh service are unchanged." h.agentDefault;
+      h.nonGoal "Dropping a received sample. Receive-side loss is owned by the lane items." h.agentDefault;
+      h.nonGoal "A component, a composition or a QEMU gate. This item judges the link on the host." h.agentDefault;
+    };
+    requirements = {
+      h.req "drop-discards-and-counts"
+        "With the send slot busy, publish_qos of a Qos that is not Block returns Dropped, queues nothing and adds one to Link::dropped. It builds no frame, so the session spends no sequence number: the next frame that is sent carries the number that follows the last one sent. The count after one drop is 1 and after three is 3."
+        { "zenoh_congestion_check"; };
+      h.req "block-keeps-send-busy"
+        "With the send slot busy, publish_qos of a Block Qos returns SendBusy, queues nothing and leaves Link::dropped as it was. It sends the frame once the slot is free. It leaves the stall count alone: a link whose peer accepts nothing reports RetryLimit on the fourth stalled pump, MAX_RETRIES (3) plus one, with a refused Block publication between every two pumps. The exam observes that pump as the count retry-limit-on-pump and the refusal block-stalled-past-the-limit."
+        { "zenoh_congestion_check"; };
+      h.req "free-slot-sends-the-host-reference-frame"
+        "With the slot free, publish_qos queues the frame the host reference zenoh_wire.push_put_qos writes, byte for byte: no extension for the default QoS, and the extension for a Block one. The exam compares two frames, one before and one after three drops."
+        { "zenoh_congestion_check"; };
+      h.req "refusals-keep-their-class"
+        "publish_qos refuses a publication after the link is closed as send-after-close and one through a handle from an earlier link generation as stale-handle, as publish does. Each refusal is reported by name and class."
+        { "zenoh_congestion_check"; };
+      h.req "judge-refuses-corruption"
+        "The judge refuses 50 corrupted transcripts of an honest run: a dropped, duplicated, reordered or unrecognised line, a frame with one digit changed, in capitals or with its sequence number moved by one, a count one over or under, including the pump that reports RetryLimit, and a refusal with another class."
+        { "zenoh_congestion_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_congestion_check" {
+        h.count "casesObserved" 17;
+        h.count "negativeControlsRefused" 50;
+      };
+    };
+    decisions = {
+      h.decided "add-a-method-not-a-parameter"
+        "Link::publish_qos is new and Link::publish is unchanged."
+        "Link::publish has callers in the demo nodes, the service server and the host tests, and a changed signature would put every one of them under this item. The new method is the one place the congestion rule lives, and publish stays the Block behaviour it has today"
+        h.agentDefault
+        { "block-keeps-send-busy"; };
+      h.decided "dropped-count-lives-on-the-link"
+        "The link counts dropped publications in a u32 that saturates, and the owner reads it with Link::dropped."
+        "a counter on the link needs no storage the owner lends and no clock, and the service core already reports a ring's drops as a count the next take reads once. A saturating count cannot wrap into a smaller number"
+        h.agentDefault
+        { "drop-discards-and-counts"; };
+    };
+  };
+
+item
