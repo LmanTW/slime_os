@@ -34,6 +34,8 @@ pub mod shared_buffer_probe;
 pub mod tick_clock;
 pub mod uart16550;
 pub mod virtio_mmio;
+#[cfg(test)]
+mod zenoh_lanes;
 pub mod zenoh_link;
 pub mod zenoh_link_limits_v3;
 #[cfg(test)]

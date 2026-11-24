@@ -46,7 +46,7 @@ carrying `DECLARE_SUBSCRIBER`, `UNDECLARE_SUBSCRIBER` and a `PUSH` with a `Put`
 body and the 33-byte `rmw_zenoh` attachment, `KEEP_ALIVE`, and `CLOSE`. A stock
 eclipse-zenoh 1.0.0 peer on the plain demo topic is also taken
 ([decision](../decisions/zenoh-stock-peer.md)): the optional QoS extension on
-`INIT_SYN` and, only where it was observed, on `OAM` and on the outer `DECLARE`; an
+`INIT_SYN` and, only where it was observed, on `OAM`, on the outer `DECLARE` and on a `PUSH`; an
 `OAM` and a `DeclareFinal` after `OPEN`; and one numeric key-expression alias for the
 demo key, in the declaring peer's mapping only (a reference in the receiver's mapping
 names an alias this side declared, and it declares none, so it is `invalid-keyexpr`); and its
@@ -58,6 +58,16 @@ full form still matches on id and key, and the bare form without the QoS extensi
 `contracts/zenoh-profile/v1`, never tolerated: routers and clients, wildcard key
 expressions, other resolutions, unknown extensions and messages. A second alias is
 refused as over-bound and an undeclared one as `invalid-keyexpr`.
+
+A `PUSH` carries the network QoS extension between its key expression and its `Put`, as eclipse-zenoh
+1.0.0 writes it. The value is a priority of 0 to 7 in bits 0 to 2, Block congestion control in bit 3
+and express in bit 4. The decoder keeps it as `Qos` on `Network::PushPut` and `PushPutAlias`. A
+`PUSH` with no extension has the default `Qos`: priority 5, drop, not express. The encoder writes no
+extension for the default, and `FrameEncoder::push_put_qos` writes the extension for any other value.
+A value over `0x1F` is `malformed-message`, and an extension other than the optional network QoS is
+`unsupported-extension`. Nothing acts on the value yet: the link keeps one send slot, drops nothing
+under congestion and batches an express message like any other. The `Put` and the `FRAME` and
+`FRAGMENT` headers still refuse the extension.
 
 Bounds are enforced before any byte is taken. The first release's are the demo
 contract's: a 512-byte batch, 129-byte key expression, 33-byte attachment, 12-byte
@@ -640,6 +650,9 @@ Known limits:
   including its `UndeclareSubscriber` that names the subscriber by id alone behind the
   network QoS extension, which the host reference reproduces byte for byte, and ten
   variants of it refused by name and class;
+- `just zenoh_qos_check` — the 12 QoS values a `PUSH` can state (each priority, then Block and express alone
+  and together), each written by the encoder as the host reference `scripts/lib/zenoh_wire.py` writes it
+  and decoded to the same value, and 3 malformed extensions refused by name and class;
 - `just zenoh_rmw_check` — 60 batches from three sessions of an `rmw_zenoh_cpp` peer, replayed into a graph
   session. The host reference `scripts/lib/zenoh_rmw_wire.py` writes every captured frame again byte for
   byte. The session's `INIT_ACK` and its silence after the handshake are judged. 11 variants are

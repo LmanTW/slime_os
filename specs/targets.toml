@@ -9,7 +9,9 @@
 # board on the operator's USB-C cable and its Debug Probe. zenoh_rmw_live_check
 # starts rmw_zenohd and two ROS nodes from packages the operator names in
 # SLIME_ROS_ENV, SLIME_RMW_ZENOHD, SLIME_ROS_TALKER and SLIME_ROS_LISTENER,
-# because those packages are not pinned in flake.nix.
+# because those packages are not pinned in flake.nix. zenoh_rmw_discover_check
+# starts rmw_zenohd and runs ros2 from the packages the operator names in
+# SLIME_ROS_ENV and SLIME_RMW_ZENOHD, for the same reason.
 operator = [
   "rpi5_ros2_zenoh_check",
   "rpi5_boot_check",
@@ -20,6 +22,7 @@ operator = [
   "lidar_foxglove_demo_check",
   "link_wake_check",
   "zenoh_rmw_live_check",
+  "zenoh_rmw_discover_check",
 ]
 
 # `host`: targets the default `aarch64` host class cannot run, by the class

@@ -866,6 +866,12 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
         self.slot_of(lane).or_else(|| self.free_slot())
     }
 
+    /// Whether the run in `slot` is open. A slot [`Self::run_slot`] names is open when its lane has a message in
+    /// progress, and free when the fragment would start one.
+    pub fn run_open(&self, slot: usize) -> bool {
+        self.run_table.get(slot).is_some_and(Run::is_open)
+    }
+
     /// The key aliases the peer declared.
     pub const fn aliases(&self) -> usize {
         self.aliases.len()
