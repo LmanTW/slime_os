@@ -45,7 +45,7 @@ item :: s.Item = (h.task "01a20dc1-d977-7470-98cf-3175b7529a16" "zenoh-serial-fr
     };
     decisions = {
       h.decided "the-vectors-come-from-the-stock-crate"
-        "The 37 frames and 19 reads come from `z-serial` 0.2.3 itself, built from its crates.io source with SHA-256 f113597c6b880587004169f14bc010e4b440981ab2ad669779d3654f9b1c4af1."
+        "The 37 frames, the 18 reads and the one refused write come from `z-serial` 0.2.3 itself, built from its crates.io source with SHA-256 f113597c6b880587004169f14bc010e4b440981ab2ad669779d3654f9b1c4af1."
         "a Python model of the frame matched all 37 frames the crate wrote, and the model alone would share its author's reading of the format. The crate's own bytes are the independent evidence"
         h.agentDefault
         { "writes-the-stock-frame"; "reads-and-refuses-as-the-stock-reader"; };

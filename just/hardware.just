@@ -469,7 +469,7 @@ zenoh_link_v3_reader_check:
     python3 scripts/check/check-zenoh-profile0.py --slice link-v3-reader
 
 # Judges the Rust z-serial framer against frames that `z-serial` 0.2.3 wrote. A host reference reproduces all 37 stock frames
-# and the 19 stock reads and refusals in scripts/lib/zserial_vectors.txt before it judges anything. A Rust test under the module
+# and the 18 stock reads and the one refused write in scripts/lib/zserial_vectors.txt before it judges anything. A Rust test under the module
 # path `zenoh_serial::` prints one line for each frame it writes, each wire it reads or refuses and each receive scenario, and
 # the judge compares them with the reference. The expectation is scripts/lib/zenoh_serial_frame_exam.py. The recipe is in no
 # aggregate. It fails until the framer lands.
