@@ -65,8 +65,12 @@ and express in bit 4. The decoder keeps it as `Qos` on `Network::PushPut` and `P
 `PUSH` with no extension has the default `Qos`: priority 5, drop, not express. The encoder writes no
 extension for the default, and `FrameEncoder::push_put_qos` writes the extension for any other value.
 A value over `0x1F` is `malformed-message`, and an extension other than the optional network QoS is
-`unsupported-extension`. Nothing acts on the value yet: the link keeps one send slot, drops nothing
-under congestion and batches an express message like any other. The `Put` and the `FRAME` and
+`unsupported-extension`. Congestion control is the one part of the value the link acts on, through
+`Link::publish_qos`: with the send slot busy, a Block publication is refused as `SendBusy` and any
+other is discarded and counted by `Link::dropped`, and a discarded publication builds no frame, so
+the session spends no sequence number. `Link::publish` keeps refusing every publication on a busy
+slot. The link keeps one send slot, so a discarded publication is lost and not queued. Priority does
+not order anything and an express message is batched like any other. The `Put` and the `FRAME` and
 `FRAGMENT` headers still refuse the extension.
 
 Bounds are enforced before any byte is taken. The first release's are the demo
@@ -653,6 +657,10 @@ Known limits:
 - `just zenoh_qos_check` — the 12 QoS values a `PUSH` can state (each priority, then Block and express alone
   and together), each written by the encoder as the host reference `scripts/lib/zenoh_wire.py` writes it
   and decoded to the same value, and 3 malformed extensions refused by name and class;
+- `just zenoh_congestion_check` — a Drop publication discarded and counted when the send slot is busy, a Block
+  one refused as `SendBusy`, the frame before and the frame after three discards equal to the host reference
+  with the next sequence number, and the retry limit on the fourth stalled send with Block publications
+  refused between the pumps;
 - `just zenoh_rmw_check` — 60 batches from three sessions of an `rmw_zenoh_cpp` peer, replayed into a graph
   session. The host reference `scripts/lib/zenoh_rmw_wire.py` writes every captured frame again byte for
   byte. The session's `INIT_ACK` and its silence after the handshake are judged. 11 variants are
