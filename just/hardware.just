@@ -243,12 +243,12 @@ zenoh_link_limits_v3_check: (zenoh_link_v3_limits_gen "--check")
 zenoh_qos_check:
     python3 scripts/check/check-zenoh-profile0.py --slice qos
 
-# Judges liveliness tokens and the client role of a Zenoh Profile 0 session: declare and undeclare a
-# token, hold the peer's, answer an INTEREST for tokens with a DECLARE_TOKEN each and a DeclareFinal, and
-# send INIT as a Client. The host reference reproduces 16 batches the upstream eclipse-zenoh 1.0.0 encoder
-# wrote before it judges the session's frames (scripts/lib/zenoh_liveliness_exam.py, zenoh_wire.py). The
-# links and stock-peer exams run beside it. Nothing here needs a registry. The recipe fails until the
-# session takes tokens and the role.
+# Judges the answer a client-role Zenoh Profile 0 session gives a router's INTEREST for tokens: a
+# DECLARE_TOKEN for each token it holds whose key the INTEREST selects, each carrying the interest id, then a
+# DeclareFinal. It also judges a listener that takes a Client INIT_SYN only when configured to. The host
+# reference reproduces 23 batches the upstream eclipse-zenoh 1.0.0 encoder wrote before it judges the session's
+# frames (scripts/lib/zenoh_liveliness_exam.py, zenoh_wire.py). The links and stock-peer exams run beside it.
+# Nothing here needs a registry. The recipe fails until the session answers an INTEREST.
 [group('hardware')]
 zenoh_liveliness_check:
     python3 scripts/check/check-zenoh-profile0.py --slice liveliness

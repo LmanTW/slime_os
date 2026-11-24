@@ -82,9 +82,11 @@ judge, the retained suites and the stock-peer exam are run beside it, so accepti
 cannot move a pinned refusal or a stock case.
 
 `--slice liveliness` judges the answer a client-role session gives a router's INTEREST for tokens: one
-DECLARE_TOKEN for each token it holds, each carrying the interest id, then the DeclareFinal. It also judges a
-listener that takes a Client INIT_SYN only where configured to. `scripts/lib/zenoh_wire.py` first reproduces 16
-batches the upstream eclipse-zenoh 1.0.0 encoder wrote, then the frames the session wrote. Router stays refused.
+DECLARE_TOKEN for each token it holds whose key the INTEREST selects, each carrying the interest id, then the
+DeclareFinal. An INTEREST selects every key or the keys under one `<prefix>/**`. It also judges a listener that
+takes a Client INIT_SYN only where configured to, and the INIT_ACK it answers with.
+`scripts/lib/zenoh_wire.py` first reproduces 23 batches the upstream eclipse-zenoh 1.0.0 encoder wrote, then the
+frames the session wrote. Router stays refused.
 
 `--slice subscribers` judges a session that holds several subscriptions of its own. The session held
 exactly one, whatever the link was declared with; it now holds as many as its parameters say. The exam

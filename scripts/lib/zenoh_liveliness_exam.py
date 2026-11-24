@@ -1,10 +1,11 @@
 """Judge the Zenoh Profile 0 exam for a client-role session that answers a token INTEREST, and a listener that admits clients.
 
-A router asks a client for the liveliness tokens it holds with an INTEREST. Upstream's client-role session
-declares and withdraws tokens (`send_declare_token`, `send_undeclare_token`) and refuses that INTEREST as an
-unsupported message. This exam judges the answer: one frame holding a DECLARE_TOKEN for each token the session
-holds, each carrying the interest id, then the DeclareFinal for that id. It also judges a listener that takes a
-Client INIT_SYN only when it is configured to.
+A router asks a client for the liveliness tokens it holds with an INTEREST. A client-role session declares and
+withdraws tokens (`send_declare_token`, `send_undeclare_token`, landed by zenoh-rmw-token) and refuses that
+INTEREST as an unsupported message. This exam judges the answer: one frame holding a DECLARE_TOKEN for each token
+the session holds whose key the INTEREST selects, each carrying the interest id, then the DeclareFinal for that id.
+An INTEREST selects every key, or the keys under one `<prefix>/**`. It also judges a listener that takes a Client
+INIT_SYN only when it is configured to, and the INIT_ACK it answers with.
 
 The Rust tests under `zenoh_liveliness::` print one `[zenoh-exam] liveliness ...` line for each thing they did.
 This module owns what those lines must be, and nothing here reads the Rust:
@@ -38,10 +39,17 @@ OK_SCENARIOS = (
     "final-interest-answers-nothing",
     "no-token-answers-final-alone",
     "withdrawn-token-is-not-answered",
+    "restricted-interest-answers-the-tokens-under-its-key",
+    "interest-with-the-qos-extension-is-answered",
     "refused-answer-spends-no-sequence-number",
     "listener-admits-a-client-when-configured",
     "default-configuration-unchanged",
 )
+
+# The keys the answer frames carry. A restricted INTEREST names the prefix `KEY_ROS`, so the node token under it is
+# answered and the token under `KEY_OTHER` is not.
+KEY_UNDER = f"{zenoh_wire.KEY_ROS}/slime_node"
+KEY_OTHER = "@/liveliness/slime/elsewhere"
 
 # (name, bytes the session wrote). Each frame is written by a session built for its scenario with initial number
 # ANSWERER_SN, so its sequence number is ANSWERER_SN plus the frames that session sent before it. A token enters the
@@ -67,6 +75,28 @@ FRAMES = (
     ),
     ("answer-empty-interest-9", zenoh_wire.frame(ANSWERER_SN, zenoh_wire.declare_final(9)).hex()),
     (
+        "answer-restricted-interest-11",
+        zenoh_wire.frame(
+            ANSWERER_SN + 2,  # after the declarations of tokens 1 and 2
+            zenoh_wire.declare_token(1, KEY_UNDER, True, 11),
+            zenoh_wire.declare_final(11),
+        ).hex(),
+    ),
+    (
+        "answer-interest-with-qos-12",
+        zenoh_wire.frame(
+            ANSWERER_SN + 1,  # after the declaration of token 1
+            zenoh_wire.declare_token(1, KEY_UNDER, True, 12),
+            zenoh_wire.declare_final(12),
+        ).hex(),
+    ),
+    (
+        "next-frame-after-refused-answer",
+        # after the declaration of token 1; the refused answer spent no number, so the withdrawal takes the next one
+        zenoh_wire.frame(ANSWERER_SN + 1, zenoh_wire.undeclare_token_by_id(1)).hex(),
+    ),
+    ("init-ack-to-a-client", zenoh_wire.init(bytes([0xB2] * 8), 512, bytes([0xC0] * 32)).hex()),
+    (
         "answer-after-withdrawal-interest-10",
         zenoh_wire.frame(
             ANSWERER_SN + 3,  # after the declarations of tokens 1 and 2 and the withdrawal of token 1
@@ -80,16 +110,19 @@ FRAMES = (
 HELD = (
     ("answered-two", 2),
     ("after-withdrawal", 1),
-    ("refused-answer", 2),
+    ("refused-answer", 1),
+    ("after-restricted-answer", 2),
 )
 
 REFUSED_SCENARIOS = (
     ("interest-in-subscribers", "unsupported-message"),
     ("interest-in-queryables", "unsupported-message"),
     ("interest-in-key-expressions", "unsupported-message"),
-    ("interest-restricted-to-a-key", "unsupported-message"),
+    ("interest-restricted-to-a-key-without-a-wildcard-suffix", "unsupported-message"),
+    ("interest-restricted-with-a-wildcard-inside-the-key", "unsupported-message"),
+    ("interest-restricted-and-in-key-expressions-only", "unsupported-message"),
     ("interest-in-tokens-and-subscribers", "unsupported-message"),
-    ("interest-with-an-extension", "unsupported-extension"),
+    ("interest-with-an-unknown-extension", "unsupported-extension"),
     ("interest-to-a-session-with-no-client-role", "unsupported-message"),
     ("two-interests-in-one-frame", "too-many-messages"),
     ("answer-beyond-the-peer-batch", "encode"),
@@ -281,5 +314,5 @@ def all_controls() -> int:
 
 
 # The exact counts the exam fixes. The checker compares both with a run.
-PINNED_CASES = 25
-PINNED_CONTROLS = 92
+PINNED_CASES = 33
+PINNED_CONTROLS = 126

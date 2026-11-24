@@ -175,13 +175,39 @@ def declare_final(interest_id: int) -> bytes:
     return _declare(bytes([ID_D_FINAL]), interest_id)
 
 
-def interest(interest_id: int, mode: str, options: int = INTEREST_TOKENS) -> bytes:
-    """INTEREST for every key expression: the mode in bits 5 and 6, no restriction, no extension."""
-    header = ID_INTEREST | (INTEREST_MODES[mode] << 5)
-    return bytes([header]) + leb128(interest_id) + (b"" if mode == "final" else bytes([options]))
+INTEREST_RESTRICTED = 0x70  # R, N and M: a named key of the sender's mapping follows the options byte
+
+
+def interest(
+    interest_id: int,
+    mode: str,
+    options: int = INTEREST_TOKENS,
+    key: str | None = None,
+    qos: bool = False,
+) -> bytes:
+    """INTEREST: the mode in bits 5 and 6, then the id and, but for Final, the options byte. A `key` restricts it
+    and adds R, N and M to the options and the key after them. `qos` adds the network QoS extension upstream writes
+    when the QoS is not the default, and sets the extension flag."""
+    header = ID_INTEREST | (INTEREST_MODES[mode] << 5) | (FLAG_Z if qos else 0)
+    out = bytes([header]) + leb128(interest_id)
+    if mode != "final":
+        out += bytes([options | (INTEREST_RESTRICTED if key is not None else 0)])
+        if key is not None:
+            out += leb128(0) + prefixed(key.encode())
+    if qos:
+        out += bytes([EXT_QOS_NETWORK, QOS_NETWORK_DEFAULT])
+    return out
+
+
+def undeclare_token_by_id(token_id: int) -> bytes:
+    """The withdrawal the client-role link writes: a bare DECLARE, U_TKN with its extension flag, the id and the
+    extension `5f 02 00 00` that `rmw_zenohd`'s own client sent (scripts/lib/zenoh_rmw_token_exam.py)."""
+    return bytes([ID_DECLARE, ID_U_TOKEN | FLAG_Z]) + leb128(token_id) + bytes([EXT_WIRE_EXPR, 0x02, 0x00, 0x00])
 
 
 KEY_LIVELINESS = "@/liveliness/slime/node"
+KEY_ROS = "@ros2_lv/0"
+INTEREST_KEYEXPRS = 0x01
 
 # Bytes the upstream eclipse-zenoh 1.0.0 encoder produced for each message below (zenoh-protocol and
 # zenoh-codec =1.0.0, a throwaway program that wrote them and read them back). `liveliness_self_test`
@@ -203,6 +229,13 @@ UPSTREAM_LIVELINESS = {
     "interest_tokens_current_future_id7_sn2": "2502790708",
     "interest_final_id7_sn3": "25031907",
     "interest_subscribers_current_id7_sn2": "2502390702",
+    "interest_tokens_qos_id7_sn2": "2502b907082108",
+    "interest_restricted_exact_id7_sn2": "25023907780017402f6c6976656c696e6573732f736c696d652f6e6f6465",
+    "interest_restricted_wildcard_id7_sn2": "25023907780015402f6c6976656c696e6573732f736c696d652f2a2a",
+    "interest_keyexprs_tokens_restricted_wildcard_id7_sn2": "25023907790015402f6c6976656c696e6573732f736c696d652f2a2a",
+    "interest_keyexprs_tokens_restricted_wildcard_qos_id7_sn2": "2502b907790015402f6c6976656c696e6573732f736c696d652f2a2a2108",
+    "interest_keyexprs_tokens_restricted_ros_id7_sn2": "2502390779000d40726f73325f6c762f302f2a2a",
+    "interest_keyexprs_tokens_unrestricted_id7_sn2": "2502390709",
 }
 
 
@@ -226,6 +259,19 @@ def liveliness_reference() -> dict[str, str]:
         "interest_tokens_current_future_id7_sn2": frame(2, interest(7, "current-future")).hex(),
         "interest_final_id7_sn3": frame(3, interest(7, "final")).hex(),
         "interest_subscribers_current_id7_sn2": frame(2, interest(7, "current", 0x02)).hex(),
+        "interest_tokens_qos_id7_sn2": frame(2, interest(7, "current", qos=True)).hex(),
+        "interest_restricted_exact_id7_sn2": frame(2, interest(7, "current", key=key)).hex(),
+        "interest_restricted_wildcard_id7_sn2": frame(2, interest(7, "current", key="@/liveliness/slime/**")).hex(),
+        "interest_keyexprs_tokens_restricted_wildcard_id7_sn2": frame(
+            2, interest(7, "current", INTEREST_TOKENS | INTEREST_KEYEXPRS, "@/liveliness/slime/**")
+        ).hex(),
+        "interest_keyexprs_tokens_restricted_wildcard_qos_id7_sn2": frame(
+            2, interest(7, "current", INTEREST_TOKENS | INTEREST_KEYEXPRS, "@/liveliness/slime/**", qos=True)
+        ).hex(),
+        "interest_keyexprs_tokens_restricted_ros_id7_sn2": frame(
+            2, interest(7, "current", INTEREST_TOKENS | INTEREST_KEYEXPRS, f"{KEY_ROS}/**")
+        ).hex(),
+        "interest_keyexprs_tokens_unrestricted_id7_sn2": frame(2, interest(7, "current", INTEREST_TOKENS | INTEREST_KEYEXPRS)).hex(),
     }
 
 
