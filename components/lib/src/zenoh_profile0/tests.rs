@@ -88,6 +88,36 @@ fn network_summary(message: &Network<'_>) -> String {
         Network::UndeclareSubscriberById { id } => format!("UNDECLARE_SUBSCRIBER_BY_ID:id={id}"),
         Network::Oam => "OAM".into(),
         Network::DeclareFinal => "DECLARE_FINAL".into(),
+        Network::DeclareQueryable {
+            id,
+            mapping: m,
+            key,
+        } => {
+            format!(
+                "DECLARE_QUERYABLE:id={id},mapping={},key={key:?}",
+                mapping(*m)
+            )
+        }
+        Network::UndeclareQueryable { id } => format!("UNDECLARE_QUERYABLE:id={id}"),
+        Network::Request {
+            id,
+            mapping: m,
+            key,
+            timeout_ms,
+        } => format!(
+            "REQUEST:id={id},mapping={},key={key:?},timeout={timeout_ms}",
+            mapping(*m)
+        ),
+        Network::Response {
+            id,
+            mapping: m,
+            key,
+            payload,
+        } => format!(
+            "RESPONSE:id={id},mapping={},key={key:?},payload={payload:?}",
+            mapping(*m)
+        ),
+        Network::ResponseFinal { id } => format!("RESPONSE_FINAL:id={id}"),
     }
 }
 
@@ -225,7 +255,7 @@ fn run(vector: &Vector<'_>) -> String {
 #[test]
 fn corpus_agrees() {
     let all = vectors();
-    assert_eq!(all.len(), 132, "the corpus changed size");
+    assert_eq!(all.len(), 129, "the corpus changed size");
     let mut wrong = Vec::new();
     for vector in &all {
         let got = run(vector);
@@ -388,6 +418,11 @@ fn byte_flips_never_panic_and_stay_bounded() {
                             Network::DeclareSubscriberAlias { .. }
                             | Network::UndeclareSubscriberById { .. }
                             | Network::Oam
+                            | Network::DeclareQueryable { .. }
+                            | Network::UndeclareQueryable { .. }
+                            | Network::Request { .. }
+                            | Network::Response { .. }
+                            | Network::ResponseFinal { .. }
                             | Network::DeclareFinal => {}
                             Network::PushPut {
                                 key,

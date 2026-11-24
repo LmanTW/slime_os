@@ -95,6 +95,11 @@ fn owned(outcome: &Outcome<'_>, out: &[u8]) -> (Vec<u8>, Vec<Ev>) {
                 unreachable!("a session that cannot fragment stores no sample")
             }
             Event::Dropped { .. } => unreachable!("these sessions hold one run and drop nothing"),
+            Event::QueryableDeclared { .. }
+            | Event::QueryableUndeclared { .. }
+            | Event::QueryReceived { .. }
+            | Event::ReplyDelivered { .. }
+            | Event::QueryFinished { .. } => unreachable!("this exam carries no query"),
         })
         .collect();
     (outcome.batch(out).to_vec(), events)

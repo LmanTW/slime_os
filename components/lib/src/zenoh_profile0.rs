@@ -47,6 +47,20 @@ const ID_D_KEYEXPR: u8 = p::ID_DECLARE_KEYEXPR as u8;
 const ID_D_FINAL: u8 = p::ID_DECLARE_FINAL as u8;
 const ID_D_SUBSCRIBER: u8 = p::ID_DECLARE_SUBSCRIBER as u8;
 const ID_U_SUBSCRIBER: u8 = p::ID_UNDECLARE_SUBSCRIBER as u8;
+const ID_D_QUERYABLE: u8 = p::ID_DECLARE_QUERYABLE as u8;
+const ID_U_QUERYABLE: u8 = p::ID_UNDECLARE_QUERYABLE as u8;
+const ID_REQUEST: u8 = p::ID_REQUEST as u8;
+const ID_RESPONSE: u8 = p::ID_RESPONSE as u8;
+const ID_RESPONSE_FINAL: u8 = p::ID_RESPONSE_FINAL as u8;
+const ID_QUERY: u8 = p::ID_QUERY as u8;
+const ID_REPLY: u8 = p::ID_REPLY as u8;
+const CONSOLIDATION_LATEST: u8 = p::CONSOLIDATION_LATEST as u8;
+const EXT_TIMEOUT: u8 = p::EXT_TIMEOUT as u8;
+const EXT_RESPONDER: u8 = p::EXT_RESPONDER as u8;
+/// The "more extensions follow" bit of an extension header.
+const EXT_MORE: u8 = 0x80;
+/// A responder extension holds a zenoh id of 1 to 16 bytes, its length byte, and an entity id of up to 5.
+const RESPONDER_MAX_BYTES: usize = 1 + p::MAX_ZID_BYTES + 5;
 const ID_PUT: u8 = p::ID_PUT as u8;
 const FLAG_BIT5: u8 = p::FLAG_BIT5 as u8;
 const FLAG_BIT6: u8 = p::FLAG_BIT6 as u8;
@@ -286,6 +300,37 @@ pub enum Network<'a> {
     Oam,
     /// The end of a declaration sequence; accepted and ignored.
     DeclareFinal,
+    /// A queryable on one exact key, by the key in full or through an alias.
+    DeclareQueryable {
+        id: u32,
+        mapping: Mapping,
+        key: QueryKey<'a>,
+    },
+    /// The withdrawal of a queryable, which names it by id and restates no key.
+    UndeclareQueryable { id: u32 },
+    /// One query for the latest value on one exact key. `timeout_ms` is 0 when the peer stated none.
+    Request {
+        id: u32,
+        mapping: Mapping,
+        key: QueryKey<'a>,
+        timeout_ms: u32,
+    },
+    /// One reply to a request, a Put with no attachment, timestamp or encoding.
+    Response {
+        id: u32,
+        mapping: Mapping,
+        key: QueryKey<'a>,
+        payload: &'a [u8],
+    },
+    /// The end of the replies to a request.
+    ResponseFinal { id: u32 },
+}
+
+/// The key a query message names: in full, or the alias a peer declared for it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QueryKey<'a> {
+    Full(&'a str),
+    Alias(u32),
 }
 
 /// A validated reliable FRAME. Its network messages parse without failing.
@@ -786,8 +831,192 @@ fn declare<'a>(
                 key,
             })
         }
+        ID_D_QUERYABLE => {
+            // The queryable-info extension is the one extension a queryable declaration may carry, and no
+            // capture has one: the default info is not written.
+            if sub & FLAG_Z != 0 {
+                return Err(Refusal::UnsupportedExtension);
+            }
+            let id = reader.leb(p::LEB128_MAX_BITS)?;
+            let mapping = Mapping::from_flag(sub & FLAG_BIT6 != 0);
+            let key = query_key(reader, sub & FLAG_BIT5 != 0, bounds)?;
+            Ok(Network::DeclareQueryable { id, mapping, key })
+        }
+        ID_U_QUERYABLE => {
+            // The form upstream writes: the wire-expression extension, null or restating the key, which the
+            // session ignores because a queryable is named by its id.
+            if sub != FLAG_Z | ID_U_QUERYABLE {
+                return Err(Refusal::MalformedMessage);
+            }
+            let id = reader.leb(p::LEB128_MAX_BITS)?;
+            withdrawn_wire_expression(reader, bounds)?;
+            Ok(Network::UndeclareQueryable { id })
+        }
         _ => Err(Refusal::UnsupportedMessage),
     }
+}
+
+/// The wire-expression extension of a withdrawn queryable: flags, scope 0, and either no suffix or a valid key.
+fn withdrawn_wire_expression(reader: &mut Reader<'_>, bounds: &Bounds) -> Result<(), Refusal> {
+    if reader.u8()? != EXT_WIRE_EXPR {
+        return Err(Refusal::UnsupportedExtension);
+    }
+    let length = reader.leb(p::LEB128_MAX_BITS)? as usize;
+    if length > WIRE_EXPR_HEADER_BYTES + bounds.key {
+        return Err(Refusal::OverBound);
+    }
+    let mut inner = Reader::new(reader.take(length)?);
+    let flags = inner.u8()?;
+    if flags & !WIRE_EXPR_FLAG_MASK != 0 {
+        return Err(Refusal::MalformedMessage);
+    }
+    if inner.leb(p::LEB128_SHORT_BITS)? != 0 {
+        return Err(Refusal::InvalidKeyexpr);
+    }
+    let rest = inner.left();
+    if flags & WIRE_EXPR_FLAG_NAMED == 0 {
+        return if rest == 0 {
+            Ok(())
+        } else {
+            Err(Refusal::InvalidKeyexpr)
+        };
+    }
+    if rest == 0 {
+        return Err(Refusal::InvalidKeyexpr);
+    }
+    key_expression(inner.take(rest)?).map(|_| ())
+}
+
+/// A wire expression of a query message, as a key in full or an alias reference.
+fn query_key<'a>(
+    reader: &mut Reader<'a>,
+    named: bool,
+    bounds: &Bounds,
+) -> Result<QueryKey<'a>, Refusal> {
+    Ok(match key_reference(reader, named, bounds)? {
+        KeyRef::Full(key) => QueryKey::Full(key),
+        KeyRef::Alias(alias) => QueryKey::Alias(alias),
+    })
+}
+
+/// The extensions of a REQUEST: the network QoS value, then the timeout, each optional and neither mandatory.
+/// Any other extension, in any position, is refused. Returns the timeout in milliseconds, 0 when absent.
+fn request_extensions(reader: &mut Reader<'_>) -> Result<u32, Refusal> {
+    let mut header = reader.u8()?;
+    if header & !EXT_MORE == EXT_QOS_NETWORK {
+        qos_value(reader)?;
+        if header & EXT_MORE == 0 {
+            return Ok(0);
+        }
+        header = reader.u8()?;
+    }
+    if header != EXT_TIMEOUT {
+        return Err(Refusal::UnsupportedExtension);
+    }
+    reader.leb(p::LEB128_MAX_BITS)
+}
+
+/// A QoS value after its extension header: at most the five bits priority, congestion and express use.
+fn qos_value(reader: &mut Reader<'_>) -> Result<(), Refusal> {
+    if reader.leb(p::LEB128_MAX_BITS)? > QOS_NETWORK_MAX {
+        return Err(Refusal::MalformedMessage);
+    }
+    Ok(())
+}
+
+/// The body of a REQUEST: a Query that asks for the latest value, with no parameters and no extension.
+fn query_body(reader: &mut Reader<'_>) -> Result<(), Refusal> {
+    let body = reader.u8()?;
+    if body & ID_MASK != ID_QUERY || body & FLAG_BIT6 != 0 {
+        return Err(Refusal::UnsupportedMessage);
+    }
+    if body & FLAG_Z != 0 {
+        return Err(Refusal::UnsupportedExtension);
+    }
+    if body & FLAG_BIT5 == 0 || reader.u8()? != CONSOLIDATION_LATEST {
+        return Err(Refusal::UnsupportedMessage);
+    }
+    Ok(())
+}
+
+fn request<'a>(
+    reader: &mut Reader<'a>,
+    header: u8,
+    bounds: &Bounds,
+) -> Result<Network<'a>, Refusal> {
+    let id = reader.leb(p::LEB128_MAX_BITS)?;
+    let mapping = Mapping::from_flag(header & FLAG_BIT6 != 0);
+    let key = query_key(reader, header & FLAG_BIT5 != 0, bounds)?;
+    let timeout_ms = if header & FLAG_Z != 0 {
+        request_extensions(reader)?
+    } else {
+        0
+    };
+    query_body(reader)?;
+    Ok(Network::Request {
+        id,
+        mapping,
+        key,
+        timeout_ms,
+    })
+}
+
+/// A RESPONSE carrying a Reply with a Put: the network QoS value and the responder identity are each optional
+/// and the responder is only length-checked. An error reply, a Delete and any flag on either body are refused.
+fn response<'a>(
+    reader: &mut Reader<'a>,
+    header: u8,
+    bounds: &Bounds,
+) -> Result<Network<'a>, Refusal> {
+    let id = reader.leb(p::LEB128_MAX_BITS)?;
+    let mapping = Mapping::from_flag(header & FLAG_BIT6 != 0);
+    let key = query_key(reader, header & FLAG_BIT5 != 0, bounds)?;
+    if header & FLAG_Z != 0 {
+        let mut extension = reader.u8()?;
+        let mut more = true;
+        if extension & !EXT_MORE == EXT_QOS_NETWORK {
+            qos_value(reader)?;
+            more = extension & EXT_MORE != 0;
+            if more {
+                extension = reader.u8()?;
+            }
+        }
+        if more {
+            if extension != EXT_RESPONDER {
+                return Err(Refusal::UnsupportedExtension);
+            }
+            let length = reader.leb(p::LEB128_MAX_BITS)? as usize;
+            if !(2..=RESPONDER_MAX_BYTES).contains(&length) {
+                return Err(Refusal::MalformedMessage);
+            }
+            reader.take(length)?;
+        }
+    }
+    if reader.u8()? != ID_REPLY || reader.u8()? != ID_PUT {
+        return Err(Refusal::UnsupportedMessage);
+    }
+    let size = reader.leb(p::LEB128_MAX_BITS)? as usize;
+    if size > bounds.payload {
+        return Err(Refusal::OverBound);
+    }
+    let payload = reader.take(size)?;
+    Ok(Network::Response {
+        id,
+        mapping,
+        key,
+        payload,
+    })
+}
+
+fn response_final<'a>(reader: &mut Reader<'a>, header: u8) -> Result<Network<'a>, Refusal> {
+    if header & (FLAG_BIT5 | FLAG_BIT6) != 0 {
+        return Err(Refusal::MalformedMessage);
+    }
+    let id = reader.leb(p::LEB128_MAX_BITS)?;
+    if header & FLAG_Z != 0 {
+        network_qos_extension(reader)?;
+    }
+    Ok(Network::ResponseFinal { id })
 }
 
 /// A DECLARE with the interest flag: `<interest id>` and a DeclareFinal. The DECLARE around a
@@ -915,6 +1144,9 @@ fn parse_network<'a>(
         ID_DECLARE => declare(reader, header, bounds),
         ID_PUSH => push(reader, header, bounds, client),
         ID_OAM => oam(reader, header),
+        ID_REQUEST => request(reader, header, bounds),
+        ID_RESPONSE => response(reader, header, bounds),
+        ID_RESPONSE_FINAL => response_final(reader, header),
         _ => Err(Refusal::UnsupportedMessage),
     }
 }

@@ -7,11 +7,13 @@
 //! refused here with the matching class. Nothing allocates.
 
 use super::{
-    ATTACHMENT_GID_LEN_AT, Bounds, EXT_ATTACHMENT, EXT_QOS_NETWORK, EXT_QOS_UNIT, EXT_WIRE_EXPR,
-    FLAG_BIT5, FLAG_BIT6, FLAG_Z, GID_BYTES, ID_CLOSE, ID_D_SUBSCRIBER, ID_DECLARE, ID_FRAME,
-    ID_INIT, ID_KEEP_ALIVE, ID_OPEN, ID_PUSH, ID_PUT, MAX_ATTACHMENT_BYTES, MAX_BATCH_BYTES,
-    MAX_COOKIE_BYTES, Mapping, Qos, Refusal, STREAM_LENGTH_BYTES, U_SUBSCRIBER_HEADER,
-    WIRE_EXPR_FLAG_NAMED, WIRE_EXPR_FLAG_SENDER, key_expression,
+    ATTACHMENT_GID_LEN_AT, Bounds, CONSOLIDATION_LATEST, EXT_ATTACHMENT, EXT_QOS_NETWORK,
+    EXT_QOS_UNIT, EXT_RESPONDER, EXT_TIMEOUT, EXT_WIRE_EXPR, FLAG_BIT5, FLAG_BIT6, FLAG_Z,
+    GID_BYTES, ID_CLOSE, ID_D_QUERYABLE, ID_D_SUBSCRIBER, ID_DECLARE, ID_FRAME, ID_INIT,
+    ID_KEEP_ALIVE, ID_OPEN, ID_PUSH, ID_PUT, ID_QUERY, ID_REPLY, ID_REQUEST, ID_RESPONSE,
+    ID_RESPONSE_FINAL, ID_U_QUERYABLE, MAX_ATTACHMENT_BYTES, MAX_BATCH_BYTES, MAX_COOKIE_BYTES,
+    Mapping, Qos, Refusal, STREAM_LENGTH_BYTES, U_SUBSCRIBER_HEADER, WIRE_EXPR_FLAG_NAMED,
+    WIRE_EXPR_FLAG_SENDER, key_expression,
 };
 use slime_proto::zenoh_profile as p;
 
@@ -419,6 +421,137 @@ fn undeclare_subscriber(
     writer.put(key)
 }
 
+/// The network QoS value a stock peer writes on a DECLARE and the value of a query message's extension.
+const QOS_DECLARE: u8 = 8;
+const QOS_QUERY: u8 = 0x0D;
+/// The entity id a responder extension names after the zenoh id.
+const RESPONDER_ENTITY: u8 = 2;
+/// The `DeclareKeyExpr` sub-message id.
+const ID_D_KEYEXPR: u8 = 0;
+
+/// What a REQUEST names: a key in full, or an alias in the mapping `sender` says.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QueryTarget<'a> {
+    Full(&'a str),
+    /// An alias the receiver of the request declared, as a stock peer writes it.
+    ReceiverAlias(u32),
+}
+
+/// A DECLARE that carries the network QoS extension a stock peer writes, then `sub`.
+fn declare_with_qos(writer: &mut Writer<'_>, sub: u8) -> Result<(), EncodeError> {
+    writer.byte(ID_DECLARE | FLAG_Z)?;
+    writer.byte(EXT_QOS_NETWORK)?;
+    writer.byte(QOS_DECLARE)?;
+    writer.byte(sub)
+}
+
+/// An alias for `key`, declared once: the scope every reference to it carries is `id`.
+fn declare_keyexpr(
+    writer: &mut Writer<'_>,
+    id: u32,
+    key: &str,
+    bounds: Bounds,
+) -> Result<(), EncodeError> {
+    let key = check_key(key, bounds.key)?;
+    declare_with_qos(writer, ID_D_KEYEXPR | FLAG_BIT5)?;
+    writer.leb(id)?;
+    writer.leb(GLOBAL_SCOPE)?;
+    writer.prefixed(key)
+}
+
+/// A queryable under the alias `alias` that this side declared, in the sender mapping.
+fn declare_queryable_alias(
+    writer: &mut Writer<'_>,
+    id: u32,
+    alias: u32,
+) -> Result<(), EncodeError> {
+    declare_with_qos(writer, ID_D_QUERYABLE | FLAG_BIT6)?;
+    writer.leb(id)?;
+    writer.leb(alias)
+}
+
+/// The withdrawal of a queryable: its id and the null wire expression upstream writes.
+fn undeclare_queryable(writer: &mut Writer<'_>, id: u32) -> Result<(), EncodeError> {
+    declare_with_qos(writer, ID_U_QUERYABLE | FLAG_Z)?;
+    writer.leb(id)?;
+    writer.byte(EXT_WIRE_EXPR)?;
+    writer.leb(2)?;
+    writer.byte(0)?;
+    writer.leb(GLOBAL_SCOPE)
+}
+
+/// A REQUEST for the latest value on one exact key, with a timeout.
+fn request(
+    writer: &mut Writer<'_>,
+    id: u32,
+    target: QueryTarget<'_>,
+    timeout_ms: u32,
+    bounds: Bounds,
+) -> Result<(), EncodeError> {
+    let mut header = ID_REQUEST | FLAG_Z;
+    let key = match target {
+        QueryTarget::Full(key) => {
+            header |= FLAG_BIT5 | FLAG_BIT6;
+            Some(check_key(key, bounds.key)?)
+        }
+        QueryTarget::ReceiverAlias(_) => None,
+    };
+    writer.byte(header)?;
+    writer.leb(id)?;
+    match (target, key) {
+        (QueryTarget::ReceiverAlias(alias), _) => writer.leb(alias)?,
+        (QueryTarget::Full(_), Some(key)) => {
+            writer.leb(GLOBAL_SCOPE)?;
+            writer.prefixed(key)?;
+        }
+        (QueryTarget::Full(_), None) => return Err(EncodeError::InvalidKey),
+    }
+    writer.byte(EXT_QOS_NETWORK | 0x80)?;
+    writer.byte(QOS_QUERY)?;
+    writer.byte(EXT_TIMEOUT)?;
+    writer.leb(timeout_ms)?;
+    writer.byte(ID_QUERY | FLAG_BIT5)?;
+    writer.byte(CONSOLIDATION_LATEST)
+}
+
+/// A RESPONSE carrying a Reply with a Put, the key in full and the responder this side names.
+fn response(
+    writer: &mut Writer<'_>,
+    id: u32,
+    key: &str,
+    zid: &[u8],
+    payload: &[u8],
+    bounds: Bounds,
+) -> Result<(), EncodeError> {
+    let key = check_key(key, bounds.key)?;
+    let zid_code = check_zid(zid)?;
+    if payload.len() > bounds.payload {
+        return Err(EncodeError::PayloadTooLong);
+    }
+    writer.byte(ID_RESPONSE | FLAG_BIT5 | FLAG_BIT6 | FLAG_Z)?;
+    writer.leb(id)?;
+    writer.leb(GLOBAL_SCOPE)?;
+    writer.prefixed(key)?;
+    writer.byte(EXT_QOS_NETWORK | 0x80)?;
+    writer.byte(QOS_QUERY)?;
+    writer.byte(EXT_RESPONDER)?;
+    let length = u32::try_from(zid.len() + 2).map_err(|_| EncodeError::ZidLength)?;
+    writer.leb(length)?;
+    writer.byte(zid_code << 4)?;
+    writer.put(zid)?;
+    writer.byte(RESPONDER_ENTITY)?;
+    writer.byte(ID_REPLY)?;
+    writer.byte(ID_PUT)?;
+    writer.prefixed(payload)
+}
+
+fn response_final(writer: &mut Writer<'_>, id: u32) -> Result<(), EncodeError> {
+    writer.byte(ID_RESPONSE_FINAL | FLAG_Z)?;
+    writer.leb(id)?;
+    writer.byte(EXT_QOS_NETWORK)?;
+    writer.byte(QOS_QUERY)
+}
+
 /// Refuses a Put the decoder would refuse: a key that is not a valid key expression within the bounds,
 /// an attachment that is not the 33-byte form, or a payload over the bound.
 pub fn validate_put(
@@ -550,6 +683,50 @@ impl<'a> FrameEncoder<'a> {
     /// The withdrawal of the liveliness token `id`.
     pub fn undeclare_token(&mut self, id: u32) -> Result<(), EncodeError> {
         self.message(|writer| undeclare_token(writer, id))
+    }
+
+    /// An alias for `key`, which later declarations and requests name by `id`.
+    pub fn declare_keyexpr(&mut self, id: u32, key: &str) -> Result<(), EncodeError> {
+        let bounds = self.bounds;
+        self.message(|writer| declare_keyexpr(writer, id, key, bounds))
+    }
+
+    /// A queryable under the alias `alias` this side declared.
+    pub fn declare_queryable_alias(&mut self, id: u32, alias: u32) -> Result<(), EncodeError> {
+        self.message(|writer| declare_queryable_alias(writer, id, alias))
+    }
+
+    /// The withdrawal of the queryable `id`.
+    pub fn undeclare_queryable(&mut self, id: u32) -> Result<(), EncodeError> {
+        self.message(|writer| undeclare_queryable(writer, id))
+    }
+
+    /// A REQUEST for the latest value on `target`.
+    pub fn request(
+        &mut self,
+        id: u32,
+        target: QueryTarget<'_>,
+        timeout_ms: u32,
+    ) -> Result<(), EncodeError> {
+        let bounds = self.bounds;
+        self.message(|writer| request(writer, id, target, timeout_ms, bounds))
+    }
+
+    /// A RESPONSE to the request `id`: one reply carrying `payload` under `key`, from the responder `zid`.
+    pub fn response(
+        &mut self,
+        id: u32,
+        key: &str,
+        zid: &[u8],
+        payload: &[u8],
+    ) -> Result<(), EncodeError> {
+        let bounds = self.bounds;
+        self.message(|writer| response(writer, id, key, zid, payload, bounds))
+    }
+
+    /// The end of the replies to the request `id`.
+    pub fn response_final(&mut self, id: u32) -> Result<(), EncodeError> {
+        self.message(|writer| response_final(writer, id))
     }
 
     /// A PUSH carrying a Put with the 33-byte attachment and a payload of at

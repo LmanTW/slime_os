@@ -690,6 +690,13 @@ impl<
                 Event::SubscriberDeclared { id } => Notice::SubscriberDeclared { id },
                 Event::SubscriberUndeclared { id } => Notice::SubscriberUndeclared { id },
                 Event::Closed { reason } => Notice::Closed { reason },
+                // A link carries no query yet: the session takes a queryable, a request and its replies, and the
+                // owner reads them from the session. A notice for them waits for the item that serves a query.
+                Event::QueryableDeclared { .. }
+                | Event::QueryableUndeclared { .. }
+                | Event::QueryReceived { .. }
+                | Event::ReplyDelivered { .. }
+                | Event::QueryFinished { .. } => continue,
                 Event::Dropped { priority, cause } => {
                     self.note_drop(priority, cause);
                     continue;

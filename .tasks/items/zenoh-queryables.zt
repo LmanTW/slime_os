@@ -5,7 +5,7 @@ item :: s.Item = (h.task "01a208f8-8fee-75a7-a7db-ea499dafbd6a" "zenoh-queryable
   "Zenoh Profile 0 carries one query: a queryable declaration, a request, its responses and the final response"
   "Profile 0 refuses a queryable declaration, a request and a response as unsupported-message, so a Slime OS peer can publish and subscribe but cannot answer or ask a query. docs/decisions/zenoh-service.md names the queryable as the Zenoh equivalent of a fabric call and lists it out of scope because no stock-peer capture shows one. This item adds the capture. A stock eclipse-zenoh 1.0.0 peer that declared a queryable on slime_demo/query and answered one get, and a stock peer that asked it, put 14 batches on a TCP link; the exam replays them into sessions of ours, reproduces each query message byte for byte from the field layouts, and requires 15 refusals by name and class. The frozen requirement 01a1b49c-abf1-7139-b388-c6f26fe240c7 pins the queryable declaration and the request as refused, so this item supersedes it, restates it as stock-exam-takes-queries with the stock-peer checker amended in the same pull request, and keeps every other refusal it names.")
   with {
-    intent = #planned;
+    intent = #active;
     supersedes = {
       "01a1b49c-abf1-7139-b388-c6f26fe240c7";
       "01a208f9-4f69-7010-9168-da35c062b3e9/stock-exam-takes-push-qos";

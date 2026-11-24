@@ -255,6 +255,11 @@ fn bounded(frame: &crate::zenoh_profile0::Frame<'_>) {
             Network::DeclareSubscriberAlias { .. }
             | Network::UndeclareSubscriberById { .. }
             | Network::Oam
+            | Network::DeclareQueryable { .. }
+            | Network::UndeclareQueryable { .. }
+            | Network::Request { .. }
+            | Network::Response { .. }
+            | Network::ResponseFinal { .. }
             | Network::DeclareFinal => {}
         }
     }

@@ -80,6 +80,7 @@ enum Ev {
     },
     Undeclared(u32),
     Closed(u8),
+    QueryableDeclared(u32),
 }
 
 type Snapshot = (State, u32, u32, Option<u32>, Option<u32>, Option<u64>);
@@ -117,6 +118,11 @@ fn owned(events: &crate::zenoh_profile0::session::Events<'_>) -> Vec<Ev> {
                 unreachable!("a session that cannot fragment stores no sample")
             }
             Event::Dropped { .. } => unreachable!("a session with one run drops nothing"),
+            Event::QueryableDeclared { id } => Ev::QueryableDeclared(id),
+            Event::QueryableUndeclared { .. }
+            | Event::QueryReceived { .. }
+            | Event::ReplyDelivered { .. }
+            | Event::QueryFinished { .. } => unreachable!("this exam carries no query"),
         })
         .collect()
 }
@@ -417,6 +423,24 @@ fn alias_resolves_to_declared_key() {
 
 /// The fixture row that is a captured PUSH with the network QoS extension after its key.
 const QOS_ON_PUSH: &str = "refuse-qos-on-push";
+
+/// The fixture row that is a captured DeclareKeyExpr for `slime/demo/q` and a DeclareQueryable through its alias.
+const QUERYABLE: &str = "refuse-queryable";
+
+/// The fixture row that is a captured `get` request for a key no queryable of ours holds.
+const REQUEST: &str = "refuse-request";
+
+/// A queryable on an exact key is valid: the session takes the declaration and holds the queryable by id.
+fn queryable_declaration_is_taken() {
+    let (mut ours, now) = opened_listener();
+    assert_eq!(ours.peer_queryable(), None);
+    let before = ours.expected_rx_sn();
+    let (_, events) = feed_next(&mut ours, &captured(QUERYABLE), now).expect("accepted");
+    assert_eq!(events, [Ev::QueryableDeclared(1)]);
+    assert_eq!(ours.peer_queryable(), Some(1));
+    assert_eq!(ours.expected_rx_sn(), before.wrapping_add(1));
+    line("ok queryable-declaration-is-taken");
+}
 
 /// The extension `21 08` is priority 0, Block, not express: a value eclipse-zenoh writes on a PUSH, so the
 /// session takes the batch and delivers the sample behind it.
@@ -786,11 +810,18 @@ fn refusals() {
     for (name, _) in fixtures::REFUSE {
         // This row is a PUSH whose QoS extension is where eclipse-zenoh writes it, so the session takes it;
         // `qos_on_push_is_taken` feeds it with the sequence number the session expects.
-        if name == QOS_ON_PUSH {
+        if name == QOS_ON_PUSH || name == QUERYABLE {
             continue;
         }
         let before = snapshot(&ours);
-        let error = feed(&mut ours, &captured(name), now + 1).expect_err(name);
+        // A request is refused for what the session holds, not for its bytes, so it is fed at the sequence
+        // number the session expects. Every other row is refused before the session reads a sequence number.
+        let result = if name == REQUEST {
+            feed_next(&mut ours, &captured(name), now + 1)
+        } else {
+            feed(&mut ours, &captured(name), now + 1)
+        };
+        let error = result.expect_err(name);
         assert_eq!(snapshot(&ours), before, "{name} changed the session");
         refused(name, class_of(error));
     }
@@ -954,6 +985,11 @@ fn bounded(frame: &crate::zenoh_profile0::Frame<'_>) {
             Network::DeclareSubscriberAlias { .. }
             | Network::UndeclareSubscriberById { .. }
             | Network::Oam
+            | Network::DeclareQueryable { .. }
+            | Network::UndeclareQueryable { .. }
+            | Network::Request { .. }
+            | Network::Response { .. }
+            | Network::ResponseFinal { .. }
             | Network::DeclareFinal => {}
         }
     }
@@ -1156,6 +1192,7 @@ fn the_stock_peer_exam() {
     }
     keep_alive_suppressed_by_traffic();
     qos_on_push_is_taken();
+    queryable_declaration_is_taken();
     refusals();
     for (name, bytes) in fixtures::CONNECTS.iter().chain(fixtures::LISTENS.iter()) {
         properties(name, &unhex(bytes));

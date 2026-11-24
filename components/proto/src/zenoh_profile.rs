@@ -30,6 +30,14 @@ pub const ID_OAM: u32 = 31;
 pub const ID_DECLARE_KEYEXPR: u32 = 0;
 pub const ID_DECLARE_SUBSCRIBER: u32 = 2;
 pub const ID_UNDECLARE_SUBSCRIBER: u32 = 3;
+pub const ID_DECLARE_QUERYABLE: u32 = 4;
+pub const ID_UNDECLARE_QUERYABLE: u32 = 5;
+pub const ID_REQUEST: u32 = 28;
+pub const ID_RESPONSE: u32 = 27;
+pub const ID_RESPONSE_FINAL: u32 = 26;
+pub const ID_QUERY: u32 = 3;
+pub const ID_REPLY: u32 = 4;
+pub const CONSOLIDATION_LATEST: u32 = 3;
 pub const ID_DECLARE_FINAL: u32 = 26;
 pub const ID_PUT: u32 = 1;
 
@@ -40,6 +48,9 @@ pub const EXT_WIRE_EXPR: u32 = 95;
 pub const EXT_ATTACHMENT: u32 = 67;
 pub const EXT_QOS_UNIT: u32 = 1;
 pub const EXT_QOS_NETWORK: u32 = 33;
+pub const EXT_QUERYABLE_INFO: u32 = 33;
+pub const EXT_TIMEOUT: u32 = 38;
+pub const EXT_RESPONDER: u32 = 67;
 
 pub const CLOSE_GENERIC: u32 = 0;
 pub const CLOSE_UNSUPPORTED: u32 = 1;

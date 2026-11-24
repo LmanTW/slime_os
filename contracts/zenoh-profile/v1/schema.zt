@@ -74,8 +74,19 @@ idOam :: Int = 31;
 idDeclareKeyExpr :: Int = 0;
 idDeclareSubscriber :: Int = 2;
 idUndeclareSubscriber :: Int = 3;
+idDeclareQueryable :: Int = 4;
+idUndeclareQueryable :: Int = 5;
+-- The query messages, carried inside a FRAME beside PUSH.
+idRequest :: Int = 28;
+idResponse :: Int = 27;
+idResponseFinal :: Int = 26;
 -- DeclareFinal rides in a DECLARE whose interest flag is set; it is accepted and ignored.
 idDeclareFinal :: Int = 26;
+-- The query body inside a REQUEST and the reply body inside a RESPONSE. The only consolidation a REQUEST
+-- carries is latest.
+idQuery :: Int = 3;
+idReply :: Int = 4;
+consolidationLatest :: Int = 3;
 -- The data sub-message inside a PUSH.
 idPut :: Int = 1;
 
@@ -102,6 +113,13 @@ extAttachment :: Int = 67;
 -- wraps a DeclareKeyExpr or DeclareSubscriber. Both are id 1, optional, the last in their chain.
 extQosUnit :: Int = 1;
 extQosNetwork :: Int = 33;
+-- The queryable info extension on D_QUERYABLE: optional, id 1, a Z64 value whose low byte holds the
+-- complete bit (0x01) and whose remaining bits are the 16-bit distance.
+extQueryableInfo :: Int = 33;
+-- A REQUEST's timeout extension (id 6, optional, a Z64 in milliseconds) and a RESPONSE's responder
+-- extension (id 3, optional, a ZBuf of a zenoh id and an entity id).
+extTimeout :: Int = 38;
+extResponder :: Int = 67;
 
 -- CLOSE reason codes the profile recognises; any other value is malformed.
 closeGeneric :: Int = 0;
@@ -165,6 +183,14 @@ profile ::= {
   idDeclareKeyExpr =;
   idDeclareSubscriber =;
   idUndeclareSubscriber =;
+  idDeclareQueryable =;
+  idUndeclareQueryable =;
+  idRequest =;
+  idResponse =;
+  idResponseFinal =;
+  idQuery =;
+  idReply =;
+  consolidationLatest =;
   idDeclareFinal =;
   idPut =;
   flagBit5 =;
@@ -174,6 +200,9 @@ profile ::= {
   extAttachment =;
   extQosUnit =;
   extQosNetwork =;
+  extQueryableInfo =;
+  extTimeout =;
+  extResponder =;
   closeGeneric =;
   closeUnsupported =;
   closeInvalid =;

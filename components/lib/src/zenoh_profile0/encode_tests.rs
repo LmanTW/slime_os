@@ -188,6 +188,36 @@ fn network_summary(message: &Network<'_>) -> String {
         Network::UndeclareSubscriberById { id } => format!("UNDECLARE_SUBSCRIBER_BY_ID:id={id}"),
         Network::Oam => "OAM".into(),
         Network::DeclareFinal => "DECLARE_FINAL".into(),
+        Network::DeclareQueryable {
+            id,
+            mapping: m,
+            key,
+        } => {
+            format!(
+                "DECLARE_QUERYABLE:id={id},mapping={},key={key:?}",
+                mapping_name(*m)
+            )
+        }
+        Network::UndeclareQueryable { id } => format!("UNDECLARE_QUERYABLE:id={id}"),
+        Network::Request {
+            id,
+            mapping: m,
+            key,
+            timeout_ms,
+        } => format!(
+            "REQUEST:id={id},mapping={},key={key:?},timeout={timeout_ms}",
+            mapping_name(*m)
+        ),
+        Network::Response {
+            id,
+            mapping: m,
+            key,
+            payload,
+        } => format!(
+            "RESPONSE:id={id},mapping={},key={key:?},payload={payload:?}",
+            mapping_name(*m)
+        ),
+        Network::ResponseFinal { id } => format!("RESPONSE_FINAL:id={id}"),
     }
 }
 

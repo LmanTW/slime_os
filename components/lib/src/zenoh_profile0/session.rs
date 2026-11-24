@@ -26,8 +26,8 @@ use super::reassembly::{Progress, Run};
 use super::tables::{InsertError, Keys, SlotTable};
 use super::{
     Bounds, Frame, MAX_BATCH_BYTES, MAX_COOKIE_BYTES, MAX_KEY_BYTES, Mapping, Message, Network,
-    Qos, Refusal, STREAM_LENGTH_BYTES, decode_batch_client, decode_batch_qos, decode_batch_with,
-    frame_of,
+    Qos, QueryKey, Refusal, STREAM_LENGTH_BYTES, decode_batch_client, decode_batch_qos,
+    decode_batch_with, frame_of,
 };
 use slime_proto::zenoh_profile as p;
 
@@ -176,6 +176,12 @@ pub enum SessionError {
     /// A first fragment on a reliable lane while every run the session holds is open. A best-effort lane
     /// drops the fragment instead.
     LaneLimit,
+    /// A queryable declared under an id already held, or one more than the session holds.
+    QueryableLimit,
+    /// The withdrawal of a queryable the peer never declared.
+    UnknownQueryable,
+    /// A request under an id already outstanding, or while one is.
+    RequestLimit,
     /// A liveliness token with an id already declared, or one more than the session holds.
     TokenLimit,
     /// The withdrawal of a liveliness token that was never declared.
@@ -202,6 +208,9 @@ impl SessionError {
             Self::OutOfMemory => "out-of-memory",
             Self::NeedsFragments => "needs-fragments",
             Self::LaneLimit => "lane-limit",
+            Self::QueryableLimit => "queryable-limit",
+            Self::UnknownQueryable => "unknown-queryable",
+            Self::RequestLimit => "request-limit",
             Self::TokenLimit => "token-limit",
             Self::UnknownToken => "unknown-token",
         }
@@ -260,6 +269,27 @@ pub enum Event<'a> {
     },
     Closed {
         reason: u8,
+    },
+    /// The peer declared a queryable on a key this side knows.
+    QueryableDeclared {
+        id: u32,
+    },
+    QueryableUndeclared {
+        id: u32,
+    },
+    /// The peer asked one query. `request` is its id, which each response and the final response repeat.
+    QueryReceived {
+        request: u32,
+        timeout_ms: u32,
+    },
+    /// The peer answered this side's query with one payload.
+    ReplyDelivered {
+        request: u32,
+        payload: &'a [u8],
+    },
+    /// The peer ended the replies to this side's query.
+    QueryFinished {
+        request: u32,
     },
     /// A best-effort frame or run the session did not take. The lane stays open, and the loss is the
     /// owner's to count. A reliable lane refuses instead.
@@ -415,6 +445,21 @@ enum Change {
     Alias(usize),
     Subscribed(usize),
     Unsubscribed(usize),
+    /// The query state before the message that changed it, restored whole.
+    Queries(Queries),
+}
+
+/// What a session holds about queries, by id and key: the queryable the peer declared, the request the peer asked
+/// and has not had finished, and the request this side asked and has not had finished. Each holds at most one,
+/// because a link carries one query at a time.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Queries {
+    peer_queryable: Option<u32>,
+    peer_request: Option<u32>,
+    own_request: Option<u32>,
+    /// The queryable this side declared, and the alias of its key. A received frame never changes them.
+    own_queryable: Option<u32>,
+    own_alias: u32,
 }
 
 /// The alias a reference names, or the refusal a reference to an alias nobody declared draws. The alias
@@ -558,6 +603,7 @@ pub struct SessionOf<
     /// The ids of the liveliness tokens this side declared and has not withdrawn. A withdrawal names the id and no key.
     tokens: [u32; MAX_TOKENS],
     token_n: usize,
+    queries: Queries,
 }
 
 /// The lanes a session counts: a priority (0 to 7) and a reliability.
@@ -580,7 +626,12 @@ fn count_events<const E: usize>(frame: &Frame<'_>) -> (usize, usize) {
             Network::DeclareSubscriber { .. }
             | Network::DeclareSubscriberAlias { .. }
             | Network::UndeclareSubscriber { .. }
-            | Network::UndeclareSubscriberById { .. } => events += 1,
+            | Network::UndeclareSubscriberById { .. }
+            | Network::DeclareQueryable { .. }
+            | Network::UndeclareQueryable { .. }
+            | Network::Request { .. }
+            | Network::Response { .. }
+            | Network::ResponseFinal { .. } => events += 1,
             _ => {}
         }
     }
@@ -684,6 +735,7 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
             client: false,
             tokens: [0; MAX_TOKENS],
             token_n: 0,
+            queries: Queries::default(),
         })
     }
 
@@ -945,6 +997,7 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
         self.local_n = 0;
         self.remote_n = 0;
         self.token_n = 0;
+        self.queries = Queries::default();
         self.aliases.clear();
         for run in &mut self.run_table {
             run.release();
@@ -1288,6 +1341,7 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
                             self.subs.restore(at);
                             self.remote_n += 1;
                         }
+                        Change::Queries(before) => self.queries = before,
                     }
                 }
                 Err(error)
@@ -1399,6 +1453,7 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
                     self.subs.restore(at);
                     self.remote_n += 1;
                 }
+                Change::Queries(before) => self.queries = before,
             }
         }
     }
@@ -1508,6 +1563,74 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
                     note(journal, used, Change::Alias(at));
                 }
                 Network::Oam | Network::DeclareFinal => {}
+                Network::DeclareQueryable { id, mapping, key } => {
+                    room(used)?;
+                    self.query_key(key, mapping)?;
+                    if self.queries.peer_queryable.is_some() {
+                        return Err(SessionError::QueryableLimit);
+                    }
+                    note(journal, used, Change::Queries(self.queries));
+                    self.queries.peer_queryable = Some(id);
+                    events.push(Event::QueryableDeclared { id })?;
+                }
+                Network::UndeclareQueryable { id } => {
+                    room(used)?;
+                    if self.queries.peer_queryable != Some(id) {
+                        return Err(SessionError::UnknownQueryable);
+                    }
+                    note(journal, used, Change::Queries(self.queries));
+                    self.queries.peer_queryable = None;
+                    events.push(Event::QueryableUndeclared { id })?;
+                }
+                Network::Request {
+                    id,
+                    mapping,
+                    key,
+                    timeout_ms,
+                } => {
+                    room(used)?;
+                    if self.queries.own_queryable.is_none() {
+                        return Err(SessionError::UndeclaredKey);
+                    }
+                    let named = self.query_key(key, mapping)?;
+                    if !self.answers(named) {
+                        return Err(SessionError::UndeclaredKey);
+                    }
+                    if self.queries.peer_request.is_some() {
+                        return Err(SessionError::RequestLimit);
+                    }
+                    note(journal, used, Change::Queries(self.queries));
+                    self.queries.peer_request = Some(id);
+                    events.push(Event::QueryReceived {
+                        request: id,
+                        timeout_ms,
+                    })?;
+                }
+                Network::Response {
+                    id,
+                    mapping,
+                    key,
+                    payload,
+                } => {
+                    room(used)?;
+                    if self.queries.own_request != Some(id) {
+                        return Err(SessionError::UnexpectedMessage);
+                    }
+                    self.query_key(key, mapping)?;
+                    events.push(Event::ReplyDelivered {
+                        request: id,
+                        payload,
+                    })?;
+                }
+                Network::ResponseFinal { id } => {
+                    room(used)?;
+                    if self.queries.own_request != Some(id) {
+                        return Err(SessionError::UnexpectedMessage);
+                    }
+                    note(journal, used, Change::Queries(self.queries));
+                    self.queries.own_request = None;
+                    events.push(Event::QueryFinished { request: id })?;
+                }
             }
         }
         Ok(())
@@ -1838,6 +1961,150 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
         self.tx_sn = self.tx_sn.wrapping_add(1);
         self.sent_now(self.now_ms);
         Ok(Outcome::sending(sent))
+    }
+
+    /// The key a query message names. A key in full is its own. An alias in the sender's mapping is one the peer
+    /// declared. An alias in the receiver's mapping is one this side declared, and is held under [`LOCAL`].
+    fn query_key<'k>(
+        &'k self,
+        key: QueryKey<'k>,
+        mapping: Mapping,
+    ) -> Result<&'k [u8], SessionError> {
+        match key {
+            QueryKey::Full(key) => Ok(key.as_bytes()),
+            QueryKey::Alias(alias) => match mapping {
+                Mapping::Sender => resolve(&self.aliases, alias, mapping),
+                Mapping::Receiver => self
+                    .aliases
+                    .key_of(LOCAL | u64::from(alias))
+                    .ok_or(SessionError::Decode(Refusal::InvalidKeyexpr)),
+            },
+        }
+    }
+
+    /// Whether `key` is the one this side's queryable answers.
+    fn answers(&self, key: &[u8]) -> bool {
+        self.queries.own_queryable.is_some()
+            && self
+                .aliases
+                .key_of(LOCAL | u64::from(self.queries.own_alias))
+                .is_some_and(|held| held == key)
+    }
+
+    /// Writes a FRAME declaring an alias for `key` and this side's queryable on it, as a stock peer does. One
+    /// queryable is held at a time, and its alias takes a slot of the alias table.
+    pub fn send_declare_queryable<'a>(
+        &mut self,
+        id: u32,
+        alias: u32,
+        key: &str,
+        out: &mut [u8],
+    ) -> Result<Outcome<'a, E>, SessionError> {
+        if self.queries.own_queryable.is_some() {
+            return Err(SessionError::QueryableLimit);
+        }
+        if alias == 0 || alias > u32::from(u16::MAX) {
+            return Err(SessionError::Decode(Refusal::InvalidKeyexpr));
+        }
+        let at = self
+            .aliases
+            .insert(LOCAL | u64::from(alias), key.as_bytes())
+            .map_err(|error| table_error(error, SessionError::Decode(Refusal::OverBound)))?;
+        let sent = self.send_frame(out, |frame| {
+            frame.declare_keyexpr(alias, key)?;
+            frame.declare_queryable_alias(id, alias)
+        });
+        match sent {
+            Ok(outcome) => {
+                self.queries.own_queryable = Some(id);
+                self.queries.own_alias = alias;
+                Ok(outcome)
+            }
+            Err(error) => {
+                self.aliases.remove(at);
+                Err(error)
+            }
+        }
+    }
+
+    /// Writes a FRAME withdrawing this side's queryable. The alias stays held.
+    pub fn send_undeclare_queryable<'a>(
+        &mut self,
+        out: &mut [u8],
+    ) -> Result<Outcome<'a, E>, SessionError> {
+        let id = self
+            .queries
+            .own_queryable
+            .ok_or(SessionError::UnknownQueryable)?;
+        let outcome = self.send_frame(out, |frame| frame.undeclare_queryable(id))?;
+        self.queries.own_queryable = None;
+        Ok(outcome)
+    }
+
+    /// The queryable the peer declared, by id.
+    pub const fn peer_queryable(&self) -> Option<u32> {
+        self.queries.peer_queryable
+    }
+
+    /// The request the peer asked that this side has not yet finished.
+    pub const fn peer_request(&self) -> Option<u32> {
+        self.queries.peer_request
+    }
+
+    /// The request this side asked that the peer has not yet finished.
+    pub const fn own_request(&self) -> Option<u32> {
+        self.queries.own_request
+    }
+
+    /// Writes a FRAME with a REQUEST for the latest value on `target`. One request is outstanding at a time.
+    pub fn send_request<'a>(
+        &mut self,
+        id: u32,
+        target: encode::QueryTarget<'_>,
+        timeout_ms: u32,
+        out: &mut [u8],
+    ) -> Result<Outcome<'a, E>, SessionError> {
+        if self.queries.own_request.is_some() {
+            return Err(SessionError::RequestLimit);
+        }
+        if let encode::QueryTarget::ReceiverAlias(alias) = target
+            && self.aliases.find(u64::from(alias)).is_none()
+        {
+            return Err(SessionError::Decode(Refusal::InvalidKeyexpr));
+        }
+        let outcome = self.send_frame(out, |frame| frame.request(id, target, timeout_ms))?;
+        self.queries.own_request = Some(id);
+        Ok(outcome)
+    }
+
+    /// Writes a FRAME with one RESPONSE to the request the peer asked: `payload` under `key`, from the
+    /// responder `zid`. The request stays open until [`Self::send_response_final`].
+    pub fn send_response<'a>(
+        &mut self,
+        key: &str,
+        zid: &[u8],
+        payload: &[u8],
+        out: &mut [u8],
+    ) -> Result<Outcome<'a, E>, SessionError> {
+        let id = self
+            .queries
+            .peer_request
+            .ok_or(SessionError::UnexpectedMessage)?;
+        self.send_frame(out, |frame| frame.response(id, key, zid, payload))
+    }
+
+    /// Writes a FRAME that ends the replies to the request the peer asked.
+    pub fn send_response_final<'a>(
+        &mut self,
+        out: &mut [u8],
+    ) -> Result<Outcome<'a, E>, SessionError> {
+        let id = self
+            .queries
+            .peer_request
+            .ok_or(SessionError::UnexpectedMessage)?;
+        let outcome = self.send_frame(out, |frame| frame.response_final(id))?;
+        self.queries.peer_request = None;
+        Ok(outcome)
     }
 
     /// Writes a FRAME declaring this side's subscriber on `key`. A full key expression travels with

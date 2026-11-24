@@ -39,6 +39,14 @@ Profile :: type {
   idDeclareKeyExpr : Int;
   idDeclareSubscriber : Int;
   idUndeclareSubscriber : Int;
+  idDeclareQueryable : Int;
+  idUndeclareQueryable : Int;
+  idRequest : Int;
+  idResponse : Int;
+  idResponseFinal : Int;
+  idQuery : Int;
+  idReply : Int;
+  consolidationLatest : Int;
   idDeclareFinal : Int;
   idPut : Int;
   flagBit5 : Int;
@@ -48,6 +56,9 @@ Profile :: type {
   extAttachment : Int;
   extQosUnit : Int;
   extQosNetwork : Int;
+  extQueryableInfo : Int;
+  extTimeout : Int;
+  extResponder : Int;
   closeGeneric : Int;
   closeUnsupported : Int;
   closeInvalid : Int;
@@ -123,6 +134,17 @@ valid :: Profile -> Bool
       && p.extQosUnit == 1
       && p.extQosNetwork == 33
       && p.idDeclareSubscriber != p.idUndeclareSubscriber
+      && p.idDeclareQueryable == 4
+      && p.idUndeclareQueryable == 5
+      && p.idRequest == 28
+      && p.idResponse == 27
+      && p.idResponseFinal == 26
+      && p.idQuery == 3
+      && p.idReply == 4
+      && p.consolidationLatest == 3
+      && p.extQueryableInfo == 33
+      && p.extTimeout == 38
+      && p.extResponder == 67
       && p.flagBit5 == 32
       && p.flagBit6 == 64
       && p.flagExtensions == 128
@@ -163,6 +185,14 @@ rustBindings :: Profile -> Text
     w.u32Const "ID_DECLARE_KEYEXPR" p.idDeclareKeyExpr;
     w.u32Const "ID_DECLARE_SUBSCRIBER" p.idDeclareSubscriber;
     w.u32Const "ID_UNDECLARE_SUBSCRIBER" p.idUndeclareSubscriber;
+    w.u32Const "ID_DECLARE_QUERYABLE" p.idDeclareQueryable;
+    w.u32Const "ID_UNDECLARE_QUERYABLE" p.idUndeclareQueryable;
+    w.u32Const "ID_REQUEST" p.idRequest;
+    w.u32Const "ID_RESPONSE" p.idResponse;
+    w.u32Const "ID_RESPONSE_FINAL" p.idResponseFinal;
+    w.u32Const "ID_QUERY" p.idQuery;
+    w.u32Const "ID_REPLY" p.idReply;
+    w.u32Const "CONSOLIDATION_LATEST" p.consolidationLatest;
     w.u32Const "ID_DECLARE_FINAL" p.idDeclareFinal;
     w.u32Const "ID_PUT" p.idPut;
     "\n";
@@ -173,6 +203,9 @@ rustBindings :: Profile -> Text
     w.u32Const "EXT_ATTACHMENT" p.extAttachment;
     w.u32Const "EXT_QOS_UNIT" p.extQosUnit;
     w.u32Const "EXT_QOS_NETWORK" p.extQosNetwork;
+    w.u32Const "EXT_QUERYABLE_INFO" p.extQueryableInfo;
+    w.u32Const "EXT_TIMEOUT" p.extTimeout;
+    w.u32Const "EXT_RESPONDER" p.extResponder;
     "\n";
     w.u32Const "CLOSE_GENERIC" p.closeGeneric;
     w.u32Const "CLOSE_UNSUPPORTED" p.closeUnsupported;
