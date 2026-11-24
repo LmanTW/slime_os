@@ -2,12 +2,11 @@
 #
 # `zenoh-link-serial` 1.0.0 puts every message on the line as one z-serial frame: a COBS body ended by the sentinel 0x00. The
 # body is a 2-byte little-endian length, the data, and a 4-byte little-endian CRC. The CRC is not the standard CRC-32: it is
-# the polynomial 0x04C11DB7 in a reflected loop with an inverted accumulator. `scripts/lib/zserial_wire.py` reproduces every
-# frame below before it judges anything.
+# the polynomial 0x04C11DB7 in a reflected loop with an inverted accumulator.
 #
 # Source: crates.io `z-serial` 0.2.3, SHA-256 f113597c6b880587004169f14bc010e4b440981ab2ad669779d3654f9b1c4af1. The frames
 # are what `WireFormat::serialize_into` wrote. The decode lines are what `WireFormat::deserialize_into` did with each wire.
-# An empty payload is written '-'. A decode result is `ok <length>` or `refused`.
+# An empty payload is written '-'. A decode result is `ok <data hex>` or `refused`.
 #
 #   frame  <name> <data hex> <wire hex>      what the stock writer produced
 #   decode <name> <wire hex> ok <data hex>   a wire the stock reader accepted, and the data it returned
