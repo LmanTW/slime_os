@@ -15,7 +15,8 @@ use crate::zenoh_profile0::session::{
     Config, DropCause, Event, MAX_EVENTS, Outcome, Params, Role, SessionError, SessionOf, State,
 };
 use crate::zenoh_profile0::{
-    MAX_BATCH_BYTES, MAX_KEY_BYTES, MAX_PAYLOAD_BYTES, Refusal, STREAM_LENGTH_BYTES, StreamFramerOf,
+    MAX_BATCH_BYTES, MAX_KEY_BYTES, MAX_PAYLOAD_BYTES, Qos, Refusal, STREAM_LENGTH_BYTES,
+    StreamFramerOf,
 };
 
 #[cfg(test)]
@@ -54,6 +55,15 @@ pub trait ByteLink {
 pub enum LinkError {
     Reset,
     Closed,
+}
+
+/// What [`LinkOf::publish_qos`] did with a publication.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Published {
+    /// The frame is in the send slot.
+    Queued,
+    /// The send slot was busy and the publication does not block, so it was discarded and counted.
+    Dropped,
 }
 
 /// Why the link refuses an operation or ends.
@@ -228,6 +238,8 @@ pub struct LinkOf<
     drops: [Option<(u8, DropCause)>; E],
     drops_held: usize,
     drops_lost: u32,
+    /// The publications [`publish_qos`](Self::publish_qos) discarded because the send slot was busy. It saturates.
+    dropped: u32,
     /// The heap cell each open run of the session is joined into, valid while the run is open.
     run_cell: [usize; R],
     /// The cell the fragment being applied is joined into, which a completed message is stored in.
@@ -325,6 +337,7 @@ impl<
             drops: [None; E],
             drops_held: 0,
             drops_lost: 0,
+            dropped: 0,
             run_cell: [0; R],
             fragment_cell: 0,
             tap_sent: Tap::new(),
@@ -485,6 +498,50 @@ impl<
         };
         let batch = outcome.batch(&body);
         self.queue(batch)
+    }
+
+    /// [`publish`](Self::publish) with the QoS the PUSH states. With the send slot free it queues the frame, as
+    /// `publish` does. With the slot busy the congestion control decides: a Block publication is refused as
+    /// [`Error::SendBusy`] and changes nothing, and any other is discarded and counted by
+    /// [`dropped`](Self::dropped). A discarded publication builds no frame, so the session spends no sequence
+    /// number and the next frame sent follows the last one sent. A Put the link could never send is refused whether
+    /// the slot is busy or not.
+    pub fn publish_qos(
+        &mut self,
+        handle: LinkHandle,
+        key: &str,
+        attachment: &[u8],
+        payload: &[u8],
+        qos: Qos,
+    ) -> Result<Published, Error> {
+        self.check(handle)?;
+        if self.send_len != 0 {
+            if qos.block() {
+                return Err(Error::SendBusy);
+            }
+            match self.session.check_whole_put(key, attachment, payload.len()) {
+                Err(SessionError::NeedsFragments) => return Err(Error::NeedsFragments),
+                other => other?,
+            }
+            self.dropped = self.dropped.saturating_add(1);
+            return Ok(Published::Dropped);
+        }
+        let mut body = [0u8; FRAMED];
+        let outcome = match self
+            .session
+            .send_put_qos(key, attachment, payload, qos, &mut body)
+        {
+            Err(SessionError::NeedsFragments) => return Err(Error::NeedsFragments),
+            other => other?,
+        };
+        let batch = outcome.batch(&body);
+        self.queue(batch)?;
+        Ok(Published::Queued)
+    }
+
+    /// How many publications [`publish_qos`](Self::publish_qos) discarded because the send slot was busy.
+    pub const fn dropped(&self) -> u32 {
+        self.dropped
     }
 
     /// Queues the next FRAGMENT of a Put, starting at byte `at` of its message (0 for the first), and

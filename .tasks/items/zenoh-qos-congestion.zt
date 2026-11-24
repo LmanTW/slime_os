@@ -5,7 +5,7 @@ item :: s.Item = (h.task "01a20d1f-2dcf-742f-ba3b-fe1fce39d685" "zenoh-qos-conge
   "A Profile 0 link acts on the congestion control of a publication"
   "A Profile 0 PUSH states Drop or Block, and the decoder keeps it as Qos::block. The link ignores the value: Link::publish refuses every publication with SendBusy while the link's one send slot holds a batch, and an owner that gets SendBusy cannot tell a publication it may lose from one it must keep. eclipse-zenoh 1.0.0 drops a Drop message when its queue is full and waits for a Block one. The change adds Link::publish_qos. With the slot busy, a Drop publication is discarded and counted, and no frame is built, so the session spends no sequence number. A Block publication is refused as SendBusy as today.")
   with {
-    intent = #planned;
+    intent = #active;
     owns = {
       "components/lib/src/zenoh_link.rs";
       "components/lib/src/zenoh_link/**";
