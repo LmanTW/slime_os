@@ -121,6 +121,7 @@ REFUSED_SCENARIOS = (
     ("interest-restricted-to-a-key-without-a-wildcard-suffix", "unsupported-message"),
     ("interest-restricted-with-a-wildcard-inside-the-key", "unsupported-message"),
     ("interest-restricted-and-in-key-expressions-only", "unsupported-message"),
+    ("interest-in-key-expressions-and-tokens-unrestricted", "unsupported-message"),
     ("interest-in-tokens-and-subscribers", "unsupported-message"),
     ("interest-with-an-unknown-extension", "unsupported-extension"),
     ("interest-to-a-session-with-no-client-role", "unsupported-message"),
@@ -314,5 +315,5 @@ def all_controls() -> int:
 
 
 # The exact counts the exam fixes. The checker compares both with a run.
-PINNED_CASES = 33
-PINNED_CONTROLS = 126
+PINNED_CASES = 34
+PINNED_CONTROLS = 128

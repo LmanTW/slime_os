@@ -26,10 +26,10 @@ item :: s.Item = (h.task "01a208ef-1ac1-73c3-91bb-2a4315bf72a4" "zenoh-livelines
         "A client-role session answers an INTEREST for tokens, mode Current or CurrentFuture, with one frame at its next sequence number: a DECLARE_TOKEN for each token it holds whose key the INTEREST selects, in the order it declared them, each carrying the interest id, then one DeclareFinal carrying that id. Mode Future and mode Final answer nothing. A token it withdrew is not answered. An answer that does not fit the batch is refused, and the next frame the session writes takes the number the refused answer would have taken."
         { "zenoh_liveliness_check"; };
       h.req "interest-selection"
-        "An INTEREST selects every key when it has no restriction. When it names a key `<prefix>/**` it selects the tokens whose key is under that prefix. The options byte is 0x08 for the first form and 0x78 or 0x79 for the second, and the network QoS extension may follow either."
+        "An INTEREST selects every key when it has no restriction. When it names a key `<prefix>/**` it selects the tokens whose key is under that prefix. The options byte is 0x08 for the first form and 0x78 or 0x79 for the second, and the network QoS extension may follow either. Key expressions may accompany tokens only in the restricted form, so 0x09 is not admitted."
         { "zenoh_liveliness_check"; };
       h.req "interest-refusals"
-        "An INTEREST for subscribers, queryables or key expressions only, one that mixes kinds, one restricted to a key with no trailing wildcard or a wildcard inside it, and one with an unknown extension are refused by name. A session with no client role refuses every INTEREST as unsupported-message. Two INTERESTs in one frame are refused whole."
+        "An INTEREST for subscribers, queryables or key expressions only, one that mixes kinds other than key expressions with a restricted tokens interest, the unrestricted key-expressions-and-tokens form 0x09, one restricted to a key with no trailing wildcard or a wildcard inside it, and one with an unknown extension are refused by name. A session with no client role refuses every INTEREST as unsupported-message. Two INTERESTs in one frame are refused whole."
         { "zenoh_liveliness_check"; };
       h.req "liveliness-wire"
         "Every answer frame, the INIT_ACK a listener writes to a Client, and the frame after a refused answer equal the bytes the host reference writes. The reference reproduces 23 batches the upstream eclipse-zenoh 1.0.0 encoder wrote before it judges any frame."
