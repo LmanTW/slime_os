@@ -145,8 +145,8 @@ fn pump<const K: usize>(
 }
 
 /// Opens the session and prints what the router announced. Returns once the link is open. The exam holds one
-/// `router-ready` line for the whole run, so only the inbound direction prints it. The outbound direction connects to a
-/// router on the same address, and its handshake line is what shows that a router answered.
+/// `router-ready` line for each run, so `inbound` and `discover` print it and `outbound` does not. The outbound direction
+/// connects to a router on the same address, and its handshake line is what shows that a router answered.
 fn open<const K: usize>(
     link: &mut LinkOf<Tcp, FRAMED, 1, 2, K, PAYLOAD, NOTICES, MAX_EVENTS>,
     start: Instant,
@@ -336,6 +336,8 @@ fn discover() -> Result<(), String> {
             }
         }
     }
+    // A pump can leave a keep-alive in the send slot, and a close is refused while the slot is busy.
+    flush(&mut link, start)?;
     link.close(handle, 0)
         .map_err(|error| format!("the close was refused: {error:?}"))?;
     flush(&mut link, start)?;
