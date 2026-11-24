@@ -571,11 +571,27 @@ showed one publisher. A client that closed its session lost both, and a client t
 connected lost `/chatter` and kept the node. A node token alone listed the node, and a publisher token alone listed the node
 and the topic. The probes are not fixtures, and the Rust link took no part in them.
 
+`zenoh_rmw_discover_check` runs the Rust link. Its checker starts `rmw_zenohd` and the program in `verification/zenoh-live`
+with `discover`. The program opens a client-role link with a 253-byte key bound. It declares the node token with id 10 and
+the publisher token with id 11. It then holds the session open. The checker ends that with a line on the program's stdin.
+
+| When | Command the checker runs | What it read in one run |
+| --- | --- | --- |
+| Session open | `ros2 node list --no-daemon` | `/slime_node` and no other node |
+| Session open | `ros2 topic list --no-daemon` | `/chatter`, `/parameter_events` and `/rosout` |
+| After the close | `ros2 node list --no-daemon` | No node |
+| After the close | `ros2 topic list --no-daemon` | `/parameter_events` and `/rosout` |
+
+The checker reads each list from `ros2` itself, and keeps a line as a name only when it starts with `/`. `ros2` once wrote a
+zenoh warning to stdout before its list. The program withdraws no token before it closes, and no line of the transcript
+observes that. `scripts/lib/zenoh_rmw_discover_exam.py` judges 8 cases and refuses 39 corrupted transcripts. The target is an
+operator target, and one run on one host is not a signed record.
+
 Known limits:
 
 - The plain session and the plain link take the role. The graph link and the graph session do not.
-- No run has shown `ros2` listing a node from a token the Rust link wrote. The probes above used the Python library. A subscription
-  token, a service token, a second node and a namespace other than `/` are not written, and the link has no alias writer.
+- A subscription token, a service token, a second node and a namespace other than `/` are not written, and the link has no
+  alias writer. The token is in the plain form, and `ros2` accepted it in the run above.
 - A router writes nothing back, so the link cannot tell a matched Put from a dropped one.
 - The live target is an operator target in `specs/targets.toml`, and CI does not run it. The router and the nodes come
   from packages `flake.nix` does not pin, which the operator names in four environment variables. The item closes only
@@ -685,6 +701,9 @@ Known limits:
   and 52 controls. A connector with no role still refuses them; explicit, not part of `all`;
 - `just zenoh_rmw_token_check` — a client-role link declares the node and publisher tokens of a node, withdraws one and
   closes: 32 cases and 87 controls. No router runs, and a link with no role refuses a token; explicit, not part of `all`;
+- `just zenoh_rmw_discover_check` — a client-role link declares the node and publisher tokens of `slime_node` through a live
+  `rmw_zenohd`, and `ros2` lists them while the session is open and not after it closes: 8 cases and 39 controls; an
+  operator target, explicit, not part of `all`;
 - `just zenoh_rmw_live_check` — a client-role link against a live `rmw_zenohd`, a talker and a listener: at least 12
   cases and 38 controls. The checker starts the router and the nodes, the operator names them in four environment
   variables, and CI does not run it; an operator target, explicit, not part of `all`;
