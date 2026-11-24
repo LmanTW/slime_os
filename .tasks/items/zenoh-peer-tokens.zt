@@ -1,0 +1,86 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a20e0a-ffa7-7721-a468-30b0e8c47190" "zenoh-peer-tokens" "zenoh-transport"
+  "A Profile 0 peer session decodes and tracks liveliness token declarations and INTEREST messages"
+  "The plain Profile 0 session refuses a token declaration, a token undeclaration and an INTEREST as unsupported-message, so a peer that declares a token or asks for declarations gets a refusal and the link ends. Only the graph session and the client role read these messages, and each has its own decoder. Upstream eclipse-zenoh 1.0.0 writes D_TOKEN as `1e 66 <id> 00 <key>`, U_TOKEN with a null wire-expression extension, and INTEREST as `<0x19 | mode << 5> <id> <options> [<key>]`. A working tree decoded and tracked all three in the plain session, wrote them with the encoder, and agreed with the upstream crates on 2,982 frames; it was held back because zenoh-queryables owns the same files. This item takes the token and INTEREST part of it.")
+  with {
+    intent = #planned;
+    depends = {
+      "01a208f8-8fee-75a7-a7db-ea499dafbd6a";
+    };
+    owns = {
+      "components/lib/src/zenoh_profile0.rs";
+      "components/lib/src/zenoh_profile0/**";
+      "components/lib/src/zenoh_link.rs";
+      "components/lib/src/zenoh_stock*";
+      "components/lib/src/zenoh_undeclare.rs";
+      "components/lib/src/zenoh_subscribers.rs";
+      "components/lib/src/zenoh_node.rs";
+      "components/applications/zenoh-peer/**";
+      "components/applications/lidar-publisher/**";
+      "components/proto/src/zenoh_profile.rs";
+      "contracts/zenoh-profile/v1/**";
+      "scripts/lib/zenoh_wire.py";
+      "verification/zenoh-xcheck/**";
+    };
+    nonGoals = {
+      h.nonGoal "Answering an INTEREST. A session reports it as an event and writes nothing. zenoh-liveliness-roles owns the answer and the client role." h.agentDefault;
+      h.nonGoal "The graph session and the client role, which keep their own decoders and their own token tables." h.agentDefault;
+      h.nonGoal "Queryables, REQUEST and RESPONSE. zenoh-queryables owns them, and this item starts after it merges." h.agentDefault;
+      h.nonGoal "A token or an INTEREST restricted by a key alias, an aggregated INTEREST, and a wildcard key. Each stays refused." h.agentDefault;
+      h.nonGoal "Serving tokens or INTEREST from the Zenoh service, its grants or its client protocol." h.agentDefault;
+      h.nonGoal "More than two tokens and two standing interests held at once. A larger table needs a new version of contracts/zenoh-link-limits." h.agentDefault;
+    };
+    requirements = {
+      h.req "decodes-the-upstream-bytes"
+        "The decoder reads a token declaration, both token undeclaration forms (a null or restating wire-expression extension, and the bare form behind the network QoS extension), and an INTEREST in every mode, with and without a restricting key, exactly as the upstream encoder wrote them. Each decoded field equals the value upstream was asked to encode."
+        { "zenoh_xcheck_check"; };
+      h.req "encodes-the-same-bytes"
+        "The encoder writes each of those messages byte for byte as the upstream encoder does, and the host reference scripts/lib/zenoh_wire.py reproduces the same bytes before it judges any frame."
+        { "zenoh_xcheck_check"; "zenoh_encoder_check"; };
+      h.req "tracks-by-id"
+        "The session holds a token by id alone, and a standing interest (mode future or current-future) by id until a final interest ends it. A declaration under a held id or past the table is declaration-limit. An undeclaration or final interest for an id not held is unknown-declaration. A frame refused midway leaves both tables as they were, and closing the session empties them."
+        { "zenoh_session_check"; };
+      h.req "refuses-what-stays-out"
+        "The decoder refuses by name and class: the aggregate bit, an INTEREST with no kind, an unrestricted INTEREST that sets the named or mapping bit, a key alias in a token or INTEREST, a wildcard key, a token with an extension, and an undeclaration with a reserved flag."
+        { "zenoh_session_check"; "zenoh_stock_check"; };
+      h.req "stock-exam-takes-tokens"
+        "The stock-peer exam keeps every refusal it pins except declare_token and frame_network_interest, which leave the pinned refused set because the profile now takes them. The other pinned refused vectors keep their name, class and bytes, the accepted batches and stream rows are unchanged, and no accepted row is added to the corpus."
+        { "zenoh_stock_check"; };
+      h.req "defaults-unchanged"
+        "A session and a link built as before decode and encode exactly as before. The 17 corpus batches, the stock peer's session, the undeclaration exam and every refusal outside the two vectors above are reproduced unchanged, and the session's fixed storage stays within the limits contract."
+        { "zenoh_encoder_check"; "zenoh_session_check"; "zenoh_stock_check"; "zenoh_links_check"; "zenoh_undeclare_check"; "zenoh_transport_check"; };
+    };
+    acceptance = {
+      h.observed "zenoh_xcheck_check";
+      h.observed "zenoh_encoder_check";
+      h.observed "zenoh_session_check";
+      h.observed "zenoh_stock_check";
+      h.observed "zenoh_links_check";
+      h.observed "zenoh_undeclare_check";
+      h.observed "zenoh_transport_check";
+    };
+    decisions = {
+      h.decided "ids-not-keys"
+        "The session keeps the ids of tokens and standing interests and no keys"
+        "nothing in this item answers an INTEREST or lists a token, so a key would add 129 bytes of storage for each slot and move the arithmetic of contracts/zenoh-link-limits"
+        h.agentDefault
+        { "tracks-by-id"; "defaults-unchanged"; };
+      h.decided "after-queryables"
+        "This item depends on zenoh-queryables and starts after it merges"
+        "both change the decoder, the session, the contract ids and the stock exam, and the queryable item already amends the three vectors it shares"
+        h.agentDefault
+        { "stock-exam-takes-tokens"; };
+    };
+    knownLimits = {
+      h.knownLimit "zenoh_xcheck_check"
+        "The upstream comparison covers the plain DECLARE and the form behind the network QoS extension, on the plain demo keys and ids across every LEB128 width. It shows no rmw_zenoh or router traffic and no capture of a stock peer sending an INTEREST."
+        h.agentDefault;
+      h.knownLimit "zenoh_session_check"
+        "The exam of the session's tables is not written. The planning pull request that lands this item must add it, with its negative controls, before the item can leave #planned."
+        h.agentDefault;
+    };
+  };
+
+item
