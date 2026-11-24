@@ -1992,9 +1992,9 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
         })
     }
 
-    /// What `send_put` checks before it builds a frame, and nothing more: the Put's key, attachment and size, and
-    /// that it travels in one FRAME. It changes nothing, so a caller that is about to discard the Put can still
-    /// refuse a Put that could never be sent.
+    /// What `send_put` checks before it builds a frame, and nothing more: that the session is open, the Put's key,
+    /// attachment and size, and that it travels in one FRAME. It changes nothing, so a caller that is about to
+    /// discard the Put refuses the same Puts `send_put` refuses.
     pub fn check_whole_put(
         &self,
         key: &str,
@@ -2002,7 +2002,10 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
         payload_len: usize,
     ) -> Result<(), SessionError> {
         self.check_put(key, attachment, payload_len, true)?;
-        if self.state == State::Open && !self.put_fits_one_frame(key, attachment, payload_len) {
+        if self.state != State::Open {
+            return Err(SessionError::NotOpen);
+        }
+        if !self.put_fits_one_frame(key, attachment, payload_len) {
             return Err(if self.params.fragments {
                 SessionError::NeedsFragments
             } else {

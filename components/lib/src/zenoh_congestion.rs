@@ -339,3 +339,35 @@ fn refusals() {
         &format!("block-stalled-past-the-limit {}", class(reported)),
     );
 }
+
+/// A Drop publication before the handshake ends is refused as `NotOpen`, as it is with a free slot. The INIT_SYN
+/// holds the send slot, so this is the busy path, and a count here would be a publication the free path refuses.
+#[test]
+fn a_drop_publication_before_open_is_refused_not_counted() {
+    let io = Scripted {
+        rx: Rc::new(RefCell::new(Pipe::default())),
+        tx: Rc::new(RefCell::new(Pipe::default())),
+        budget: Rc::new(RefCell::new(None)),
+        stalled: Rc::new(RefCell::new(0)),
+    };
+    let mut link = Link::new(
+        io,
+        Role::Connector,
+        &config(&[0xa1, 0xa2], b"", FIRST_SN),
+        1,
+    )
+    .expect("connector")
+    .with_client_role()
+    .expect("client role");
+    let handle = link.handle();
+    link.open(handle, 0).expect("open");
+    assert!(link.send_pending(), "the INIT_SYN holds the send slot");
+    let error = link
+        .publish_qos(handle, KEY, &attachment(), &PAYLOAD, drop_default())
+        .expect_err("a link that is not open refuses a publication");
+    assert_eq!(
+        error,
+        Error::Session(crate::zenoh_profile0::session::SessionError::NotOpen)
+    );
+    assert_eq!(link.dropped(), 0);
+}
