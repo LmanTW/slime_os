@@ -271,6 +271,16 @@ zenoh_congestion_check:
 zenoh_liveliness_check:
     python3 scripts/check/check-zenoh-profile0.py --slice liveliness
 
+# Judges sending by priority. When both INITs offered the QoS unit extension, a publication goes in a FRAME of
+# the lane of its priority, with the transport QoS extension and a sequence counter of its own, and a link
+# without lanes keeps one counter. A bounded queue for each priority drains the lowest priority number first and
+# first in first out within it. The host references scripts/lib/zenoh_lanes_exam.py and zenoh_wire.py reproduce
+# every frame byte for byte; the expectation is scripts/lib/zenoh_priorities_exam.py. Nothing here needs a
+# registry. The recipe fails until the Rust tests land.
+[group('hardware')]
+zenoh_priorities_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice priorities
+
 # Judges what the Zenoh service may do for each holder. The decoder of
 # contracts/zenoh-service-grants/v1 takes the declarations it must take and refuses the ones it must
 # refuse. Each limit is held on both sides of its bound. Each check is removed in turn, and the

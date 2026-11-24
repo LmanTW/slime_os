@@ -137,6 +137,7 @@ from typing import NoReturn
 import devloop_observations
 import zenoh_congestion_exam
 import zenoh_exchange
+import zenoh_priorities_exam
 import zenoh_rmw_exam
 import zenoh_rmw_graph_exam
 import zenoh_rmw_arm
@@ -3229,6 +3230,43 @@ def congestion_main(controls_only: bool) -> int:
     return 0
 
 
+PRIORITIES_FILTER = "zenoh_priorities::"
+# The exam's own Rust test, by name: a filter that matches nothing passes silently.
+PRIORITIES_TESTS = ("zenoh_priorities::the_priorities_exam",)
+
+
+def run_priorities() -> list[str]:
+    stdout, output = cargo_tests((PRIORITIES_FILTER,), {**_os.environ})
+    missing = [name for name in PRIORITIES_TESTS if name not in tests_passed(output)]
+    if missing:
+        fail(f"priorities: the exam's tests did not run and pass ({len(missing)} of {len(PRIORITIES_TESTS)}): {', '.join(missing)}")
+    return exam_lines(stdout)
+
+
+def priorities_main(controls_only: bool) -> int:
+    neighbour_controls(subscribers=False)
+    try:
+        refused_controls = zenoh_priorities_exam.all_controls()
+        positive, refusals = zenoh_priorities_exam.judge(zenoh_priorities_exam.good_lines())
+    except zenoh_priorities_exam.PrioritiesError as error:
+        fail(str(error))
+    if positive + refusals != zenoh_priorities_exam.PINNED_CASES:
+        fail(f"priorities: an honest transcript is {positive + refusals} cases, the checker pins {zenoh_priorities_exam.PINNED_CASES}")
+    if refused_controls != zenoh_priorities_exam.PINNED_CONTROLS:
+        fail(f"priorities: {refused_controls} controls, the checker pins {zenoh_priorities_exam.PINNED_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 priorities judge: refused {refused_controls} corrupted records")
+        return 0
+    try:
+        cases, refusals = zenoh_priorities_exam.judge(run_priorities())
+    except zenoh_priorities_exam.PrioritiesError as error:
+        fail(str(error))
+    print(f"[zenoh-profile0] slice=priorities cases={cases} refusals={refusals} controls={refused_controls}")
+    devloop_observations.record(casesObserved=cases + refusals, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 priorities check: a link sends each publication on the lane of its priority and drains a queue highest priority first")
+    return 0
+
+
 def grants_main(controls_only: bool) -> int:
     try:
         refused_controls = zenoh_grants_exam.all_controls()
@@ -4313,7 +4351,7 @@ def lost_holder_main(controls_only: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "liveliness", "queries", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-client", "rmw-router-link", "rmw-client-put", "rmw-token", "rmw-live", "rmw-discover", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "qos", "congestion", "lanes", "link-limits-v3", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service-peer", "service-four", "service-fault", "service", "service-link", "holder-fault", "service-stack", "link-v3-reader", "lost-holder", "tls-dependency"), required=True)
+    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "liveliness", "queries", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-client", "rmw-router-link", "rmw-client-put", "rmw-token", "rmw-live", "rmw-discover", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "qos", "congestion", "priorities", "lanes", "link-limits-v3", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service-peer", "service-four", "service-fault", "service", "service-link", "holder-fault", "service-stack", "link-v3-reader", "lost-holder", "tls-dependency"), required=True)
     parser.add_argument("--controls-only", action="store_true")
     arguments = parser.parse_args()
     if arguments.slice == "composition":
@@ -4368,6 +4406,8 @@ def main() -> int:
         return qos_main(arguments.controls_only)
     if arguments.slice == "congestion":
         return congestion_main(arguments.controls_only)
+    if arguments.slice == "priorities":
+        return priorities_main(arguments.controls_only)
     if arguments.slice == "grants":
         return grants_main(arguments.controls_only)
     if arguments.slice == "client":

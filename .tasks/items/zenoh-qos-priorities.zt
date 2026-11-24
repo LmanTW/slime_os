@@ -1,0 +1,72 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a20e10-a8b0-77ba-be09-1c27af5d4291" "zenoh-qos-priorities" "zenoh-transport"
+  "A Profile 0 link sends by priority: a lane for each priority and a queue"
+  "A Profile 0 link sends every publication on the default lane, with one sequence counter, in the order it was called. The receive side already keeps a counter for each pair of a priority and a reliability (zenoh-fragment-lanes), and a PUSH already states its priority (zenoh-qos-wire). Nothing sends the priority in a FRAME header, so a stock peer cannot tell a priority 0 publication from a priority 7 one, and a publication that waits for the one send slot waits in the owner's order, not the priority's. The change: when both INITs offered the QoS unit extension, a publication of priority p goes in a FRAME of lane (p, reliable), with the mandatory transport QoS extension for any priority but 5 and a sequence counter of its own for each lane. A bounded PriorityQueue holds publications for each priority and drains them into the send slot, the lowest priority number first and first in first out within a priority. A link without lanes keeps one counter, and the number is given when a publication leaves the queue.")
+  with {
+    intent = #planned;
+    owns = {
+      "components/lib/src/zenoh_profile0.rs";
+      "components/lib/src/zenoh_profile0/session.rs";
+      "components/lib/src/zenoh_profile0/encode.rs";
+      "components/lib/src/zenoh_profile0/priority_queue*";
+      "components/lib/src/zenoh_link.rs";
+      "components/lib/src/zenoh_link/**";
+      "components/lib/src/zenoh_priorities*";
+      "components/lib/src/lib.rs";
+    };
+    nonGoals = {
+      h.nonGoal "Best-effort sends. Every lane this item writes is reliable. The item zenoh-qos-best-effort owns the best-effort FRAME and its own sequence space." h.agentDefault;
+      h.nonGoal "Fragmented Puts on a lane. publish_part keeps writing the default lane, so a Put larger than one FRAME is sent as today." h.agentDefault;
+      h.nonGoal "A change to contracts/zenoh-link-limits. The queue is a type the owner builds with its own depth, key and payload bounds, so the contract's stack and heap arithmetic does not move." h.agentDefault;
+      h.nonGoal "Batching. The link writes one message in each FRAME, so an express message has nothing to skip, and the express bit is only written, as zenoh-qos-wire does." h.agentDefault;
+      h.nonGoal "A component, a composition or a QEMU gate. This item judges the link on the host, and nothing calls the queue yet." h.agentDefault;
+      h.nonGoal "Any change to Link::publish, Link::publish_qos or Session::send_put. They keep their signatures and bytes." h.agentDefault;
+    };
+    requirements = {
+      h.req "lanes-write-the-priority"
+        "When both INITs offered the QoS unit extension, a publication of priority p is sent in a FRAME on lane (p, reliable). The header has no extension for priority 5 and the mandatory extension 31 <p> for any other, and each lane counts its own numbers from the number the connector's OPEN announced. The exam compares 5 frames to scripts/lib/zenoh_lanes_exam.py frame_header, which is proved against the bytes zenoh-codec 1.0.0 wrote, and to zenoh_wire.push_put_qos, byte for byte. Two publications on lane 2 carry the numbers n and n+1, and the first of each other lane carries n."
+        { "zenoh_priorities_check"; };
+      h.req "no-lanes-keeps-one-counter"
+        "A link whose peer did not offer the QoS unit extension sends every FRAME on the default lane with no extension, whatever the priority, and numbers them consecutively. The exam compares 2 frames of priorities 2 and 7."
+        { "zenoh_priorities_check"; };
+      h.req "queue-drains-by-priority"
+        "PriorityQueue drains the lowest priority number first and first in first out within a priority. Five publications queued as priorities 5, 2, 2, 0 and 7 drain as 4, 2, 3, 5 and 1 by their attachment sequence. The sequence number is given as a publication leaves the queue, so two publications that leave a link without lanes carry n and n+1 in the order they left."
+        { "zenoh_priorities_check"; };
+      h.req "full-queue-follows-congestion-control"
+        "A priority whose queue is full discards a Drop publication and counts it, and refuses a Block one as queue-full. Another priority with room still takes its publication. The drain stops at a busy send slot, writes nothing, and resumes once the slot is free."
+        { "zenoh_priorities_check"; };
+      h.req "refusals-keep-their-class"
+        "drain on a busy slot is refused as send-busy, and after close as send-after-close. Each refusal is reported by name and class."
+        { "zenoh_priorities_check"; };
+      h.req "judge-refuses-corruption"
+        "The judge refuses 88 corrupted transcripts of an honest run: a dropped, duplicated, reordered or unrecognised line, a frame with one digit changed, in capitals, with its sequence number moved by one or on another lane, a drain order reversed or short by one, a count one over or under, and a refusal with another class."
+        { "zenoh_priorities_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_priorities_check" {
+        h.count "casesObserved" 26;
+        h.count "negativeControlsRefused" 88;
+      };
+    };
+    decisions = {
+      h.decided "queue-is-not-part-of-the-link-limits"
+        "PriorityQueue is a type with its own depth, key and payload bounds as const generics, built and owned by the caller and lent to Link::drain."
+        "the limits contract judges the stack and heap of a link, and a queue the owner sizes is the owner's memory. Adding it to the contract would need a version 4 and move every closure that names a limits record"
+        h.agentDefault
+        { "queue-drains-by-priority"; };
+      h.decided "lane-by-priority-only-when-both-offered"
+        "A link writes a lane header only when Session::lanes is true, and otherwise writes the default lane whatever the priority."
+        "upstream reads a priority other than the default only on a connection that negotiated the extension, so a header the peer did not offer is a protocol error on its side"
+        h.agentDefault
+        { "lanes-write-the-priority"; "no-lanes-keeps-one-counter"; };
+      h.decided "number-given-at-drain"
+        "A publication takes its sequence number when it leaves the queue, not when it is queued."
+        "a number given at enqueue would leave a gap on the lane whenever a Drop publication is discarded or a higher priority overtakes it, and a reliable lane takes exactly its next number"
+        h.agentDefault
+        { "queue-drains-by-priority"; };
+    };
+  };
+
+item
