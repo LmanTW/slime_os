@@ -6,7 +6,10 @@ item :: s.Item = (h.task "01a208f8-8fee-75a7-a7db-ea499dafbd6a" "zenoh-queryable
   "Profile 0 refuses a queryable declaration, a request and a response as unsupported-message, so a Slime OS peer can publish and subscribe but cannot answer or ask a query. docs/decisions/zenoh-service.md names the queryable as the Zenoh equivalent of a fabric call and lists it out of scope because no stock-peer capture shows one. This item adds the capture. A stock eclipse-zenoh 1.0.0 peer that declared a queryable on slime_demo/query and answered one get, and a stock peer that asked it, put 14 batches on a TCP link; the exam replays them into sessions of ours, reproduces each query message byte for byte from the field layouts, and requires 15 refusals by name and class. The frozen requirement 01a1b49c-abf1-7139-b388-c6f26fe240c7 pins the queryable declaration and the request as refused, so this item supersedes it, restates it as stock-exam-takes-queries with the stock-peer checker amended in the same pull request, and keeps every other refusal it names.")
   with {
     intent = #planned;
-    supersedes = { "01a1b49c-abf1-7139-b388-c6f26fe240c7"; };
+    supersedes = {
+      "01a1b49c-abf1-7139-b388-c6f26fe240c7";
+      "01a208f9-4f69-7010-9168-da35c062b3e9/stock-exam-takes-push-qos";
+    };
     owns = {
       "components/lib/src/zenoh_profile0.rs";
       "components/lib/src/zenoh_profile0/**";
@@ -36,10 +39,10 @@ item :: s.Item = (h.task "01a208f8-8fee-75a7-a7db-ea499dafbd6a" "zenoh-queryable
         "The host encoders in scripts/lib/zenoh_queries_exam.py reproduce the captured request, both responses, the final response, the queryable undeclaration and the queryable declaration byte for byte, so the capture is not taken on trust from the peer that wrote it."
         { "controls-refused"; "recipe-passed"; };
       h.req "three-scenarios"
-        "Three scenarios run in this order: our query is answered by a stock queryable with both payloads delivered, then a stock peer's query is answered by our queryable, then a queryable is undeclared by id."
+        "Three scenarios are reported in this order: a stock queryable answers our query, a stock peer's query reaches our queryable, and a queryable is undeclared by id. The judge also reads the two payloads the first scenario delivered, 616e737765722d31 and 616e737765722d32, in that order. It reads no frame our side writes, so what our encoder puts on the wire is not judged here."
         { "cases-observed"; };
       h.req "refuses-what-stays-out"
-        "The session refuses 15 named variants with the class the exam fixes for each, and a refused call leaves the session unchanged: a wildcard suffix, an unknown alias, query parameters, a target extension, a mandatory QoS extension, a request id over 32 bits, a truncated request, an error reply, a Delete reply, a wildcard reply key, a wildcard queryable, a token declaration, a request with no queryable declared, a response nobody asked for, and a repeated final response."
+        "The session refuses 15 named variants with the class the exam fixes for each: a wildcard suffix, an unknown alias, query parameters, a target extension, a mandatory QoS extension, a request id over 32 bits, a truncated request, an error reply, a Delete reply, a wildcard reply key, a wildcard queryable, a token declaration, a request with no queryable declared, a response nobody asked for, and a repeated final response."
         { "cases-observed"; "controls-refused"; };
       h.req "stock-exam-takes-queries"
         "The stock-peer exam keeps every refusal of the area requirement this item supersedes, except for the PUSH QoS refusal that zenoh-qos-wire already moves to the scenario qos-on-push-is-taken and except for three more: the captured DeclareQueryable through an alias is taken and the exam reports the scenario queryable-declaration-is-taken, and the corpus vectors declare_queryable, frame_network_request and frame_network_response may leave the corpus or stay refused with their captured bytes and class, but never become accepted rows. The captured request is refused as undeclared-key, because no queryable of ours holds its key. The other 97 pinned refused vectors keep their name, class and bytes, the 17 accepted batches and the 14 stream rows are unchanged, and the exam still reports 69 cases: 37 accepted, because the scenarios qos-on-push-is-taken and queryable-declaration-is-taken are both reported, and 32 refused."
@@ -53,8 +56,8 @@ item :: s.Item = (h.task "01a208f8-8fee-75a7-a7db-ea499dafbd6a" "zenoh-queryable
         h.count "casesObserved" 69;
         h.atLeast "negativeControlsRefused" 138;
       };
-      h.observedAs "cases-observed" "zenoh_queries_check" { h.count "casesObserved" 32; };
-      h.observedAs "controls-refused" "zenoh_queries_check" { h.count "negativeControlsRefused" 105; };
+      h.observedAs "cases-observed" "zenoh_queries_check" { h.count "casesObserved" 34; };
+      h.observedAs "controls-refused" "zenoh_queries_check" { h.count "negativeControlsRefused" 113; };
       h.observedAs "recipe-passed" "zenoh_queries_check" h.noPredicates;
     };
     decisions = {

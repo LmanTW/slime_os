@@ -476,6 +476,10 @@ def good_lines() -> list[str]:
     return (
         [f"queries replay {name} ok" for name in names]
         + [f"queries ok {name}" for name in OK_SCENARIOS]
+        + [
+            f"queries delivered {number} {payload.hex()}"
+            for number, payload in enumerate(REPLIES, 1)
+        ]
         + [f"queries property {name} ok" for name in names]
         + [f"queries refused {name} {cls}" for name, cls in REFUSED_SCENARIOS]
     )
@@ -494,6 +498,7 @@ def judge(lines: list[str]) -> tuple[int, int]:
     """Check a transcript against the exam; returns (cases, refusals), a case being a scenario or a replay."""
     shapes = {
         ("queries", "ok"): 3,
+        ("queries", "delivered"): 4,
         ("queries", "replay"): 4,
         ("queries", "property"): 4,
         ("queries", "refused"): 4,
@@ -516,6 +521,12 @@ def judge(lines: list[str]) -> tuple[int, int]:
     done = [f[2] for f in split if f[:2] == ["queries", "ok"]]
     replays = [f[2] for f in split if f[:2] == ["queries", "replay"]]
     properties = [f[2] for f in split if f[:2] == ["queries", "property"]]
+    delivered = [(f[2], f[3]) for f in split if f[:2] == ["queries", "delivered"]]
+    wanted_delivered = [(str(number), payload.hex()) for number, payload in enumerate(REPLIES, 1)]
+    _need(
+        delivered == wanted_delivered,
+        f"queries delivered {delivered}, the stock queryable answered {wanted_delivered}",
+    )
     refused = [(f[2], f[3]) for f in split if f[:2] == ["queries", "refused"]]
     _exactly("scenarios", OK_SCENARIOS, done)
     _need(
@@ -542,7 +553,7 @@ def judge(lines: list[str]) -> tuple[int, int]:
         [name for name, _ in refused] == [name for name, _ in REFUSED_SCENARIOS],
         "queries refusals are out of order",
     )
-    return len(done) + len(replays), len(refused)
+    return len(done) + len(replays) + len(delivered), len(refused)
 
 
 def transcript_mutations() -> list[tuple[str, list[str]]]:
@@ -605,6 +616,33 @@ def transcript_mutations() -> list[tuple[str, list[str]]]:
         out.append((f"the property of {name} missing", without(f"queries property {name} ok")))
     for name in OK_SCENARIOS:
         out.append((f"the scenario {name} missing", without(f"queries ok {name}")))
+    first, second = (
+        f"queries delivered {number} {payload.hex()}" for number, payload in enumerate(REPLIES, 1)
+    )
+    out.extend(
+        [
+            ("the first delivered payload missing", without(first)),
+            ("the second delivered payload missing", without(second)),
+            (
+                "every delivered payload missing",
+                [line for line in good if not line.startswith("queries delivered ")],
+            ),
+            (
+                "a delivered payload that is not the reply",
+                [
+                    line.replace(REPLIES[0].hex(), REPLIES[1].hex(), 1) if line == first else line
+                    for line in good
+                ],
+            ),
+            ("the delivered payloads swapped", swapped(good.index(first), good.index(second))),
+            ("a delivered payload reported twice", [*good, first]),
+            ("a third delivered payload", [*good, f"queries delivered 3 {REPLIES[0].hex()}"]),
+            (
+                "a delivered line with an extra field",
+                [line + " extra" if line == first else line for line in good],
+            ),
+        ]
+    )
     classes = sorted({cls for _name, cls in REFUSED_SCENARIOS})
     for name, cls in REFUSED_SCENARIOS:
         out.append((f"{name} missing", without(f"queries refused {name} {cls}")))
@@ -623,7 +661,10 @@ def transcript_controls() -> int:
     cases, refusals = judge(good)
     _need(
         (cases, refusals)
-        == (len(OK_SCENARIOS) + len(QUERYABLE_PEER) + len(GETTER_PEER), len(REFUSED_SCENARIOS)),
+        == (
+            len(OK_SCENARIOS) + len(QUERYABLE_PEER) + len(GETTER_PEER) + len(REPLIES),
+            len(REFUSED_SCENARIOS),
+        ),
         f"queries: the honest transcript is {cases} cases and {refusals} refusals",
     )
     refused = 0
@@ -838,8 +879,8 @@ def all_controls() -> int:
 # What the admitted item fixes, held here as well so the gate stays correct after the item is completed
 # and retired to .tasks/terminal. While the item is open its stored body is compared with these; once it is
 # gone these still bind. Both counts are exact.
-PINNED_CASES = 32
-PINNED_CONTROLS = 105
+PINNED_CASES = 34
+PINNED_CONTROLS = 113
 ITEM_SLUG = "zenoh-queryables"
 
 
