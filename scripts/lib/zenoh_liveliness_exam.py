@@ -43,13 +43,14 @@ OK_SCENARIOS = (
     "default-configuration-unchanged",
 )
 
-# (name, bytes the session wrote). Each frame is written by a session built for its scenario, so its sequence
-# number is ANSWERER_SN plus the frames that session sent before it.
+# (name, bytes the session wrote). Each frame is written by a session built for its scenario with initial number
+# ANSWERER_SN, so its sequence number is ANSWERER_SN plus the frames that session sent before it. A token enters the
+# table only through `send_declare_token`, which sends a frame, so each declaration and each withdrawal counts.
 FRAMES = (
     (
         "answer-current-interest-7",
         zenoh_wire.frame(
-            ANSWERER_SN,
+            ANSWERER_SN + 2,  # after the declarations of tokens 1 and 2
             zenoh_wire.declare_token(1, KEY, True, 7),
             zenoh_wire.declare_token(2, KEY_SECOND, True, 7),
             zenoh_wire.declare_final(7),
@@ -58,7 +59,7 @@ FRAMES = (
     (
         "answer-current-future-interest-8",
         zenoh_wire.frame(
-            ANSWERER_SN,
+            ANSWERER_SN + 2,  # after the declarations of tokens 1 and 2
             zenoh_wire.declare_token(1, KEY, True, 8),
             zenoh_wire.declare_token(2, KEY_SECOND, True, 8),
             zenoh_wire.declare_final(8),
@@ -67,7 +68,11 @@ FRAMES = (
     ("answer-empty-interest-9", zenoh_wire.frame(ANSWERER_SN, zenoh_wire.declare_final(9)).hex()),
     (
         "answer-after-withdrawal-interest-10",
-        zenoh_wire.frame(ANSWERER_SN, zenoh_wire.declare_token(2, KEY_SECOND, True, 10), zenoh_wire.declare_final(10)).hex(),
+        zenoh_wire.frame(
+            ANSWERER_SN + 3,  # after the declarations of tokens 1 and 2 and the withdrawal of token 1
+            zenoh_wire.declare_token(2, KEY_SECOND, True, 10),
+            zenoh_wire.declare_final(10),
+        ).hex(),
     ),
 )
 
