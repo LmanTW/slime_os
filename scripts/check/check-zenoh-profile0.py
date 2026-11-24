@@ -3719,7 +3719,7 @@ def service_four_main(controls_only: bool) -> int:
     return 0
 
 
-SERVICE_FAULT_CONTROLS = 57
+SERVICE_FAULT_CONTROLS = 66
 FAULT_LINE = re.compile(r"^\[(?:zenoh-service|zenoh-peer|victim|zenoh-supervisor)\] ")
 
 

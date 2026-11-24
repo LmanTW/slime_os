@@ -41,13 +41,13 @@ item :: s.Item = (h.task "01a20cf3-fcd2-743e-b929-8a638498d10b" "zenoh-service-f
         "`alpha` attaches after the reclaim and publishes four samples. Each reaches 2 holders, the rows of `beta` and `victim`. `beta` is delivered all four. The peer receives each once. `beta` is refused once. The supervisor reads an exit status 0 from every survivor."
         { "zenoh_service_fault_check"; };
       h.req "controls-are-refused"
-        "The judge refuses 57 inputs. 15 remove one declaration from a synthetic file set. 42 corrupt an honest transcript."
+        "The judge refuses 66 inputs. 20 remove one declaration from a synthetic file set. 46 corrupt an honest transcript."
         { "zenoh_service_fault_check"; };
     };
     acceptance = {
       h.observedWhere "zenoh_service_fault_check" {
-        h.count "casesObserved" 24;
-        h.count "negativeControlsRefused" 57;
+        h.count "casesObserved" 29;
+        h.count "negativeControlsRefused" 66;
       };
     };
     decisions = {

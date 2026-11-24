@@ -49,8 +49,18 @@ REACHED = 2
 FACTS: tuple[facts.Fact, ...] = (
     ("spec-name", SPEC, rf'^\s*name = "{SYSTEM}";$', f'  name = "{SYSTEM}";'),
     ("spec-generation", SPEC, rf"^\s*generation = {GENERATION};$", f"  generation = {GENERATION};"),
-    ("spec-supervisor", SPEC, r'\bname = "zenoh-supervisor"; executable = "zenoh-supervisor";',
+    ("spec-supervisor", SPEC, r'\bname = "zenoh-supervisor"; executable = "zenoh-supervisor"; dependencies = \[\]; \};',
      '    { name = "zenoh-supervisor"; executable = "zenoh-supervisor"; dependencies = []; };'),
+    ("spec-owner-network", SPEC, r'\bname = "network-service"; executable = "network-service"; dependencies = \[\]; owner = "zenoh-supervisor";',
+     '    { name = "network-service"; executable = "network-service"; dependencies = []; owner = "zenoh-supervisor"; };'),
+    ("spec-owner-service", SPEC, r'\bname = "zenoh-service"; executable = "zenoh-service"; dependencies = \[\]; owner = "zenoh-supervisor";',
+     '    { name = "zenoh-service"; executable = "zenoh-service"; dependencies = []; owner = "zenoh-supervisor"; };'),
+    ("spec-owner-peer", SPEC, r'\bname = "zenoh-peer"; executable = "zenoh-peer"; dependencies = \[\]; owner = "zenoh-supervisor";',
+     '    { name = "zenoh-peer"; executable = "zenoh-peer"; dependencies = []; owner = "zenoh-supervisor"; };'),
+    ("spec-owner-alpha", SPEC, r'\bname = "alpha"; executable = "zenoh-holder-publisher"; dependencies = \[\]; owner = "zenoh-supervisor";',
+     '    { name = "alpha"; executable = "zenoh-holder-publisher"; dependencies = []; owner = "zenoh-supervisor"; };'),
+    ("spec-owner-beta", SPEC, r'\bname = "beta"; executable = "zenoh-holder-subscriber"; dependencies = \[\]; owner = "zenoh-supervisor";',
+     '    { name = "beta"; executable = "zenoh-holder-subscriber"; dependencies = []; owner = "zenoh-supervisor"; };'),
     ("spec-victim", SPEC, r'\bname = "victim"; executable = "zenoh-holder-fault"; dependencies = \[\]; owner = "zenoh-supervisor";',
      '    { name = "victim"; executable = "zenoh-holder-fault"; dependencies = []; owner = "zenoh-supervisor"; };'),
     ("spec-supervision", SPEC, r'\{ name = "victim-supervision"; owner = "zenoh-supervisor"; holder = "zenoh-service"; capabilityKind = "supervision";',
@@ -178,6 +188,7 @@ def judge_survivors(service: list[str]) -> tuple[int, int]:
             delivered[sequence].add(holder)
         elif m := arm.DENIAL.fullmatch(line):
             _need(m.group(1) == "not-granted" and m.group(3) == "1", f"{SERVICE}: a denial that is not a single not-granted refusal: {line!r}")
+            _need(m.group(2) == "beta", f"{SERVICE}: the denial names {m.group(2)}, and only beta asks to publish on a row it may not")
             _need(m.group(2) in attached and m.group(2) not in detached, f"{SERVICE}: a denial for {m.group(2)}, which has no session")
             denials += 1
         elif m := arm.DETACHED.fullmatch(line):
@@ -211,6 +222,10 @@ def judge(lines: list[str]) -> tuple[int, int, int]:
     _need(position[attached[0]] < index[VICTIM_LINE] < index[TERMINATED], "the victim's fault is not between its attach and the supervisor's read of it")
     _need(index[TERMINATED] < position[reclaimed[0]], "the service reclaimed the victim before the supervisor read its fault")
 
+    # `alpha` attaches after the reclaim. It publishes only once attached, so every publication follows the death.
+    alpha_attached = [i for i, line in enumerate(service) if (m := SERVICE_ATTACHED.fullmatch(line)) and m.group(1) == "alpha"]
+    _need(len(alpha_attached) == 1, f"{SERVICE}: alpha attached {len(alpha_attached)} times")
+    _need(reclaimed[0] < alpha_attached[0], f"{SERVICE}: alpha attached before the victim was reclaimed")
     for line in service:
         if (m := arm.PUBLISHED.fullmatch(line)):
             _need(int(m.group(4)) == REACHED, f"{SERVICE}: a publication reached {m.group(4)} holders, the core counts {REACHED} rows")
@@ -224,6 +239,21 @@ def judge(lines: list[str]) -> tuple[int, int, int]:
     _need(others_in_peer == [PEER_LINES[0], PEER_LINES[1], PEER_LINES[2]], f"{PEER}: lines that are not the exam's: {others_in_peer}")
     _need(lines[-1] == SURVIVED, "the supervisor's report of the survivors is not the last line")
     return published, refusals, len(received)
+
+
+def _alpha_early(good: list[str]) -> list[str]:
+    """`alpha` attaches between the victim's attach and its fault."""
+    line = f"[{SERVICE}] holder attached holder=alpha rows=1"
+    rest = [x for x in good if x != line]
+    return [*rest[:3], line, *rest[3:]]
+
+
+def _exchange_early(good: list[str]) -> list[str]:
+    """The attach of `alpha`, every publication, delivery and peer receipt come before the victim's fault."""
+    attach = f"[{SERVICE}] holder attached holder=alpha rows=1"
+    moved = [attach] + [x for x in good if "published holder=alpha" in x or "delivered holder=beta" in x or "received sequence=" in x]
+    rest = [x for x in good if x not in moved]
+    return [*rest[:3], *moved, *rest[3:]]
 
 
 def mutations() -> list[tuple[str, list[str]]]:
@@ -248,6 +278,10 @@ def mutations() -> list[tuple[str, list[str]]]:
         ("the reclaim before the victim attached", [good[0], good[5], *good[1:5], *good[6:]]),
         ("a publication before the reclaim", [*good[:5], good[first_publication], *good[5:first_publication], *good[first_publication + 1 :]]),
         ("a peer sample with the wrong payload", [line.replace("first=1", "first=7") for line in good]),
+        ("alpha attached before the victim's fault", _alpha_early(good)),
+        ("the whole exchange before the victim's fault", _exchange_early(good)),
+        ("the denial naming the victim", [line.replace("holder=beta refused=1", f"holder={VICTIM} refused=1") for line in good]),
+        ("the denial naming alpha", [line.replace("holder=beta refused=1", "holder=alpha refused=1") for line in good]),
         ("a second denial", [*good[:-4], f"[{SERVICE}] denial class=not-granted holder=beta refused=1", *good[-4:]]),
         ("the supervisor's report before the peer closed", [*good[:-2], good[-1], good[-2]]),
     ]
