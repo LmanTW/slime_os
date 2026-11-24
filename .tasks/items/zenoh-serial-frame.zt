@@ -51,7 +51,7 @@ item :: s.Item = (h.task "01a20dc1-d977-7470-98cf-3175b7529a16" "zenoh-serial-fr
         { "writes-the-stock-frame"; "reads-and-refuses-as-the-stock-reader"; };
       h.decided "the-exam-pins-the-writers-bound"
         "The exam holds a data length of 1500 bytes, the stock writer's `MAX_MTU`, for both directions."
-        "the stock reader decodes frames of 1501 to 1512 data bytes, because it bounds only the wire at 1516 bytes. A reader that is stricter than the stock reader is safe, and the stock writer never sends those frames"
+        "the stock decoder takes frames of 1501 to 1512 data bytes. The stock read loop stops after 1516 wire bytes, so it never delivers a frame of more than 1508 data bytes. A reader that is stricter than the stock reader is safe, and the stock writer never sends those frames"
         h.agentDefault
         { "refuses-over-1500-bytes"; };
       h.decided "no-length-prefix-on-a-serial-link"
