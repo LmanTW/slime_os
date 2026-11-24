@@ -13,7 +13,6 @@ test = false
 
 [dependencies]
 boot-contracts = { path = "../../../boot-contracts" }
-slime-components = { path = "../../lib" }
 slime-rt = { path = "../../runtime" }
 
 [build-dependencies]
