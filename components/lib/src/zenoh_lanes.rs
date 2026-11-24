@@ -1,6 +1,8 @@
 //! Host tests for a heap link that holds several reassembly runs: which heap cell each run is joined into, and
 //! what a tick reports while a best-effort run is late.
 
+mod exam;
+
 use crate::zenoh_link::{ByteLink, Error, LinkError, LinkHandle, LinkOf, Notice};
 use crate::zenoh_profile0::fragment::tests as codec;
 use crate::zenoh_profile0::limits::HEAP;
@@ -371,4 +373,10 @@ fn a_new_message_never_takes_the_cell_of_a_sample_the_owner_has_not_read() {
             "message {index} is intact"
         );
     }
+}
+
+/// Prints the lanes exam: the lines `scripts/lib/zenoh_lanes_exam.py` judges.
+#[test]
+fn the_lanes_exam() {
+    exam::run();
 }

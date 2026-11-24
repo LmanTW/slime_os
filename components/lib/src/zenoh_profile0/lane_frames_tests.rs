@@ -1366,3 +1366,57 @@ fn late_best_effort_runs_are_released_when_the_events_have_room_for_one_report()
         assert_eq!(spell(events.events.iter()), ["drop discarded"]);
     }
 }
+
+/// One best-effort FRAGMENT of priority 2 with the given number: the number is a LEB128 value, so it may exceed a byte.
+fn edge_fragment(sn: u32, more: bool) -> Vec<u8> {
+    let mut body = std::vec![0x06 | if more { 0x40 } else { 0 } | 0x80];
+    let mut rest = sn;
+    loop {
+        let byte = (rest & 0x7f) as u8;
+        rest >>= 7;
+        if rest == 0 {
+            body.push(byte);
+            break;
+        }
+        body.push(byte | 0x80);
+    }
+    body.extend_from_slice(&[0x31, 2, 1, 2, 3]);
+    body
+}
+
+#[test]
+fn a_best_effort_fragment_is_ahead_up_to_half_the_range_and_stale_from_there() {
+    // Upstream measures from the last number taken, so a number is ahead by 1 to 2^31 - 1 of it. The count held
+    // here is one more, so the last number ahead is `next + 2^31 - 2` and the first stale one is `next + 2^31 - 1`.
+    let half = 1u32 << 31;
+    for (offset, ahead) in [
+        (0, true),
+        (1, true),
+        (half - 2, true),
+        (half - 1, false),
+        (half, false),
+    ] {
+        let (_, mut receiver) = heap_pair();
+        let mut cells = Cells::new();
+        let lane = best_effort(2);
+        let sn = receiver.lane_next(lane).wrapping_add(offset);
+        let events = best_effort_in(&mut receiver, &mut cells, &edge_fragment(sn, true), 10)
+            .expect("a best-effort fragment is never refused for its number");
+        assert_eq!(receiver.reassembling(), ahead, "offset {offset}");
+        assert_eq!(
+            events,
+            if ahead {
+                Vec::new()
+            } else {
+                ["drop stale-sequence"].to_vec()
+            },
+            "offset {offset}"
+        );
+        let counted = if ahead {
+            sn.wrapping_add(1)
+        } else {
+            sn.wrapping_sub(offset)
+        };
+        assert_eq!(receiver.lane_next(lane), counted, "offset {offset}");
+    }
+}

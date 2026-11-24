@@ -12,7 +12,7 @@
 use crate::zenoh_profile0::encode::{self, EncodeError};
 use crate::zenoh_profile0::lane::{Lane, peek_fragment_lane};
 use crate::zenoh_profile0::session::{
-    Config, Event, MAX_EVENTS, Outcome, Params, Role, SessionError, SessionOf, State,
+    Config, DropCause, Event, MAX_EVENTS, Outcome, Params, Role, SessionError, SessionOf, State,
 };
 use crate::zenoh_profile0::{
     MAX_BATCH_BYTES, MAX_KEY_BYTES, MAX_PAYLOAD_BYTES, Refusal, STREAM_LENGTH_BYTES, StreamFramerOf,
@@ -222,6 +222,12 @@ pub struct LinkOf<
     cell_next: usize,
     /// How many queued notices hold a stored sample, each of which occupies one heap cell.
     stored: usize,
+    /// The best-effort drops the session reported and the owner has not taken, oldest first, and how many arrived
+    /// with no room to hold them. A drop is a count for the owner and not a notice, so it never takes a slot a
+    /// sample needs.
+    drops: [Option<(u8, DropCause)>; E],
+    drops_held: usize,
+    drops_lost: u32,
     /// The heap cell each open run of the session is joined into, valid while the run is open.
     run_cell: [usize; R],
     /// The cell the fragment being applied is joined into, which a completed message is stored in.
@@ -316,6 +322,9 @@ impl<
             notice_len: 0,
             cell_next: 0,
             stored: 0,
+            drops: [None; E],
+            drops_held: 0,
+            drops_lost: 0,
             run_cell: [0; R],
             fragment_cell: 0,
             tap_sent: Tap::new(),
@@ -377,6 +386,34 @@ impl<
             self.stored -= 1;
         }
         notice
+    }
+
+    /// The oldest best-effort drop the owner has not taken: the priority of the lane and why it dropped. A link
+    /// holds as many as its session reports in one batch. One that arrives with no room is counted by
+    /// [`drops_lost`](Self::drops_lost) and not kept, so the owner takes them after each pump.
+    pub fn take_drop(&mut self) -> Option<(u8, DropCause)> {
+        if self.drops_held == 0 {
+            return None;
+        }
+        let first = self.drops.get_mut(0)?.take();
+        self.drops.rotate_left(1);
+        self.drops_held -= 1;
+        first
+    }
+
+    /// How many drops arrived while the link already held as many as its session reports in one batch.
+    pub const fn drops_lost(&self) -> u32 {
+        self.drops_lost
+    }
+
+    fn note_drop(&mut self, priority: u8, cause: DropCause) {
+        match self.drops.get_mut(self.drops_held) {
+            Some(slot) => {
+                *slot = Some((priority, cause));
+                self.drops_held += 1;
+            }
+            None => self.drops_lost = self.drops_lost.saturating_add(1),
+        }
     }
 
     fn check(&self, handle: LinkHandle) -> Result<(), Error> {
@@ -596,8 +633,10 @@ impl<
                 Event::SubscriberDeclared { id } => Notice::SubscriberDeclared { id },
                 Event::SubscriberUndeclared { id } => Notice::SubscriberUndeclared { id },
                 Event::Closed { reason } => Notice::Closed { reason },
-                // A drop is the session's report. The owner has no notice for it yet.
-                Event::Dropped { .. } => continue,
+                Event::Dropped { priority, cause } => {
+                    self.note_drop(priority, cause);
+                    continue;
+                }
                 Event::SampleStored {
                     sequence,
                     timestamp,
