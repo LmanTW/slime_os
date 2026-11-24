@@ -5,6 +5,7 @@ item :: s.Item = (h.task "01a20b81-3467-7544-99d3-b431af5d2a89" "zenoh-rmw-disco
   "Repair the discover checker so a log line on the stdout of ros2 is not read as a node or topic name"
   "The first live run of `zenoh_rmw_discover_check` listed `/slime_node`, then failed. `ros2 node list` wrote a zenoh warning line to stdout before its list, and the checker read that line as a node name. A run against a bare router printed no such line in three attempts, so the line is intermittent.")
   with {
+    intent = #active;
     depends = { "01a2095e-8c5f-717f-af72-60abb7f7ed80"; };
     owns = {
       "scripts/check/check-zenoh-profile0.py";
