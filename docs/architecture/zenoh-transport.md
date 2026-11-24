@@ -68,7 +68,10 @@ A value over `0x1F` is `malformed-message`, and an extension other than the opti
 `unsupported-extension`. Congestion control is the one part of the value the link acts on, through
 `Link::publish_qos`: with the send slot busy, a Block publication is refused as `SendBusy` and any
 other is discarded and counted by `Link::dropped`, and a discarded publication builds no frame, so
-the session spends no sequence number. `Link::publish` keeps refusing every publication on a busy
+the session spends no sequence number. A Put the link could never send, one that needs fragments,
+or that the session refuses for its key, attachment or size, or that arrives before the session is
+open, is refused with the class `Link::publish` gives it and is not counted, whether the slot is
+busy or not. `Link::publish` keeps refusing every publication on a busy
 slot. The link keeps one send slot, so a discarded publication is lost and not queued. Priority does
 not order anything and an express message is batched like any other. The `Put` and the `FRAME` and
 `FRAGMENT` headers still refuse the extension.
