@@ -5,7 +5,7 @@ item :: s.Item = (h.task "01a208f9-4f69-7010-9168-da35c062b3e9" "zenoh-qos-wire"
   "Zenoh Profile 0 PUSH carries priority, congestion control and express"
   "The Profile 0 decoder reads the network QoS extension on an OAM and on a DECLARE, checks it is at most 0x1F and discards it. It refuses the extension on a PUSH as unsupported-extension, and its encoder never writes one. A publisher therefore cannot state a priority, choose between dropping and blocking under congestion, or mark a sample express, and a stock peer's PUSH that carries one is refused. eclipse-zenoh 1.0.0 writes the value in one byte of a Z64 extension, priority in bits 0 to 2, Block in bit 3 and express in bit 4, and leaves the extension out when the value is the PUSH default (priority 5, drop, not express). The change: a PUSH carries and keeps that value, the encoder writes it as upstream does, and the decoder reads it back. Scheduling by priority, dropping under congestion, unbatched express sends and best-effort frames are separate items that build on this one.")
   with {
-    intent = #planned;
+    intent = #active;
     supersedes = { "01a1b49c-abf1-7139-b388-c6f26fe240c7"; };
     owns = {
       "components/lib/src/zenoh_profile0*";

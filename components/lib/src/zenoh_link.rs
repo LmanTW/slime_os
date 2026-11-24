@@ -10,6 +10,7 @@
 //! a new link under the next generation, cannot be driven through an old handle.
 
 use crate::zenoh_profile0::encode::{self, EncodeError};
+use crate::zenoh_profile0::lane::{Lane, peek_fragment_lane};
 use crate::zenoh_profile0::session::{
     Config, Event, MAX_EVENTS, Outcome, Params, Role, SessionError, SessionOf, State,
 };
@@ -217,9 +218,14 @@ pub struct LinkOf<
     notices: [Option<Notice<P>>; Q],
     notice_head: usize,
     notice_len: usize,
-    /// The heap cell the next fragmented message is joined into, and how many queued notices hold one.
+    /// Where the search for a free heap cell begins: the cell after the one the last stored sample took.
     cell_next: usize,
+    /// How many queued notices hold a stored sample, each of which occupies one heap cell.
     stored: usize,
+    /// The heap cell each open run of the session is joined into, valid while the run is open.
+    run_cell: [usize; R],
+    /// The cell the fragment being applied is joined into, which a completed message is stored in.
+    fragment_cell: usize,
     /// The body of the last batch queued for send and of the last one received, for evidence.
     tap_sent: Tap<FRAMED>,
     tap_received: Tap<FRAMED>,
@@ -263,12 +269,25 @@ impl<
         Ok(self)
     }
 
-    /// A link in its generation, declared by `params`.
+    /// A link in its generation, declared by `params`, whose session holds one run.
     pub fn with_params(
         io: L,
         role: Role,
         config: &Config<'_>,
         params: Params,
+        generation: u32,
+    ) -> Result<Self, SessionError> {
+        Self::with_lanes(io, role, config, params, 1, generation)
+    }
+
+    /// A link in its generation, declared by `params`, whose session holds `runs` runs. `runs` must be `R`. A
+    /// link with 2 or more offers the QoS unit extension, and one whose peer offers it too takes the lanes.
+    pub fn with_lanes(
+        io: L,
+        role: Role,
+        config: &Config<'_>,
+        params: Params,
+        runs: usize,
         generation: u32,
     ) -> Result<Self, SessionError> {
         if params.bounds.batch + STREAM_LENGTH_BYTES != FRAMED {
@@ -284,7 +303,7 @@ impl<
         }
         Ok(Self {
             io,
-            session: SessionOf::with_params(role, config, params)?,
+            session: SessionOf::with_lanes(role, config, params, runs)?,
             framer: StreamFramerOf::new(),
             send: [0; FRAMED],
             send_len: 0,
@@ -297,6 +316,8 @@ impl<
             notice_len: 0,
             cell_next: 0,
             stored: 0,
+            run_cell: [0; R],
+            fragment_cell: 0,
             tap_sent: Tap::new(),
             tap_received: Tap::new(),
         })
@@ -536,9 +557,34 @@ impl<
         }
     }
 
-    /// Where the cell the next message goes into begins.
-    fn cell_start(&self, heap_len: usize) -> usize {
-        (self.cell_next % self.cells(heap_len)) * self.session.params().message_limit
+    /// Whether `cell` holds a message: an open run is joined into it, or a queued notice points into it.
+    fn cell_busy(&self, cell: usize) -> bool {
+        let limit = self.session.params().message_limit;
+        let run = (0..R).any(|slot| self.session.run_open(slot) && self.run_cell[slot] == cell);
+        // With one run, messages complete in the order their cells were taken, so the cell after the last one
+        // taken is free whenever a cell is. Only several runs can finish out of order, and they pay for the scan.
+        if R == 1 || self.stored == 0 {
+            return run;
+        }
+        run || (0..self.notice_len).any(|at| {
+            let held = self.notices[(self.notice_head + at) % Q];
+            matches!(held, Some(Notice::SampleStored(sample)) if limit != 0 && sample.start / limit == cell)
+        })
+    }
+
+    /// The first cell no message occupies, searching from the cell after the last stored sample's.
+    fn free_cell(&self, heap_len: usize) -> Option<usize> {
+        let cells = self.cells(heap_len);
+        (0..cells)
+            .map(|step| (self.cell_next + step) % cells)
+            .find(|cell| !self.cell_busy(*cell))
+    }
+
+    /// How many cells no message occupies: every cell, less one for each stored sample and one for each open run.
+    /// It reads two counters and the run table, so a pass over a long notice queue does not pay for it.
+    fn free_cells(&self, heap_len: usize) -> usize {
+        let open = (0..R).filter(|slot| self.session.run_open(*slot)).count();
+        self.cells(heap_len).saturating_sub(self.stored + open)
     }
 
     /// Turns a session's events into notices. A heap link keeps every sample in the heap the owner lent,
@@ -558,8 +604,10 @@ impl<
                     offset,
                     len,
                 } => {
-                    let start = self.cell_start(heap.len()) + offset;
-                    self.keep_cell();
+                    let cell = self.fragment_cell;
+                    let start = cell * self.session.params().message_limit + offset;
+                    self.cell_next = cell + 1;
+                    self.stored += 1;
                     Notice::SampleStored(StoredSample {
                         sequence,
                         timestamp,
@@ -573,12 +621,16 @@ impl<
                     payload,
                     ..
                 } if self.session.params().fragments => {
-                    let start = self.cell_start(heap.len());
+                    let Some(cell) = self.free_cell(heap.len()) else {
+                        continue;
+                    };
+                    let start = cell * self.session.params().message_limit;
                     let Some(room) = heap.get_mut(start..start + payload.len()) else {
                         continue;
                     };
                     room.copy_from_slice(payload);
-                    self.keep_cell();
+                    self.cell_next = cell + 1;
+                    self.stored += 1;
                     Notice::SampleStored(StoredSample {
                         sequence,
                         timestamp,
@@ -608,12 +660,6 @@ impl<
             };
             self.push_notice(notice);
         }
-    }
-
-    /// A sample now occupies the cell the next message would have gone into.
-    fn keep_cell(&mut self) {
-        self.stored += 1;
-        self.cell_next = self.cell_next.wrapping_add(1);
     }
 
     /// Ends the link after a stream or session refusal that makes the rest of the stream untrustworthy.
@@ -698,7 +744,11 @@ impl<
                 Ok(outcome) => outcome,
                 Err(error) => return Err(self.fail(Error::Session(error))),
             };
-            let ended = !outcome.events.is_empty();
+            // Only a CLOSE ends the link. A best-effort drop reported by the same tick does not.
+            let ended = outcome
+                .events
+                .iter()
+                .any(|event| matches!(event, Event::Closed { .. }));
             self.absorb(&outcome, &mut []);
             if outcome.sent != 0 {
                 let batch = outcome.batch(&body);
@@ -791,14 +841,24 @@ impl<
                 return Ok(());
             }
             let heap_mode = self.session.params().fragments;
-            // The first fragment of a run is the one that claims the cell the whole message is joined into,
-            // so it counts as a sample for room even though it yields none until the last arrives.
-            let starts_run = heap_mode
+            let fragment = heap_mode
                 && body
                     .first()
                     .copied()
-                    .is_some_and(crate::zenoh_profile0::fragment::is_fragment)
-                && !self.session.reassembling();
+                    .is_some_and(crate::zenoh_profile0::fragment::is_fragment);
+            // A session with lanes reads the lane a fragment names. Without them every fragment is on the default
+            // lane. The session names the slot the fragment takes, and the link owns the cell for that slot.
+            let by_lane = fragment && self.session.lanes();
+            let slot = if !fragment {
+                None
+            } else if by_lane {
+                peek_fragment_lane(body).and_then(|lane| self.session.run_slot(lane))
+            } else {
+                self.session.run_slot(Lane::DEFAULT)
+            };
+            // The first fragment of a run is the one that claims the cell the whole message is joined into,
+            // so it counts as a sample for room even though it yields none until the last arrives.
+            let starts_run = slot.is_some_and(|slot| !self.session.run_open(slot));
             let samples = if starts_run { samples.max(1) } else { samples };
             // A heap link keeps every sample in the heap it was lent, so a sample the heap cannot hold is
             // refused before the session applies it and moves its sequence number.
@@ -806,24 +866,43 @@ impl<
                 return Err(self.fail(Error::Session(SessionError::OutOfMemory)));
             }
             // A heap link waits for a free cell for every sample the batch can yield: each cell holds a
-            // sample the owner has not taken.
-            let cells_needed = if heap_mode { samples } else { 0 };
-            if self.stored + cells_needed > self.cells(heap.len()) {
+            // message in progress or a sample the owner has not taken. A fragment that continues a run has
+            // its cell already.
+            let cells_needed = if !heap_mode {
+                0
+            } else if fragment {
+                usize::from(starts_run)
+            } else {
+                samples
+            };
+            if self.free_cells(heap.len()) < cells_needed {
                 return Ok(());
             }
             self.tap_received.keep(body);
             let limit = self.session.params().message_limit;
-            let cell_start = self.cell_start(heap.len());
-            let cell_end = if limit == 0 {
-                0
+            let held = match slot {
+                Some(slot) if self.session.run_open(slot) => Some(self.run_cell[slot]),
+                Some(_) => self.free_cell(heap.len()),
+                None => None,
+            };
+            if let (Some(slot), Some(cell)) = (slot, held) {
+                self.run_cell[slot] = cell;
+            }
+            self.fragment_cell = held.unwrap_or(0);
+            let cell_start = held.map_or(0, |cell| cell * limit).min(heap.len());
+            let cell_end = if limit == 0 || held.is_none() {
+                cell_start
             } else {
                 (cell_start + limit).min(heap.len())
             };
-            let cell = heap
-                .get_mut(cell_start.min(heap.len())..cell_end)
-                .unwrap_or(&mut []);
+            let cell = heap.get_mut(cell_start..cell_end).unwrap_or(&mut []);
             let mut reply = [0u8; FRAMED];
-            let outcome = match self.session.on_batch_with(body, now_ms, &mut reply, cell) {
+            let applied = if by_lane {
+                self.session.on_lane_fragment(body, now_ms, cell)
+            } else {
+                self.session.on_batch_with(body, now_ms, &mut reply, cell)
+            };
+            let outcome = match applied {
                 Ok(outcome) => outcome,
                 Err(error) => return Err(self.fail(Error::Session(error))),
             };
