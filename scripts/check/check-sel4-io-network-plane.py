@@ -1485,6 +1485,38 @@ def run_zenoh_service_four_arm(transcript_path: Path | None) -> None:
     devloop_observations.record(casesObserved=samples + denials, negativeControlsRefused=controls)
 
 
+ZENOH_SERVICE_FAULT_CLOSURE = "sel4-zenoh-service-fault"
+ZENOH_SERVICE_FAULT_CHAINS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("zenoh-service-fault admission", (r"SLIME_ROOT generation admitted number=175 executables=\d+ instances=\d+ grants=\d+ ",)),
+    ("zenoh-service-fault victim", (
+        r"\[victim\] attached, faulting now",
+        r"\[zenoh-supervisor\] holder victim terminated cause=fault",
+    )),
+    ("zenoh-service-fault reclaim", (r"\[zenoh-service\] holder reclaimed holder=victim cause=dead",)),
+    ("zenoh-service-fault survivors", (
+        r"\[zenoh-service\] published holder=alpha row=0 sequence=3 reached=2 peer=(?:none|sent)",
+        r"\[zenoh-supervisor\] survivors exited cleanly",
+    )),
+)
+# A deliberate holder fault is the point of this composition, so the VM fault the root reports is not a failure here.
+ZENOH_SERVICE_FAULT_MARKERS = tuple(m for m in FAILURE_MARKERS if m != r"Caught vm fault")
+
+
+def run_zenoh_service_fault_arm(transcript_path: Path | None) -> None:
+    """Boot the Zenoh service with a holder that faults under a supervisor and print what the service said."""
+    image = build_image(ZENOH_SERVICE_FAULT_CLOSURE)
+    terminal = re.compile(ZENOH_SERVICE_FAULT_CHAINS[-1][1][-1] + "|" + "|".join(ZENOH_SERVICE_FAULT_MARKERS))
+    transcript = run_plane(image=image, timeout=TIMEOUT, terminal_condition=terminal, fail=fail, pins_path=PINS)
+    if transcript_path is not None:
+        transcript_path.write_text(transcript, encoding="utf-8")
+    try:
+        match_marker_contract(transcript, ZENOH_SERVICE_FAULT_CHAINS, ZENOH_SERVICE_FAULT_MARKERS, fail)
+    except SystemExit:
+        print(transcript)
+        raise
+    print("[zenoh-service-fault] chains matched")
+
+
 def run_zenoh_rmw_arm(transcript_path: Path | None) -> None:
     """Boot the rmw_zenoh node and its native peer over the network service's loopback and judge what they printed.
 
@@ -1765,7 +1797,7 @@ def run_http_public_arm(image: Path, transcript_path: Path | None) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Boot and check the seL4 I/O network proof planes")
     parser.add_argument("--no-build", action="store_true")
-    parser.add_argument("--arm", choices=("authority", "tcp", "local", "lifetime", "service-fault", "driver-reset", "tcp-impairment", "tcp-listener", "tcp-options", "tcp-buffers", "root-diagnostics", "root-console", "link-wake", "net", "zenoh", "zenoh-service", "zenoh-service-four", "zenoh-rmw", "zenoh-external", "http", "http-public", "all"), default="all")
+    parser.add_argument("--arm", choices=("authority", "tcp", "local", "lifetime", "service-fault", "driver-reset", "tcp-impairment", "tcp-listener", "tcp-options", "tcp-buffers", "root-diagnostics", "root-console", "link-wake", "net", "zenoh", "zenoh-service", "zenoh-service-four", "zenoh-service-fault", "zenoh-rmw", "zenoh-external", "http", "http-public", "all"), default="all")
     parser.add_argument("--controls-only", action="store_true", help="zenoh-external arm only: run the judges against their mutated evidence, without QEMU or a listener")
     parser.add_argument("--allow-public", action="store_true", help="explicitly authorize the opt-in public DNS/HTTP smoke")
     parser.add_argument("--http-case", choices=tuple(case.name for case in http_peer.cases()))
@@ -1975,6 +2007,9 @@ def main() -> None:
     if arguments.arm == "zenoh-service-four":
         run_zenoh_service_four_arm(arguments.transcript)
         print("seL4 zenoh service check: four holders exchanged samples through the shared service and the service refused the key a holder lacks")
+    if arguments.arm == "zenoh-service-fault":
+        run_zenoh_service_fault_arm(arguments.transcript)
+        print("zenoh profile 0 service-fault check: a holder faulted and the service reclaimed it")
     if arguments.arm == "zenoh-rmw" and arguments.controls_only:
         try:
             refused = zenoh_rmw_arm.controls()

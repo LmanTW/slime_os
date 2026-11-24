@@ -1,0 +1,82 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a20cf3-fcd2-743e-b929-8a638498d10b" "zenoh-service-fault" "zenoh-service-core"
+  "A booted composition shows the Zenoh service reclaiming a holder that faults"
+  "The Zenoh service polls a supervision handle for each holder and reclaims a holder whose task the root reports dead. A host test replays that on the server half and the roster. No boot has a holder that faults. A supervision handle must come from the owner of the holder. Every Zenoh composition gives its holders the owner `root`, so none of them can declare one.")
+  with {
+    owns = {
+      "components/applications/zenoh-supervisor/**";
+      "components/applications/zenoh-holder-fault/**";
+      "contracts/component-spec/v1/components/zenoh-supervisor.zti";
+      "contracts/component-spec/v1/components/zenoh-holder-fault.zti";
+      "contracts/system-spec/v1/systems/sel4-zenoh-service-fault.zti";
+      "contracts/generation-manifest/v1/compositions/sel4-zenoh-service-fault.zti";
+      "contracts/composition-inventory/v1/inventory.zti";
+      "contracts/system-image-closure/v3/closures/sel4-zenoh-service-fault.zti";
+      "contracts/system-test-run/v2/runs/sel4-zenoh-service-fault.zti";
+      "scripts/generate/generate-system-test-runs.py";
+      "Cargo.toml";
+      "Cargo.lock";
+    };
+    nonGoals = {
+      h.nonGoal "A fault during an exchange. The supervisor spawns `alpha` after it has read the victim's fault, so the service reclaims the holder before the first publication." h.agentDefault;
+      h.nonGoal "A fault of another kind than a null write, a holder that exits with a status, and a holder that never detaches. The roster's expiry is graded on the host only." h.agentDefault;
+      h.nonGoal "A change to the service, the roster, the server half or the existing judges. The service already reads `<holder>-supervision` and reclaims on a death." h.agentDefault;
+      h.nonGoal "The reach of a publication after a death. The core counts rows and not sessions, so the reach stays 2 and the judge pins that count." h.agentDefault;
+      h.nonGoal "The release of the reclaimed holder's loans, ring and data page. The root reclaims the victim's task, and this item grades what the service prints." h.agentDefault;
+      h.nonGoal "A restart of the victim. The composition declares none." h.agentDefault;
+    };
+    requirements = {
+      h.req "the-composition-gives-the-service-a-handle"
+        "The system spec of `sel4-zenoh-service-fault` (generation 175) declares the instance `zenoh-supervisor`, owned by `root`. It declares the instances `victim`, `alpha`, `beta`, `zenoh-service` and `zenoh-peer`, owned by the supervisor. It declares the minted binding `victim-supervision`, owned by the supervisor and held by the service."
+        { "zenoh_service_fault_check"; };
+      h.req "the-victim-attaches-then-faults"
+        "`victim` attaches to the service with one subscribe row and writes through a null pointer. The supervisor reads a fault from its handle and prints that line before the service prints the reclaim."
+        { "zenoh_service_fault_check"; };
+      h.req "the-service-reclaims-the-victim-once"
+        "The service prints `holder reclaimed holder=victim cause=dead` once, after the victim attached and after the supervisor's line. The victim is never delivered a sample and never prints a detach."
+        { "zenoh_service_fault_check"; };
+      h.req "the-survivors-exchange-after-the-death"
+        "`alpha` attaches after the reclaim and publishes four samples. Each reaches 2 holders, the rows of `beta` and `victim`. `beta` is delivered all four. The peer receives each once. `beta` is refused once. The supervisor reads an exit status 0 from every survivor."
+        { "zenoh_service_fault_check"; };
+      h.req "controls-are-refused"
+        "The judge refuses 57 inputs. 15 remove one declaration from a synthetic file set. 42 corrupt an honest transcript."
+        { "zenoh_service_fault_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_service_fault_check" {
+        h.count "casesObserved" 24;
+        h.count "negativeControlsRefused" 57;
+      };
+    };
+    decisions = {
+      h.decided "a-supervisor-owns-the-holders"
+        "A new component `zenoh-supervisor` owns the holders, the service and the peer. It spawns them and gives the service a derived supervision handle for `victim`."
+        "the builder requires the owner of a holder to mint its supervision binding. `root` is not an instance a binding can name. `sel4-io-lifetime` uses the same shape"
+        h.agentDefault
+        { "the-composition-gives-the-service-a-handle"; };
+      h.decided "alpha-is-spawned-after-the-fault"
+        "The supervisor spawns `alpha` after it has read the victim's fault."
+        "the service then sees the death before any publication, so the reach and the order of lines do not depend on the scheduler. A publication that races the death is a different composition"
+        h.agentDefault
+        { "the-victim-attaches-then-faults"; "the-survivors-exchange-after-the-death"; };
+      h.decided "the-reach-counts-rows"
+        "The judge pins `reached=2` for each publication."
+        "the core counts every holder with a subscribe row on the key, whatever its session, and the roster exam states it. A boot that printed 1 would show a change to the core"
+        h.agentDefault
+        { "the-survivors-exchange-after-the-death"; };
+      h.decided "the-fault-arm-allows-the-vm-fault"
+        "The arm `zenoh-service-fault` drops the failure marker `Caught vm fault`, and keeps every other failure marker."
+        "the victim faults on purpose, and the root prints that marker for it. The arm still fails on `SLIME_ROOT FATAL`, on a component's own failure line and on a panic"
+        h.agentDefault
+        { "the-victim-attaches-then-faults"; };
+      h.decided "the-service-is-built-for-three-holders-here"
+        "The system spec declares limits of 3 holders and 3 grant rows for this composition. The component is built for 4 holders and 6 rows and serves a table below that."
+        "the composition holds the three holders the exam needs. The component refuses a table above its build size and serves one below it"
+        h.agentDefault
+        { "the-composition-gives-the-service-a-handle"; };
+    };
+  };
+
+item
