@@ -5,7 +5,9 @@ the link's one send slot holds a batch, whatever the value says. The change adds
 
 * Drop, with the slot busy, discards the publication, counts it in `Link::dropped` and returns `Dropped`.
   It builds no frame, so the session spends no sequence number and the next frame follows the last one sent.
-* Block, with the slot busy, returns `SendBusy` as today. The stall count and `RetryLimit` are unchanged.
+* Block, with the slot busy, returns `SendBusy` as today. It leaves the stall count alone: against a peer that
+  accepts nothing, the link ends with `RetryLimit` on the pump that follows `MAX_RETRIES` stalled ones, with
+  refused Block publications between the pumps.
 * With the slot free both queue the frame the host reference `zenoh_wire.push_put_qos` writes.
 
 The Rust tests under `zenoh_congestion::` print one `[zenoh-exam] congestion ...` line for each thing they
@@ -48,12 +50,16 @@ COUNTS = (
     ("after-three-drops", 3),
     ("block-leaves-the-count", 3),
     ("after-the-flush-and-a-send", 3),
+    # The pump on which a link that stalls reports RetryLimit, one past MAX_RETRIES (3), with a Block
+    # publication refused between every two pumps.
+    ("retry-limit-on-pump", 4),
 )
 
 REFUSED_SCENARIOS = (
     ("block-on-a-busy-slot", "send-busy"),
     ("drop-after-close", "send-after-close"),
     ("stale-handle", "stale-handle"),
+    ("block-stalled-past-the-limit", "retry-limit"),
 )
 
 SHAPES = {
@@ -198,5 +204,5 @@ def all_controls() -> int:
 
 
 # Held here as well as in the item, so the gate stays correct once the item is retired. Both are exact.
-PINNED_CASES = 15
-PINNED_CONTROLS = 45
+PINNED_CASES = 17
+PINNED_CONTROLS = 50

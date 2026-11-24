@@ -26,7 +26,7 @@ item :: s.Item = (h.task "01a20d1f-2dcf-742f-ba3b-fe1fce39d685" "zenoh-qos-conge
         "With the send slot busy, publish_qos of a Qos that is not Block returns Dropped, queues nothing and adds one to Link::dropped. It builds no frame, so the session spends no sequence number: the next frame that is sent carries the number that follows the last one sent. The count after one drop is 1 and after three is 3."
         { "zenoh_congestion_check"; };
       h.req "block-keeps-send-busy"
-        "With the send slot busy, publish_qos of a Block Qos returns SendBusy, queues nothing and leaves Link::dropped as it was. It sends the frame once the slot is free. The retry count and RetryLimit behave as today."
+        "With the send slot busy, publish_qos of a Block Qos returns SendBusy, queues nothing and leaves Link::dropped as it was. It sends the frame once the slot is free. It leaves the stall count alone: a link whose peer accepts nothing reports RetryLimit on the fourth stalled pump, MAX_RETRIES (3) plus one, with a refused Block publication between every two pumps. The exam observes that pump as the count retry-limit-on-pump and the refusal block-stalled-past-the-limit."
         { "zenoh_congestion_check"; };
       h.req "free-slot-sends-the-host-reference-frame"
         "With the slot free, publish_qos queues the frame the host reference zenoh_wire.push_put_qos writes, byte for byte: no extension for the default QoS, and the extension for a Block one. The exam compares two frames, one before and one after three drops."
@@ -35,13 +35,13 @@ item :: s.Item = (h.task "01a20d1f-2dcf-742f-ba3b-fe1fce39d685" "zenoh-qos-conge
         "publish_qos refuses a publication after the link is closed as send-after-close and one through a handle from an earlier link generation as stale-handle, as publish does. Each refusal is reported by name and class."
         { "zenoh_congestion_check"; };
       h.req "judge-refuses-corruption"
-        "The judge refuses 45 corrupted transcripts of an honest run: a dropped, duplicated, reordered or unrecognised line, a frame with one digit changed, in capitals or with its sequence number moved by one, a count one over or under, and a refusal with another class."
+        "The judge refuses 50 corrupted transcripts of an honest run: a dropped, duplicated, reordered or unrecognised line, a frame with one digit changed, in capitals or with its sequence number moved by one, a count one over or under, including the pump that reports RetryLimit, and a refusal with another class."
         { "zenoh_congestion_check"; };
     };
     acceptance = {
       h.observedWhere "zenoh_congestion_check" {
-        h.count "casesObserved" 15;
-        h.count "negativeControlsRefused" 45;
+        h.count "casesObserved" 17;
+        h.count "negativeControlsRefused" 50;
       };
     };
     decisions = {
