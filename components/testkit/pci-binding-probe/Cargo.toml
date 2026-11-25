@@ -1,0 +1,21 @@
+[package]
+name = "slime-component-pci-binding-probe"
+version = "0.1.0"
+edition = "2024"
+publish = false
+rust-version = "1.96"
+build = "build.rs"
+
+[[bin]]
+name = "pci-binding-probe"
+path = "src/main.rs"
+test = false
+
+[dependencies]
+slime-rt = { path = "../../runtime" }
+
+[build-dependencies]
+slime-build-support = { path = "../../build-support" }
+
+[lints]
+workspace = true

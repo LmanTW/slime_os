@@ -1,0 +1,25 @@
+{
+  formatVersion = 1;
+  name = "pci-binding-probe";
+  componentType = "service";
+  version = "1.0.0";
+  owner = "root";
+  purpose = "Proves one declared PCI function reaches a supervised driver as BAR 0 MMIO and an INTx source, bounded by the BAR, across a fault and a fresh epoch.";
+  implementation = { provider = "workspace"; binary = "pci-binding-probe"; contentHash = ""; };
+  provides = [];
+  requires = [ "device"; "interruptSource"; "mmioRegion"; ];
+  interfaces = [];
+  dependencies = [];
+  communication = { semantic = "none"; qos = []; };
+  configuration = [];
+  lifecycle = [ "Initialize"; "Start"; "Ready"; "Running"; "Error"; ];
+  runtime = {
+    executionEnvironment = "aarch64-sel4-qemu-virt";
+    resource = { stackBytes = 16384; spawnBudget = 0; extraThreads = 0; bufferBytePages = 0; bufferCount = 0; mappingCount = 0; loanCount = 0; privatePageQuota = 0; };
+    devices = [ "device"; ];
+  };
+  health = "required";
+  lifetime = "bounded";
+  compatibility = { platform = "aarch64-sel4-qemu-virt"; interface = "contracts/interface-schema/v1"; dependency = "none"; resource = "atMost"; runtime = "exact"; qos = "none"; };
+  test = { testCondition = "the io_pci_binding_check gate boots the PCI binding composition"; expectedResult = "the worker maps BAR 0 whole, reads the xHCI capability words the device holds, is refused one granule past the BAR, and binds again at epoch 2 after its fault"; passFailCriteria = "pci binding plane complete"; requiredTestEnvironment = "io_pci_binding_check"; };
+}

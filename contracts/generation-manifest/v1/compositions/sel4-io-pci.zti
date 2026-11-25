@@ -1,0 +1,239 @@
+{
+  bootAction = "wait-set";
+  bootstrapInstance = "init";
+  executables = [
+    {
+      commandProfile = [];
+      name = "init";
+      object = "sha256:init";
+      role = "init";
+      spawnBudget = 0;
+    };
+    {
+      commandProfile = [];
+      name = "pci-binding-probe";
+      object = "sha256:pci-binding-probe";
+      role = "service";
+      spawnBudget = 2;
+    };
+    {
+      commandProfile = [];
+      name = "pci-intruder";
+      object = "sha256:pci-intruder";
+      role = "application";
+      spawnBudget = 0;
+    };
+  ];
+  formatVersion = 1;
+  generation = 176;
+  grants = [
+    {
+      name = "pci-device";
+      capabilityKind = "device";
+      rights = [
+        "mapMmio";
+      ];
+      source = "pci-supervisor";
+      target = "pci-worker";
+      transferable = false;
+    };
+    {
+      name = "pci-irq";
+      capabilityKind = "interruptSource";
+      rights = [
+        "irqAck";
+      ];
+      source = "pci-supervisor";
+      target = "pci-worker";
+      transferable = false;
+    };
+    {
+      name = "pci-mmio";
+      capabilityKind = "mmioRegion";
+      rights = [
+        "mapMmio";
+      ];
+      source = "pci-supervisor";
+      target = "pci-worker";
+      transferable = false;
+    };
+    {
+      name = "pci-worker-executable";
+      capabilityKind = "executable";
+      rights = [
+        "exec";
+        "spawn";
+      ];
+      source = "pci-supervisor";
+      target = "pci-binding-probe";
+      transferable = false;
+    };
+  ];
+  health = {
+    bootAttempts = 3;
+    requiredInstances = [
+      "init";
+      "pci-intruder";
+      "pci-supervisor";
+    ];
+  };
+  instances = [
+    {
+      autostart = true;
+      bindings = [];
+      dependencies = [];
+      executable = "init";
+      health = "required";
+      lifetime = "bounded";
+      name = "init";
+      owner = "root";
+    };
+    {
+      autostart = true;
+      bindings = [];
+      dependencies = [];
+      executable = "pci-intruder";
+      health = "required";
+      lifetime = "bounded";
+      name = "pci-intruder";
+      owner = "root";
+    };
+    {
+      autostart = true;
+      bindings = [
+        {
+          grant = "pci-device";
+        };
+        {
+          grant = "pci-irq";
+          slot = 3;
+          slotReason = "allocatorOrder";
+        };
+        {
+          grant = "pci-mmio";
+        };
+        {
+          grant = "pci-worker-executable";
+        };
+      ];
+      dependencies = [];
+      executable = "pci-binding-probe";
+      health = "required";
+      lifetime = "bounded";
+      name = "pci-supervisor";
+      owner = "root";
+    };
+    {
+      autostart = false;
+      bindings = [
+        {
+          grant = "pci-device";
+          slot = 0;
+          slotReason = "componentAbi";
+        };
+        {
+          grant = "pci-irq";
+          slot = 2;
+          slotReason = "componentAbi";
+        };
+        {
+          grant = "pci-mmio";
+          slot = 1;
+          slotReason = "componentAbi";
+        };
+      ];
+      dependencies = [
+        "pci-supervisor";
+      ];
+      executable = "pci-binding-probe";
+      health = "optional";
+      lifetime = "bounded";
+      name = "pci-worker";
+      owner = "pci-supervisor";
+    };
+  ];
+  mintedBindings = [];
+  interfaceSchemas = [];
+  objects = [
+    {
+      id = "boot-layout";
+      kind = "resource";
+      size = 4096;
+    };
+    {
+      id = "io-resource-budget";
+      kind = "resource";
+      size = 4096;
+    };
+    {
+      id = "lifecycle-policy";
+      kind = "resource";
+      size = 4096;
+    };
+    {
+      id = "sha256:init";
+      kind = "bootstrap";
+      size = 65536;
+    };
+    {
+      id = "sha256:pci-binding-probe";
+      kind = "component";
+      size = 65536;
+    };
+    {
+      id = "sha256:pci-intruder";
+      kind = "component";
+      size = 65536;
+    };
+  ];
+  privateMemoryBudget = [];
+  sharedBufferBudget = [];
+  state = [];
+  target = "aarch64-sel4-qemu-virt";
+  ioResourceBudget = [
+    {
+      bufferLoans = 0;
+      dmaMappings = 0;
+      dmaPages = 0;
+      holder = "pci-worker";
+      irqSources = 1;
+      mmioBytes = 16384;
+      mmioMappings = 1;
+      outstandingRequests = 0;
+      pciFunction = {
+        bus = 0;
+        device = 3;
+        deviceId = 13;
+        function = 0;
+        vendor = 6966;
+      };
+    };
+  ];
+  lifecyclePolicy = {
+    dependencies = [];
+    initialState = "Initialize";
+    parameters = [];
+    restarts = [
+      {
+        attempts = 1;
+        backoffFactor = 256;
+        backoffNs = 0;
+        causes = [
+          "fault";
+        ];
+        instance = "pci-worker";
+      };
+    ];
+    terminalState = "Error";
+    transitions = [
+      {
+        from = "Initialize";
+        to = "Running";
+      };
+      {
+        from = "Running";
+        to = "Error";
+      };
+    ];
+  };
+}

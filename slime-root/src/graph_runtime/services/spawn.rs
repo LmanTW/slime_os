@@ -1410,12 +1410,16 @@ pub(super) fn serve_spawn(
                 .device(1)
                 .is_some_and(|other| other.region == device.region)
         });
+        let pages = io_authority
+            .device(quota.device as usize)
+            .map_or(1, |device| device.pages);
         if let Err(error) = install_driver(
             io_service,
             crate::io_resource::DriverId(u64::from(child.0)),
             plan.instance,
             quota,
             shared,
+            pages,
         ) {
             if let Some(table) = tasks.authority_mut(id) {
                 table.drop_slot(handle);

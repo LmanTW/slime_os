@@ -54,6 +54,54 @@ impl Sel4IoAdapter<'_> {
             .device(self.index(device)?)
             .ok_or(AdapterError::MapFailed)
     }
+    /// Map inventory region `region` at `base` in the caller's VSpace.
+    fn map_page(
+        &mut self,
+        region: usize,
+        base: usize,
+        access: MmioAccess,
+    ) -> Result<(), AdapterError> {
+        self.allocator
+            .prepare_mapping_page(self.caller_vspace.bits() as usize, base)
+            .map_err(|_| AdapterError::MapFailed)?;
+        let outcome = (|| {
+            crate::buffer_adapter::BufferAdapter::new(self.allocator)
+                .ensure_mapping_tables(self.caller_vspace, base)
+                .map_err(|_| AdapterError::MapFailed)?;
+            self.inventory
+                .region_mut(region)
+                .ok_or(AdapterError::MapFailed)?
+                .map_child(
+                    self.caller_vspace,
+                    base,
+                    matches!(access, MmioAccess::ReadWrite),
+                )
+                .map_err(|_| AdapterError::MapFailed)
+        })();
+        if outcome.is_err() {
+            let _ = self
+                .allocator
+                .release_mapping_page(self.caller_vspace.bits() as usize, base);
+        }
+        outcome
+    }
+    /// Undo [`Self::map_page`]: unmap the region's frame and release the
+    /// caller's mapping page.
+    fn unmap_page(&mut self, region: usize, base: usize) -> Result<(), AdapterError> {
+        if self
+            .allocator
+            .mapping_page_tracked(self.caller_vspace.bits() as usize, base)
+        {
+            self.inventory
+                .region_mut(region)
+                .ok_or(AdapterError::TeardownFailed)?
+                .unmap()
+                .map_err(|_| AdapterError::TeardownFailed)?;
+        }
+        self.allocator
+            .release_mapping_page(self.caller_vspace.bits() as usize, base)
+            .map_err(|_| AdapterError::TeardownFailed)
+    }
 }
 
 impl IoResourceAdapter for Sel4IoAdapter<'_> {
@@ -65,37 +113,29 @@ impl IoResourceAdapter for Sel4IoAdapter<'_> {
         length: u32,
         access: MmioAccess,
     ) -> Result<u64, AdapterError> {
+        let descriptor = self.device(device)?;
+        // A mapping covers a device's whole register bank: one granule for a
+        // transport, every granule of a PCI BAR. The table has already bounded
+        // the request by the grant, so this refuses only a shape it cannot map.
         if offset != 0
-            || length as usize != child_vspace::GRANULE_SIZE
+            || length as usize != descriptor.pages * child_vspace::GRANULE_SIZE
             || !self
                 .requested_base
                 .is_multiple_of(child_vspace::GRANULE_SIZE)
         {
             return Err(AdapterError::MapFailed);
         }
-        let descriptor = self.device(device)?;
-        self.allocator
-            .prepare_mapping_page(self.caller_vspace.bits() as usize, self.requested_base)
-            .map_err(|_| AdapterError::MapFailed)?;
-        let outcome = (|| {
-            crate::buffer_adapter::BufferAdapter::new(self.allocator)
-                .ensure_mapping_tables(self.caller_vspace, self.requested_base)
-                .map_err(|_| AdapterError::MapFailed)?;
-            self.inventory
-                .region_mut(descriptor.region)
-                .ok_or(AdapterError::MapFailed)?
-                .map_child(
-                    self.caller_vspace,
-                    self.requested_base,
-                    matches!(access, MmioAccess::ReadWrite),
-                )
-                .map_err(|_| AdapterError::MapFailed)
-        })();
-        if let Err(error) = outcome {
-            let _ = self
-                .allocator
-                .release_mapping_page(self.caller_vspace.bits() as usize, self.requested_base);
-            return Err(error);
+        for page in 0..descriptor.pages {
+            let base = self.requested_base + page * child_vspace::GRANULE_SIZE;
+            if let Err(error) = self.map_page(descriptor.region + page, base, access) {
+                for mapped in 0..page {
+                    let _ = self.unmap_page(
+                        descriptor.region + mapped,
+                        self.requested_base + mapped * child_vspace::GRANULE_SIZE,
+                    );
+                }
+                return Err(error);
+            }
         }
         Ok(self.requested_base as u64)
     }
@@ -146,13 +186,18 @@ impl IoResourceAdapter for Sel4IoAdapter<'_> {
         if self.inventory.irq(index).is_some() {
             return Err(AdapterError::IrqFailed);
         }
-        let paddr = self
-            .inventory
-            .region(descriptor.region)
-            .ok_or(AdapterError::IrqFailed)?
-            .physical_address()
-            + descriptor.offset;
-        let irq = virtio_irq(paddr);
+        // A PCI function's INTx route was fixed at binding; a transport's
+        // interrupt follows from its address.
+        let irq = match descriptor.irq {
+            Some(irq) => irq as sel4::Word,
+            None => virtio_irq(
+                self.inventory
+                    .region(descriptor.region)
+                    .ok_or(AdapterError::IrqFailed)?
+                    .physical_address()
+                    + descriptor.offset,
+            ),
+        };
         let binding = device::DeviceIrq::acquire(self.allocator, irq, VIRTIO_IRQ_BADGE, true)
             .map_err(|_| AdapterError::IrqFailed)?;
         self.inventory
@@ -281,19 +326,26 @@ impl IoResourceAdapter for Sel4IoAdapter<'_> {
 
     fn perform(&mut self, action: AdapterAction) -> Result<(), AdapterError> {
         match action {
-            AdapterAction::UnmapMmio { token } => {
+            AdapterAction::UnmapMmio {
+                token,
+                device,
+                length,
+            } => {
+                // The device names the frames, not the base: two drivers can
+                // map at the same virtual address in their own VSpaces.
                 let base = usize::try_from(token).map_err(|_| AdapterError::TeardownFailed)?;
-                if self
-                    .allocator
-                    .mapping_page_tracked(self.caller_vspace.bits() as usize, base)
-                {
-                    self.inventory
-                        .unmap_region_at(base)
-                        .map_err(|_| AdapterError::TeardownFailed)?;
-                }
-                self.allocator
-                    .release_mapping_page(self.caller_vspace.bits() as usize, base)
+                let descriptor = self
+                    .device(device)
                     .map_err(|_| AdapterError::TeardownFailed)?;
+                let pages = (length as usize)
+                    .div_ceil(child_vspace::GRANULE_SIZE)
+                    .min(descriptor.pages);
+                for page in 0..pages {
+                    self.unmap_page(
+                        descriptor.region + page,
+                        base + page * child_vspace::GRANULE_SIZE,
+                    )?;
+                }
             }
             AdapterAction::UnbindIrq { source } => {
                 // The same device-keyed slot `bind_irq` filled, not the granule
@@ -332,6 +384,52 @@ impl IoResourceAdapter for Sel4IoAdapter<'_> {
             AdapterAction::SettleRequest { .. } => {}
         }
         Ok(())
+    }
+}
+
+/// Print the `SLIME_IO mmio refused` record of a refused MMIO map, and pass the
+/// outcome on. The root enforces the bound, so the root reports the refusal; a
+/// driver's own report of it proves nothing.
+fn reported<T>(
+    task: TaskId,
+    offset: u32,
+    length: u32,
+    outcome: Result<T, ResourceError>,
+) -> Result<T, ResourceError> {
+    if let Err(error) = &outcome {
+        crate::diagnostic_println!(
+            "SLIME_IO mmio refused task={} offset={offset} length={length} error={}",
+            task.0,
+            refusal_name(*error)
+        );
+    }
+    outcome
+}
+
+/// The refusal's variant name, for the `SLIME_IO mmio refused` record.
+fn refusal_name(error: ResourceError) -> &'static str {
+    match error {
+        ResourceError::BadIdentity => "BadIdentity",
+        ResourceError::NoQuota => "NoQuota",
+        ResourceError::QuotaBusy => "QuotaBusy",
+        ResourceError::QuotaExceeded => "QuotaExceeded",
+        ResourceError::TableFull => "TableFull",
+        ResourceError::WrongDriver => "WrongDriver",
+        ResourceError::WrongDevice => "WrongDevice",
+        ResourceError::WrongRegion => "WrongRegion",
+        ResourceError::BadRange => "BadRange",
+        ResourceError::BadAccess => "BadAccess",
+        ResourceError::Duplicate => "Duplicate",
+        ResourceError::NotFound => "NotFound",
+        ResourceError::StaleEpoch => "StaleEpoch",
+        ResourceError::LeaseNotLive => "LeaseNotLive",
+        ResourceError::LeaseBusy => "LeaseBusy",
+        ResourceError::MappingBusy => "MappingBusy",
+        ResourceError::WrongSource => "WrongSource",
+        ResourceError::NoInterrupt => "NoInterrupt",
+        ResourceError::DuplicateAck => "DuplicateAck",
+        ResourceError::RequestNotLive => "RequestNotLive",
+        ResourceError::Adapter(_) => "Adapter",
     }
 }
 
@@ -393,6 +491,7 @@ pub(crate) fn install_driver(
     instance: usize,
     quota: boot_contracts::io_resource::DriverQuota,
     shared_granule: bool,
+    pages: usize,
 ) -> Result<DriverEpoch, ResourceError> {
     // One-based throughout the resource table, where zero means "no device":
     // `declare_quota` refuses `DeviceId(0)`, and `Sel4IoAdapter::device`
@@ -421,7 +520,7 @@ pub(crate) fn install_driver(
         if shared_granule {
             VIRTIO_MMIO_STRIDE as u32
         } else {
-            child_vspace::GRANULE_SIZE as u32
+            (pages.max(1) * child_vspace::GRANULE_SIZE) as u32
         },
         MmioAccess::ReadWrite,
         if shared_granule {
@@ -616,19 +715,22 @@ pub(super) fn serve_io_resource(
                 return response;
             }
             adapter.requested_base = words[2] as usize;
-            mapped(
-                service.table.map_mmio(
-                    &mut adapter,
-                    driver,
-                    device,
-                    DriverEpoch(words[1]),
-                    region,
-                    packed as u32,
-                    (packed >> 32) as u32,
-                    MmioAccess::ReadWrite,
-                ),
-                |handle| Response::success(handle.id.0 as i64, words[2]),
-            )
+            let (offset, length) = (packed as u32, (packed >> 32) as u32);
+            let epoch = DriverEpoch(words[1]);
+            let access = MmioAccess::ReadWrite;
+            let outcome = (service.table).map_mmio(
+                &mut adapter,
+                driver,
+                device,
+                epoch,
+                region,
+                offset,
+                length,
+                access,
+            );
+            mapped(reported(task, offset, length, outcome), |handle| {
+                Response::success(handle.id.0 as i64, words[2])
+            })
         }
         io_resource_labels::MMIO_READ32 | io_resource_labels::MMIO_WRITE32 => {
             let Some(graph::CapabilityEntry::Device(device_cap)) = table.get(words[0] as u32)

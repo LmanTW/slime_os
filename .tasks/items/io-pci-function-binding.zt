@@ -5,7 +5,7 @@ item :: s.Item = (h.task "01a20d41-db86-70d6-a414-84c962b32b14" "io-pci-function
   "The root binds one declared PCI function on qemu-arm-virt to a userspace driver"
   "QEMU attaches xHCI only as a PCI function, and Slime OS binds no PCI function on any target. `slime-root` scans virtio-mmio windows only, and the plan gives PCI binding to H2, which waits on the Framework inventory. No USB work can start under QEMU until one PCI function reaches a userspace driver through IO1 resources.")
   with {
-    intent = #planned;
+    intent = #active;
     owns = {
       "slime-root/src/pci.rs";
       "slime-root/src/pci/**";

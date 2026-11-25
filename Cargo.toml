@@ -250,6 +250,16 @@ opt-level = "s"
 codegen-units = 1
 debug = false
 
+[profile.release.package.slime-component-pci-binding-probe]
+opt-level = "s"
+codegen-units = 1
+debug = false
+
+[profile.release.package.slime-component-pci-intruder]
+opt-level = "s"
+codegen-units = 1
+debug = false
+
 [profile.release.package.slime-component-io-queue-client]
 opt-level = "s"
 codegen-units = 1

@@ -1,0 +1,197 @@
+{
+  formatVersion = 1;
+  name = "sel4-io-pci";
+  generation = 176;
+  targetRequirement = "aarch64-sel4-qemu-virt";
+  bootAction = "wait-set";
+  bootstrapInstance = "init";
+  bootAttempts = 3;
+  components = [
+    "init";
+    "pci-binding-probe";
+    "pci-intruder";
+  ];
+  placements = [
+    {
+      component = "init";
+      spawnBudget = 0;
+    };
+    {
+      component = "pci-binding-probe";
+      spawnBudget = 2;
+    };
+  ];
+  instances = [
+    {
+      name = "init";
+      executable = "init";
+    };
+    {
+      name = "pci-intruder";
+      executable = "pci-intruder";
+    };
+    {
+      name = "pci-supervisor";
+      executable = "pci-binding-probe";
+    };
+    {
+      name = "pci-worker";
+      executable = "pci-binding-probe";
+      owner = "pci-supervisor";
+      autostart = false;
+      health = "optional";
+      dependencies = [
+        "pci-supervisor";
+      ];
+    };
+  ];
+  grants = [
+    {
+      name = "pci-worker-executable";
+      capabilityKind = "executable";
+      source = "pci-supervisor";
+      target = "pci-binding-probe";
+      rights = [
+        "exec";
+        "spawn";
+      ];
+      transferable = false;
+    };
+    {
+      name = "pci-device";
+      capabilityKind = "device";
+      source = "pci-supervisor";
+      target = "pci-worker";
+      rights = [
+        "mapMmio";
+      ];
+      transferable = false;
+    };
+    {
+      name = "pci-mmio";
+      capabilityKind = "mmioRegion";
+      source = "pci-supervisor";
+      target = "pci-worker";
+      rights = [
+        "mapMmio";
+      ];
+      transferable = false;
+    };
+    {
+      name = "pci-irq";
+      capabilityKind = "interruptSource";
+      source = "pci-supervisor";
+      target = "pci-worker";
+      rights = [
+        "irqAck";
+      ];
+      transferable = false;
+    };
+  ];
+  slotPins = [
+    {
+      holder = "pci-supervisor";
+      grant = "pci-irq";
+      slot = 3;
+      reason = "allocatorOrder";
+    };
+    {
+      holder = "pci-worker";
+      grant = "pci-device";
+      slot = 0;
+      reason = "componentAbi";
+    };
+    {
+      holder = "pci-worker";
+      grant = "pci-mmio";
+      slot = 1;
+      reason = "componentAbi";
+    };
+    {
+      holder = "pci-worker";
+      grant = "pci-irq";
+      slot = 2;
+      reason = "componentAbi";
+    };
+  ];
+  extraBindings = [
+    {
+      holder = "pci-supervisor";
+      grant = "pci-device";
+    };
+    {
+      holder = "pci-supervisor";
+      grant = "pci-mmio";
+    };
+  ];
+  mintedBindings = [];
+  commandBindings = [];
+  defaultImageBytes = 65536;
+  imageSizes = [];
+  sharedBufferBudgetObject = false;
+  bootLayoutObject = true;
+  interfaceSchemas = [];
+  state = [];
+  notifications = [];
+  notificationBindings = [];
+  bootProfiles = [];
+  clockAuthority = [];
+  clockAuthorityObject = false;
+  ioResourceBudget = [
+    {
+      bufferLoans = 0;
+      dmaMappings = 0;
+      dmaPages = 0;
+      holder = "pci-worker";
+      irqSources = 1;
+      mmioBytes = 16384;
+      mmioMappings = 1;
+      outstandingRequests = 0;
+      pciFunction = {
+        bus = 0;
+        device = 3;
+        function = 0;
+        vendor = 6966;
+        deviceId = 13;
+      };
+    };
+  ];
+  ioResourceBudgetObject = true;
+  networkDestinations = [];
+  networkDestinationsObject = false;
+  blockRingAuthority = [];
+  blockRingAuthorityObject = false;
+  waitSet = [];
+  waitSetObject = false;
+  lifecyclePolicy = {
+    dependencies = [];
+    initialState = "Initialize";
+    parameters = [];
+    restarts = [
+      {
+        attempts = 1;
+        backoffFactor = 256;
+        backoffNs = 0;
+        causes = [
+          "fault";
+        ];
+        instance = "pci-worker";
+      };
+    ];
+    terminalState = "Error";
+    transitions = [
+      {
+        from = "Initialize";
+        to = "Running";
+      };
+      {
+        from = "Running";
+        to = "Error";
+      };
+    ];
+  };
+  recording = [];
+  recordingObject = false;
+  deploymentConstraint = "Boots under aarch64-sel4-qemu-virt with qemu-xhci at PCI 00:03.0, and is exercised by io_pci_binding_check.";
+  acceptanceCriteria = "the composition's owning plane checker observes its declared marker sequence to completion.";
+}

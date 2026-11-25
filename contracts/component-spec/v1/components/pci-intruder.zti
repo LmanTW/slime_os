@@ -1,0 +1,25 @@
+{
+  formatVersion = 1;
+  name = "pci-intruder";
+  componentType = "application";
+  version = "1.0.0";
+  owner = "root";
+  purpose = "Proves a component the PCI binding plane grants nothing is denied the device, MMIO and interrupt operations without a fault.";
+  implementation = { provider = "workspace"; binary = "pci-intruder"; contentHash = ""; };
+  provides = [];
+  requires = [];
+  interfaces = [];
+  dependencies = [];
+  communication = { semantic = "none"; qos = []; };
+  configuration = [];
+  lifecycle = [ "Initialize"; "Start"; "Running"; "Error"; ];
+  runtime = {
+    executionEnvironment = "aarch64-sel4-qemu-virt";
+    resource = { stackBytes = 16384; spawnBudget = 0; extraThreads = 0; bufferBytePages = 0; bufferCount = 0; mappingCount = 0; loanCount = 0; privatePageQuota = 0; };
+    devices = [];
+  };
+  health = "required";
+  lifetime = "bounded";
+  compatibility = { platform = "aarch64-sel4-qemu-virt"; interface = "contracts/interface-schema/v1"; dependency = "none"; resource = "atMost"; runtime = "exact"; qos = "none"; };
+  test = { testCondition = "the io_pci_binding_check gate boots the PCI binding composition"; expectedResult = "every attempted device, MMIO, and interrupt operation is denied without a fault"; passFailCriteria = "denied device=1 mmio=1 interrupt=1"; requiredTestEnvironment = "io_pci_binding_check"; };
+}

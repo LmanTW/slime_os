@@ -81,6 +81,7 @@ pub mod launched;
 pub mod lifecycle;
 pub mod notification;
 pub mod object_allocator;
+pub mod pci;
 pub mod peer_endpoint;
 pub mod platform_timer;
 pub mod private_memory;

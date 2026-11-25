@@ -857,10 +857,38 @@ pub const MAX_AUTHORITY_REGIONS: usize = 8;
 
 /// One device userspace may be granted: the inventory region holding its
 /// registers and the byte offset of its first register within that granule.
+///
+/// A register bank wider than a granule, a PCI BAR, holds `pages` consecutive
+/// regions starting at `region`, at offset zero. A virtio transport holds one.
+/// `irq` is the interrupt a PCI function's INTx pin routes to; a transport
+/// derives its interrupt from its address instead, so it carries none.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct AuthorityDevice {
     pub region: usize,
     pub offset: usize,
+    pub pages: usize,
+    pub irq: Option<u64>,
+}
+
+impl AuthorityDevice {
+    /// A virtio-mmio transport: one granule, its interrupt derived from its address.
+    pub const fn transport(region: usize, offset: usize) -> Self {
+        Self {
+            region,
+            offset,
+            pages: 1,
+            irq: None,
+        }
+    }
+    /// A register bank of `pages` granules from `region`, with a routed interrupt.
+    pub const fn bank(region: usize, pages: usize, irq: u64) -> Self {
+        Self {
+            region,
+            offset: 0,
+            pages,
+            irq: Some(irq),
+        }
+    }
 }
 
 /// The devices userspace drivers may be granted, with the standing root
@@ -897,10 +925,7 @@ impl AuthorityInventory {
     pub fn declared(region: DeviceRegion) -> Self {
         let mut inventory = Self::new();
         inventory.regions[0] = Some(region);
-        inventory.devices[0] = Some(AuthorityDevice {
-            region: 0,
-            offset: 0,
-        });
+        inventory.devices[0] = Some(AuthorityDevice::transport(0, 0));
         inventory.len = 1;
         inventory
     }
@@ -921,9 +946,13 @@ impl AuthorityInventory {
         }
     }
     /// Append a device at the next ordinal. `false` when the ceiling is
-    /// reached or the device names a region this inventory does not hold.
+    /// reached or the device names a region this inventory does not hold,
+    /// including any of a bank's pages.
     pub fn push_device(&mut self, device: AuthorityDevice) -> bool {
-        if self.len >= MAX_IO_DEVICES || self.region(device.region).is_none() {
+        if self.len >= MAX_IO_DEVICES
+            || device.pages == 0
+            || (0..device.pages).any(|page| self.region(device.region + page).is_none())
+        {
             return false;
         }
         self.devices[self.len] = Some(device);
@@ -942,6 +971,11 @@ impl AuthorityInventory {
     }
     pub fn region_mut(&mut self, index: usize) -> Option<&mut DeviceRegion> {
         self.regions.get_mut(index)?.as_mut()
+    }
+    /// The first index from which `pages` consecutive regions are all free.
+    pub fn free_regions(&self, pages: usize) -> Option<usize> {
+        (0..=MAX_AUTHORITY_REGIONS.checked_sub(pages)?)
+            .find(|&first| (first..first + pages).all(|index| self.regions[index].is_none()))
     }
     pub fn unmap_region_at(&mut self, base: usize) -> Result<(), DeviceError> {
         self.regions
@@ -990,13 +1024,7 @@ mod inventory_tests {
     fn a_declared_region_is_device_zero_at_offset_zero_and_nothing_else() {
         let inventory = AuthorityInventory::declared(region(0x0a00_3000));
         assert_eq!(inventory.len(), 1);
-        assert_eq!(
-            inventory.device(0),
-            Some(AuthorityDevice {
-                region: 0,
-                offset: 0
-            })
-        );
+        assert_eq!(inventory.device(0), Some(AuthorityDevice::transport(0, 0)));
         assert_eq!(
             inventory.region(0).map(DeviceRegion::paddr),
             Some(0x0a00_3000)
@@ -1017,28 +1045,41 @@ mod inventory_tests {
                 .install_region(MAX_AUTHORITY_REGIONS, region(0))
                 .is_err()
         );
-        assert!(!inventory.push_device(AuthorityDevice {
-            region: 1,
-            offset: 0
-        }));
-        assert!(inventory.push_device(AuthorityDevice {
-            region: 0,
-            offset: 0x200
-        }));
-        assert!(inventory.push_device(AuthorityDevice {
-            region: 0,
-            offset: 0
-        }));
-        assert!(!inventory.push_device(AuthorityDevice {
-            region: 0,
-            offset: 0x400
-        }));
+        assert!(!inventory.push_device(AuthorityDevice::transport(1, 0)));
+        assert!(inventory.push_device(AuthorityDevice::transport(0, 0x200)));
+        assert!(inventory.push_device(AuthorityDevice::transport(0, 0)));
+        assert!(!inventory.push_device(AuthorityDevice::transport(0, 0x400)));
         assert_eq!(inventory.len(), MAX_IO_DEVICES);
         inventory
             .devices_mut()
             .sort_unstable_by_key(|entry| entry.map_or(0, |d| d.offset));
         assert_eq!(inventory.device(0).map(|d| d.offset), Some(0));
         assert_eq!(inventory.device(1).map(|d| d.offset), Some(0x200));
+    }
+
+    /// A PCI BAR spans consecutive regions; a bank missing any of them is
+    /// refused, so a grant can never reach a frame the inventory does not hold.
+    #[test]
+    fn a_bank_needs_every_one_of_its_regions() {
+        let mut inventory = AuthorityInventory::new();
+        assert!(inventory.install_region(0, region(0xa00_0000)).is_ok());
+        assert_eq!(inventory.free_regions(4), Some(1));
+        for page in 0..3 {
+            assert!(
+                inventory
+                    .install_region(1 + page, region(0x1000_0000 + page * 0x1000))
+                    .is_ok()
+            );
+        }
+        assert!(!inventory.push_device(AuthorityDevice::bank(1, 4, 38)));
+        assert!(inventory.install_region(4, region(0x1000_3000)).is_ok());
+        assert!(inventory.push_device(AuthorityDevice::bank(1, 4, 38)));
+        assert_eq!(
+            inventory.device(0).map(|d| (d.pages, d.irq)),
+            Some((4, Some(38)))
+        );
+        assert_eq!(inventory.free_regions(MAX_AUTHORITY_REGIONS), None);
+        assert!(!inventory.push_device(AuthorityDevice::bank(5, 0, 38)));
     }
 }
 

@@ -201,10 +201,22 @@ pub enum AdapterError {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AdapterAction {
-    UnmapMmio { token: u64 },
-    UnbindIrq { source: IrqSourceId },
-    DestroyDma { token: u64 },
-    SettleRequest { request: RequestId },
+    /// `device` and `length` name the frames behind `token`: a mapping can
+    /// span several granules of one register bank, and teardown unmaps each.
+    UnmapMmio {
+        token: u64,
+        device: DeviceId,
+        length: u32,
+    },
+    UnbindIrq {
+        source: IrqSourceId,
+    },
+    DestroyDma {
+        token: u64,
+    },
+    SettleRequest {
+        request: RequestId,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1541,6 +1553,8 @@ impl ResourceTable {
         for mapping in self.mmio.iter().flatten().filter(|m| m.driver == driver) {
             actions.push(AdapterAction::UnmapMmio {
                 token: mapping.token,
+                device: mapping.device,
+                length: mapping.length,
             })?;
         }
         for action in actions.iter() {

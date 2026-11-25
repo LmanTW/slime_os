@@ -243,6 +243,21 @@ pub(crate) static mut DEVICE_PAGE: FreePage = FreePage([0; GRANULE_SIZE]);
 pub(crate) static mut AUTHORITY_MMIO_PAGES: [FreePage; VIRTIO_MMIO_GRANULES] =
     [const { FreePage([0; GRANULE_SIZE]) }; VIRTIO_MMIO_GRANULES];
 
+/// The root's window onto the configuration space of the one PCI function a
+/// generation declares. Only the root reads or writes it.
+#[cfg(all(not(slime_boot_selector), slime_root_console_pl011))]
+pub(crate) static mut PCI_CONFIG_PAGE: FreePage = FreePage([0; GRANULE_SIZE]);
+
+/// Granules of the largest BAR 0 the root binds.
+#[cfg(all(not(slime_boot_selector), slime_root_console_pl011))]
+pub(crate) const PCI_BAR_GRANULES: usize = 4;
+
+/// Standing windows onto the bound function's BAR 0, held until its driver
+/// maps the frames into its own VSpace, as `AUTHORITY_MMIO_PAGES` are.
+#[cfg(all(not(slime_boot_selector), slime_root_console_pl011))]
+pub(crate) static mut PCI_BAR_PAGES: [FreePage; PCI_BAR_GRANULES] =
+    [const { FreePage([0; GRANULE_SIZE]) }; PCI_BAR_GRANULES];
+
 #[cfg(slime_boot_selector)]
 pub(crate) static mut BOOT_MMIO_PAGES: [FreePage; MAX_BLOCK_DEVICES] =
     [const { FreePage([0; GRANULE_SIZE]) }; MAX_BLOCK_DEVICES];
@@ -736,13 +751,16 @@ impl<'a, 'g> Launch<'a, 'g> {
                 })
             });
             let driver = crate::io_resource::DriverId(u64::from(task_id));
-            services::install_driver(&mut self.io_service, driver, index, quota, shared).map_err(
-                |error| {
+            let pages = self
+                .io_authority
+                .device(ordinal)
+                .map_or(1, |device| device.pages);
+            services::install_driver(&mut self.io_service, driver, index, quota, shared, pages)
+                .map_err(|error| {
                     stop!(
                         "SLIME_IO FAIL quota install task={task_id} instance={name} error={error:?}"
                     )
-                },
-            )?;
+                })?;
             let (devices, shared) = (self.io_authority.len(), shared as u8);
             crate::diagnostic_println!(
                 "SLIME_IO quota task={task_id} instance={name} devices={devices} shared_granule={shared}"

@@ -11,7 +11,8 @@ pub use crate::device::{AuthorityDevice, AuthorityInventory};
 pub fn probe_authority_devices(
     bootinfo: &sel4::BootInfo,
     allocator: &mut ObjectAllocator,
-) -> AuthorityInventory {
+    generation: &boot_contracts::generation::Generation<'_>,
+) -> Result<AuthorityInventory, Stop> {
     // This machine has no virtio-mmio transport window: on QEMU q35 the virtio
     // devices are PCI functions behind an ACPI-described host bridge, and P6
     // deliberately enumerates no PCI (H2 owns that). Returning the empty
@@ -20,14 +21,166 @@ pub fn probe_authority_devices(
     // the loop body is unreachable.
     #[cfg(target_arch = "x86_64")]
     {
-        let _ = (bootinfo, allocator);
+        let _ = (bootinfo, allocator, generation);
         crate::diagnostic_println!(
             "SLIME_ROOT io authority inventory devices=0 mode=userspace transport=absent"
         );
-        AuthorityInventory::new()
+        Ok(AuthorityInventory::new())
     }
     #[cfg(not(target_arch = "x86_64"))]
-    probe_virtio_mmio_transports(bootinfo, allocator)
+    {
+        let mut inventory = probe_virtio_mmio_transports(bootinfo, allocator);
+        // `slime_root_console_pl011` marks the qemu-arm-virt profile, the one
+        // machine whose PCIe host this root pins.
+        #[cfg(slime_root_console_pl011)]
+        bind_declared_pci_functions(bootinfo, allocator, generation, &mut inventory)?;
+        #[cfg(not(slime_root_console_pl011))]
+        let _ = generation;
+        Ok(inventory)
+    }
+}
+
+/// Bind every PCI function the generation's io-resource budget declares, after
+/// the virtio transports, at the budget's own device ordinal.
+///
+/// The root reads the configuration space of declared functions only, so a
+/// function no budget names is never configured. A declared function whose
+/// identity differs stops the root before any configuration write: the
+/// generation names hardware this machine does not hold.
+#[cfg(all(not(slime_boot_selector), slime_root_console_pl011))]
+fn bind_declared_pci_functions(
+    bootinfo: &sel4::BootInfo,
+    allocator: &mut ObjectAllocator,
+    generation: &boot_contracts::generation::Generation<'_>,
+    inventory: &mut AuthorityInventory,
+) -> Result<(), Stop> {
+    use crate::pci;
+
+    let Some(Ok(budget)) = generation::io_resource_budget_object(generation) else {
+        return Ok(());
+    };
+    // One configuration window and one BAR window: this root binds at most
+    // one PCI function per generation.
+    let mut declared = None;
+    for quota in (0..budget.driver_count()).filter_map(|index| budget.driver(index)) {
+        let Some(function) = quota.pci_function else {
+            continue;
+        };
+        if declared.is_some() {
+            return Err(stop!("pci functions exceed the one this root binds"));
+        }
+        declared = Some((quota.device as usize, function));
+    }
+    if let Some((ordinal, function)) = declared {
+        // A declared function takes the next inventory ordinal; the budget
+        // names that ordinal, so the two must agree or a grant would reach
+        // another device.
+        if ordinal != inventory.len() {
+            return Err(stop!(
+                "pci function={} device={ordinal} expected device={}",
+                pci::Address(&function),
+                inventory.len()
+            ));
+        }
+        let config_base = ptr::addr_of!(PCI_CONFIG_PAGE) as usize;
+        ScratchPage::claim(bootinfo, config_base)
+            .map_err(|error| stop!("pci config window unavailable: {error:?}"))?;
+        let config_paddr = pci::arm_virt::ECAM_BASE + pci::ecam_offset(&function);
+        let config_region = device::DeviceRegion::map(
+            allocator,
+            sel4::init_thread::slot::VSPACE.cap(),
+            config_base,
+            config_paddr,
+        )
+        .map_err(|error| {
+            stop!(
+                "pci function={} config unmapped: {error:?}",
+                pci::Address(&function)
+            )
+        })?;
+        let mut config = RegionConfig(&config_region);
+        let binding = match pci::bind(&mut config, &function, PCI_BAR_GRANULES * GRANULE_SIZE) {
+            Ok(binding) => binding,
+            Err(pci::BindError::Identity { found }) => {
+                return Err(stop!(
+                    "pci function={} declared={} found={}",
+                    pci::Address(&function),
+                    pci::Identity(function.identity()),
+                    pci::Identity(found)
+                ));
+            }
+            Err(error) => {
+                return Err(stop!(
+                    "pci function={} bind refused: {error:?}",
+                    pci::Address(&function)
+                ));
+            }
+        };
+        let pages = binding.size / GRANULE_SIZE;
+        let first = inventory.free_regions(pages).ok_or_else(|| {
+            stop!(
+                "pci function={} has no free inventory regions",
+                pci::Address(&function)
+            )
+        })?;
+        for page in 0..pages {
+            let base = ptr::addr_of!(PCI_BAR_PAGES) as usize + page * GRANULE_SIZE;
+            ScratchPage::claim(bootinfo, base)
+                .map_err(|error| stop!("pci bar window unavailable: {error:?}"))?;
+            let region = device::DeviceRegion::map(
+                allocator,
+                sel4::init_thread::slot::VSPACE.cap(),
+                base,
+                binding.address + page * GRANULE_SIZE,
+            )
+            .map_err(|error| {
+                stop!(
+                    "pci function={} bar unmapped: {error:?}",
+                    pci::Address(&function)
+                )
+            })?;
+            inventory
+                .install_region(first + page, region)
+                .map_err(|_| {
+                    stop!(
+                        "pci function={} region {} taken",
+                        pci::Address(&function),
+                        first + page
+                    )
+                })?;
+        }
+        if !inventory.push_device(AuthorityDevice::bank(first, pages, binding.irq)) {
+            return Err(stop!(
+                "pci function={} exceeds the device ceiling",
+                pci::Address(&function)
+            ));
+        }
+        crate::diagnostic_println!(
+            "SLIME_PCI bind function={} id={} bar=0 type={} size={:#x} address={:#x} command={:#06x} irq={}",
+            pci::Address(&function),
+            pci::Identity(function.identity()),
+            if binding.wide { "mem64" } else { "mem32" },
+            binding.size,
+            binding.address,
+            binding.command,
+            binding.irq
+        );
+    }
+    Ok(())
+}
+
+/// One function's configuration space through the root's ECAM mapping.
+#[cfg(all(not(slime_boot_selector), slime_root_console_pl011))]
+struct RegionConfig<'a>(&'a device::DeviceRegion);
+
+#[cfg(all(not(slime_boot_selector), slime_root_console_pl011))]
+impl crate::pci::ConfigSpace for RegionConfig<'_> {
+    fn read32(&mut self, offset: usize) -> u32 {
+        self.0.read32(offset).unwrap_or(u32::MAX)
+    }
+    fn write32(&mut self, offset: usize, value: u32) {
+        let _ = self.0.write32(offset, value);
+    }
 }
 
 #[cfg(all(not(slime_boot_selector), not(target_arch = "x86_64")))]
@@ -79,10 +232,7 @@ fn probe_virtio_mmio_transports(
         for offset in attached.into_iter().flatten() {
             // Past the ordinal ceiling the transport stays mapped but is not a
             // device any budget can name.
-            let _ = inventory.push_device(AuthorityDevice {
-                region: granule_index,
-                offset,
-            });
+            let _ = inventory.push_device(AuthorityDevice::transport(granule_index, offset));
         }
     }
     // QEMU assigns command-line devices from the highest transport down, so

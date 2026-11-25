@@ -5,7 +5,7 @@ item :: s.Item = (h.task "01a2115a-e389-78ba-abf4-1f5f4cd52ed6" "root-size-pci-b
   "The root-size budget names the PCI binding module and holds the root that binds a PCI function"
   "The implementation of io-pci-function-binding adds slime-root/src/pci.rs and the binding path in the boot and ioResource roles. root_size_check refuses it: src/pci.rs has no role, boot holds 5793 code lines against 5650, ioResource 3270 against 3050, and the series 33335 against 32950. main already holds boot at 5651, above its ceiling, since io-resource v2 added the admission refusal of a declared PCI function. The size checker grades promises, so only a new item changes it.")
   with {
-    intent = #planned;
+    intent = #active;
     depends = {
       "01a20d41-db86-70d6-a414-84c962b32b14";
     };

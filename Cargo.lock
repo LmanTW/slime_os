@@ -1311,6 +1311,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "slime-component-pci-binding-probe"
+version = "0.1.0"
+dependencies = [
+ "slime-build-support",
+ "slime-rt",
+]
+
+[[package]]
+name = "slime-component-pci-intruder"
+version = "0.1.0"
+dependencies = [
+ "slime-build-support",
+ "slime-rt",
+]
+
+[[package]]
 name = "slime-component-powerbox-chooser"
 version = "0.1.0"
 dependencies = [

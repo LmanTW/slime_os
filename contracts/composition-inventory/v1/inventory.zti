@@ -185,6 +185,14 @@
       systemSpec = "contracts/system-spec/v1/systems/sel4-io-network.zti";
     };
     {
+      baseline = "";
+      composition = "sel4-io-pci";
+      deferralReason = "";
+      owningGate = "io_pci_binding_check";
+      state = "specNative";
+      systemSpec = "contracts/system-spec/v1/systems/sel4-io-pci.zti";
+    };
+    {
       baseline = "contracts/system-spec/v1/baselines/sel4-io-queue.zti";
       composition = "sel4-io-queue";
       deferralReason = "";

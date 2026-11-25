@@ -876,7 +876,7 @@ pub fn run(
         .map_err(|error| stop!("generation admission rejected: {error:?}"))?;
     #[cfg(all(not(slime_boot_selector), not(slime_root_fixture)))]
     let io_authority = if admission.io_resource_drivers.is_some() {
-        crate::graph_runtime::probe_authority_devices(bootinfo, allocator)
+        crate::graph_runtime::probe_authority_devices(bootinfo, allocator, &generation)?
     } else {
         crate::graph_runtime::platform::AuthorityInventory::new()
     };
