@@ -1,0 +1,155 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a212d1-0158-764f-8841-0497ad8f73d0" "usb-xhci-device-descriptor" "planes-mechanism"
+  "A userspace xHCI driver reads one USB device descriptor on qemu-arm-virt"
+  "The root binds the declared qemu-xhci function, but its command register keeps bus mastering off and no component drives the controller. xHCI needs host memory for its device context array, command ring and event ring, so no USB transfer can run. H3 starts with one driver that addresses one device and reads its descriptor.")
+  with {
+    intent = #planned;
+    owns = {
+      "slime-root/src/pci.rs";
+      "slime-root/src/pci/**";
+      "slime-root/src/lib.rs";
+      "slime-root/src/device.rs";
+      "slime-root/src/io_resource.rs";
+      "slime-root/src/generation.rs";
+      "slime-root/src/graph_runtime.rs";
+      "slime-root/src/graph_runtime/**";
+      "components/services/xhci-driver/**";
+      "components/runtime/src/**";
+      "contracts/component-spec/v1/components/xhci-driver.zti";
+      "contracts/composition-inventory/v1/inventory.zti";
+      "contracts/system-spec/v1/systems/sel4-usb-xhci.zti";
+      "contracts/generation-manifest/v1/compositions/sel4-usb-xhci.zti";
+      "contracts/system-image-closure/v3/closures/sel4-usb-xhci.zti";
+      "Cargo.toml";
+      "Cargo.lock";
+    };
+    nonGoals = {
+      h.nonGoal "USB HID: Set Configuration, interrupt endpoints, boot-protocol reports and the seat service. The next item of H3 starts from the addressed device." h.agentDefault;
+      h.nonGoal "Hubs, more than one device, hotplug, disconnect and SuperSpeed devices. Each boot attaches one full- or high-speed device to one root port before the guest starts." h.agentDefault;
+      h.nonGoal "Refusal of malformed, short or inconsistent descriptors. QEMU's device models return well-formed descriptors, and no QEMU device can return a malformed one." h.agentDefault;
+      h.nonGoal "MSI and MSI-X. The root routes INTx only, and the driver leaves both disabled." h.agentDefault;
+      h.nonGoal "Command or transfer timeouts, controller restart after a driver fault, and a supervised restart of the driver." h.agentDefault;
+      h.nonGoal "A DMA containment claim. QEMU arm-virt has no IOMMU in this profile, and QEMU's DMA is trusted." h.agentDefault;
+      h.nonGoal "PCI or xHCI on x86 q35, riscv-virt or the Framework." h.agentDefault;
+      h.nonGoal "A USB client protocol or a Zutai service contract. No component other than the driver uses the device in this item." h.agentDefault;
+      h.nonGoal "The update of `docs/architecture/io-substrate.md` and a row in `docs/reference/just-targets.md`. The devloop judge gives `docs/` the process class, so a documentation PR after the implementation carries both." h.agentDefault;
+      h.nonGoal "A change to `scripts/check/check-root-size.py`. If the root outgrows a ceiling, a separate planning PR adds a size item, as root-size-pci-binding did." h.agentDefault;
+      h.nonGoal "Moving `scripts/check/check-io-pci-binding.py` onto `scripts/lib/qemu_monitor.py`. That checker grades a terminal promise, so the move is a separate decision." h.agentDefault;
+    };
+    invariants = {
+      h.invariant "only-the-root-writes-configuration"
+        "No component receives a capability to ECAM or to any configuration register. Only `slime-root` reads and writes PCI configuration space."
+        h.agentDefault;
+      h.invariant "bus-mastering-follows-the-dma-budget"
+        "The root sets the bus master bit only for a declared function whose budget declares DMA pages. A declared function without DMA keeps command 0x0002."
+        h.agentDefault;
+      h.invariant "driver-holds-only-its-own-bus-addresses"
+        "The driver writes into controller registers and rings only the device addresses its own DMA mappings returned. It receives no bus, device or function number and no IRQ number."
+        h.agentDefault;
+      h.invariant "usb-semantics-stay-in-userspace"
+        "The root parses no xHCI register, ring, context or USB descriptor. Every xHCI and USB structure lives in the driver."
+        h.agentDefault;
+    };
+    requirements = {
+      h.req "bus-mastering-with-dma"
+        "When the declared function's budget declares DMA, the root writes command 0x0006: memory decoding and bus mastering on, I/O decoding off. The `SLIME_PCI bind` record and the QEMU monitor both show 0x0006."
+        { "usb_xhci_descriptor_check"; };
+      h.req "binding-without-dma-unchanged"
+        "The `sel4-io-pci` composition declares no DMA, and its function keeps command 0x0002 as the binding item states."
+        { "io_pci_binding_check"; };
+      h.req "controller-resets-and-runs"
+        "The driver resets the controller once, programs the device context array, one command ring and one event ring segment, and runs the controller once. QEMU's trace records exactly two resets, the machine's and the driver's, before one run. The driver reports the slot count it enabled and the port count; CONFIG and HCSPARAMS1 hold the same values."
+        { "usb_xhci_descriptor_check"; };
+      h.req "finds-the-connected-port"
+        "The driver reports exactly one connected port: the xHCI port of the device's physical port, at the speed PORTSC states. It resets that port alone. Every other port reports no connection and is not enabled."
+        { "usb_xhci_descriptor_check"; };
+      h.req "addresses-the-device"
+        "The driver issues Enable Slot once and Address Device once for that slot and port. The slot it reports equals QEMU's trace, and the address it reports equals the address the device answers at in its capture."
+        { "usb_xhci_descriptor_check"; };
+      h.req "reads-the-device-descriptor"
+        "The driver issues one GET_DESCRIPTOR request for the 18-byte device descriptor on endpoint 0. The device's capture holds that request and one successful 18-byte completion. The bytes the driver reports equal the capture and the pinned descriptor of the attached QEMU model, in a keyboard boot and a tablet boot."
+        { "usb_xhci_descriptor_check"; };
+      h.req "events-arrive-by-interrupt"
+        "The driver enables interrupter 0 and waits for events on the declared interrupt. The root's route equals the route QEMU's interrupt-map states for the function's INTA. While the controller runs, QEMU's GIC trace shows that line raised, acknowledged by the CPU, then lowered. The driver reports at least one interrupt. After the halt, USBCMD keeps the interrupter enable set, IMAN shows interrupts enabled and none pending, and ERDP shows the event handler not busy."
+        { "usb_xhci_descriptor_check"; };
+      h.req "halts-before-exit"
+        "The driver stops the controller before it exits. QEMU's trace records one stop after the transfer. USBCMD reads run/stop clear, and USBSTS reads halted with no host system or controller error."
+        { "usb_xhci_descriptor_check"; };
+      h.req "dma-within-budget-and-reclaimed"
+        "The driver holds at least one DMA page and one DMA mapping, within its budget, when it exits. The root's exit reclaim leaves no MMIO, interrupt, DMA or request charge, and no component faults."
+        { "usb_xhci_descriptor_check"; };
+      h.req "only-the-driver-holds-hardware"
+        "The derived manifest grants one device, one MMIO region, one interrupt source and one DMA account, all to the driver instance. Its budget declares one PCI function, 00:03.0 with identity 1b36:000d, one 16 KiB BAR, one interrupt and DMA."
+        { "usb_xhci_descriptor_check"; };
+      h.req "controls-are-refused"
+        "The judge refuses 158 inputs: 8 corrupted manifests and, in each of the two boots, 75 corrupted inputs. These span the serial transcript, the monitor replies, the trace, the device capture and the judge's model of the interrupt routes."
+        { "usb_xhci_descriptor_check"; };
+    };
+    acceptance = {
+      h.observedWhere "usb_xhci_descriptor_check" {
+        h.count "casesObserved" 156;
+        h.count "negativeControlsRefused" 158;
+      };
+      h.observed "io_pci_binding_check";
+    };
+    decisions = {
+      h.decided "descriptor-before-hid"
+        "This item stops at the device descriptor. Set Configuration, HID reports and the seat service follow in later items."
+        "the descriptor read proves DMA, the interrupt, the command ring and a control transfer without HID semantics"
+        (h.fromHuman "Read one device descriptor (Recommended)" "Claude Code session 0946c66e-e6cf-4ff4-b073-74e1a653fb07, 2026-11-25, choosing a descriptor read over controller bring-up alone and over a HID keyboard")
+        { "reads-the-device-descriptor"; "addresses-the-device"; };
+      h.decided "qemu-records-are-the-judge"
+        "The exam judges the driver against three records QEMU writes itself: its `usb_xhci_*` and GIC trace events, the device's `pcap=` capture, and monitor reads after the guest finishes. The GIC events stand in for `usb_xhci_irq_intx`, which QEMU 11.0.1 declares but never emits."
+        "a driver that reports its own transfer can print bytes it never read, while QEMU writes the trace and the capture from the controller and the device model"
+        h.agentDefault
+        { "controller-resets-and-runs"; "finds-the-connected-port"; "addresses-the-device"; "reads-the-device-descriptor"; "events-arrive-by-interrupt"; "halts-before-exit"; };
+      h.decided "two-models-on-two-ports"
+        "One image boots twice. The keyboard boot attaches a full-speed `usb-kbd` to physical port 2, and the tablet boot a high-speed `usb-tablet` to physical port 4. Both set `msos-desc=off`."
+        "a driver that prints one port, one speed or one descriptor as a constant fails one of the two boots, and `msos-desc=off` keeps bcdUSB as the model declares it"
+        h.agentDefault
+        { "finds-the-connected-port"; "reads-the-device-descriptor"; };
+      h.decided "bus-mastering-from-the-dma-budget"
+        "The root derives the bus master bit from the declared function's budget, not from a new declaration field."
+        "a function without DMA has no reason to master the bus, and io-resource v2 already carries the DMA budget beside the PCI function, so no format change is needed"
+        h.agentDefault
+        { "bus-mastering-with-dma"; "binding-without-dma-unchanged"; };
+      h.decided "control-packet-size-from-the-port-speed"
+        "Address Device sets endpoint 0's maximum packet size from the port speed: 8 bytes at full speed, 64 at high speed. The driver requests all 18 bytes once."
+        "the two QEMU models use exactly those sizes, and a first 8-byte read adds a transfer the capture would then have to allow"
+        h.agentDefault
+        { "reads-the-device-descriptor"; };
+      h.decided "driver-halts-before-exit"
+        "The driver stops the controller before it exits, and leaves the DMA pages to the root's exit reclaim."
+        "a running controller could write an event into a page the root has already reclaimed"
+        h.agentDefault
+        { "halts-before-exit"; "dma-within-budget-and-reclaimed"; };
+      h.decided "monitor-parsing-in-a-library"
+        "The monitor and device-tree parsing this exam uses lives in `scripts/lib/qemu_monitor.py`."
+        "the verification-checkers rule moves repeated QEMU handling into libraries, and this is its second user after the PCI binding exam"
+        h.agentDefault
+        { "controller-resets-and-runs"; };
+      h.decided "exam-outside-the-plane-inventory"
+        "The checker is `scripts/check/check-usb-xhci-descriptor.py`, and it names the closure through `XHCI_CLOSURE`, not a top-level `CLOSURE` constant."
+        "a `check-sel4-*` file joins the test-run inventory, and a `CLOSURE` constant joins the devloop closure digest. Both resolve the closure, which this planning PR cannot add, so either name would fail a bound target on main"
+        h.agentDefault
+        { "controls-are-refused"; };
+    };
+    knownLimits = {
+      h.knownLimit "usb_xhci_descriptor_check"
+        "The digest of this target is coarse, and its QEMU arguments sit in the checker, not in a `system-test-run` record. The guest and the monitor share one serial stream."
+        h.agentDefault;
+      h.knownLimit "usb_xhci_descriptor_check"
+        "The pinned descriptors, the trace event names and formats, and the GIC's IRQ numbering are those of QEMU 11.0.1. A change of the QEMU pin needs a planning PR that checks them again."
+        h.agentDefault;
+      h.knownLimit "usb_xhci_descriptor_check"
+        "The interrupt count is the driver's own report. The GIC trace shows that the CPU took the line at least once while the controller ran, not how many events the driver drained per interrupt."
+        h.agentDefault;
+      h.knownLimit "usb_xhci_descriptor_check"
+        "A full-speed device with an endpoint 0 packet size above 8 bytes needs the descriptor's first 8 bytes and an Evaluate Context first. Neither QEMU model needs it, so this item does not implement it."
+        h.agentDefault;
+    };
+  };
+
+item
