@@ -546,7 +546,9 @@ impl<
     /// is empty. It writes one and stops. With the slot busy it writes nothing and is refused as
     /// [`Error::SendBusy`], and the publication stays queued. The publication takes its sequence number here, from
     /// the lane of its priority when the session has lanes and from the one counter otherwise. A publication the link
-    /// could never send is taken off the queue and its refusal returned, so it cannot block the ones behind it.
+    /// could never send is taken off the queue and its refusal returned, so it cannot block the ones behind it. One
+    /// refused as [`SessionError::NotOpen`] or [`SessionError::UndeclaredKey`] stays queued, because the handshake or
+    /// the peer's declaration may still arrive.
     pub fn drain<const D: usize, const KB: usize, const PB: usize>(
         &mut self,
         handle: LinkHandle,
@@ -567,7 +569,13 @@ impl<
             entry.qos(),
             &mut body,
         );
-        queue.discard(priority);
+        // A refusal that depends on the link's state, not on the publication, keeps it queued for a later drain.
+        if !matches!(
+            built,
+            Err(SessionError::NotOpen | SessionError::UndeclaredKey)
+        ) {
+            queue.discard(priority);
+        }
         let outcome = match built {
             Err(SessionError::NeedsFragments) => return Err(Error::NeedsFragments),
             other => other?,

@@ -6,7 +6,7 @@
 //! is refused, never truncated, and an input the decoder would refuse is
 //! refused here with the matching class. Nothing allocates.
 
-use super::lane::{DEFAULT_PRIORITY, EXT_QOS as EXT_QOS_LANE};
+use super::lane::DEFAULT_PRIORITY;
 use super::{
     ATTACHMENT_GID_LEN_AT, Bounds, CONSOLIDATION_LATEST, EXT_ATTACHMENT, EXT_QOS_NETWORK,
     EXT_QOS_UNIT, EXT_RESPONDER, EXT_TIMEOUT, EXT_WIRE_EXPR, FLAG_BIT5, FLAG_BIT6, FLAG_Z,
@@ -18,6 +18,8 @@ use super::{
 };
 use slime_proto::zenoh_profile as p;
 
+/// The mandatory transport QoS extension of a FRAME: id 1, a Z64 value that is the priority.
+const EXT_QOS_LANE: u8 = 0x31;
 const RESOLUTION: u8 = p::DEFAULT_RESOLUTION as u8;
 const VERSION: u8 = p::PROTOCOL_VERSION as u8;
 const WHATAMI_PEER: u8 = p::WHATAMI_PEER as u8;

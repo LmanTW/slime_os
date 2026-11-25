@@ -22,7 +22,7 @@ pub const DEFAULT_PRIORITY: u8 = 5;
 /// The most priorities upstream names.
 pub const PRIORITIES: u8 = 8;
 /// The transport QoS extension: mandatory, id 1, a Z64 value that is the priority.
-pub(super) const EXT_QOS: u8 = 0x31;
+const EXT_QOS: u8 = 0x31;
 const FLAG_MORE: u8 = FLAG_BIT6;
 
 /// A pair of a priority and a reliability.

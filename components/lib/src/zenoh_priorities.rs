@@ -10,7 +10,7 @@
 use crate::zenoh_link::{ByteLink, Error, LinkError, LinkHandle, LinkOf, Published};
 use crate::zenoh_profile0::lane::{Lane, decode_lane_frame};
 use crate::zenoh_profile0::priority_queue::PriorityQueue;
-use crate::zenoh_profile0::session::{Config, MAX_EVENTS, Params, Role};
+use crate::zenoh_profile0::session::{Config, MAX_EVENTS, Params, Role, SessionError};
 use crate::zenoh_profile0::{
     Bounds, MAX_BATCH_BYTES, MAX_KEY_BYTES, MAX_PAYLOAD_BYTES, Network, Qos, STREAM_LENGTH_BYTES,
     encode, frame_of,
@@ -261,6 +261,42 @@ fn class(error: Error) -> &'static str {
         Error::QueueFull => "queue-full",
         other => panic!("a refusal the exam does not name: {other:?}"),
     }
+}
+
+/// A publication refused because the link is not open yet stays queued, and leaves once the handshake is done.
+#[test]
+fn a_publication_refused_for_the_link_state_stays_queued() {
+    let io = Scripted {
+        rx: Rc::new(RefCell::new(Pipe::default())),
+        tx: Rc::new(RefCell::new(Pipe::default())),
+    };
+    let mut link = Node::<2>::with_lanes(
+        io,
+        Role::Connector,
+        &config(&[0xa1, 0xa2], b"", FIRST_SN),
+        Params::DEMO,
+        2,
+        1,
+    )
+    .expect("connector");
+    let handle = link.handle();
+    link.open(handle, 0).expect("open");
+    let mut queue = Queue::new();
+    queue
+        .push(KEY, &attachment(1), &PAYLOAD, qos(2, true, false))
+        .expect("queued");
+    // The INIT_SYN holds the slot, so the first refusal is the busy slot.
+    assert_eq!(link.drain(handle, &mut queue), Err(Error::SendBusy));
+    assert_eq!(queue.len(), 1);
+    // Once it is flushed the slot is free and the link is still not open, so the refusal is the state.
+    link.pump(handle, 1).expect("pump");
+    assert!(!link.send_pending() && !link.is_open());
+    let refused = link.drain(handle, &mut queue).expect_err("not open");
+    assert!(matches!(
+        refused,
+        Error::Session(SessionError::NotOpen | SessionError::UndeclaredKey)
+    ));
+    assert_eq!(queue.len(), 1, "the publication waits for the link");
 }
 
 #[test]
