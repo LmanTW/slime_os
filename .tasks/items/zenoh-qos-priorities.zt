@@ -32,13 +32,13 @@ item :: s.Item = (h.task "01a20e10-a8b0-77ba-be09-1c27af5d4291" "zenoh-qos-prior
         "A link whose peer did not offer the QoS unit extension sends every FRAME on the default lane with no extension, whatever the priority, and numbers them consecutively. The exam compares 2 frames of priorities 2 and 7."
         { "zenoh_priorities_check"; };
       h.req "queue-drains-by-priority"
-        "PriorityQueue drains the lowest priority number first and first in first out within a priority. Five publications queued as priorities 5, 2, 2, 0 and 7 drain as 4, 2, 3, 5 and 1 by their attachment sequence. The sequence number is given as a publication leaves the queue, so two publications that leave a link without lanes carry n and n+1 in the order they left."
+        "PriorityQueue drains the lowest priority number first and first in first out within a priority. Five publications with attachment sequences 1 to 5, queued as priorities 5, 2, 2, 0 and 7 in that order, drain as 4, 2, 3, 1 and 5. The sequence number is given as a publication leaves the queue, so two publications that leave a link without lanes carry n and n+1 in the order they left."
         { "zenoh_priorities_check"; };
       h.req "full-queue-follows-congestion-control"
-        "A priority whose queue is full discards a Drop publication and counts it, and refuses a Block one as queue-full. Another priority with room still takes its publication. The drain stops at a busy send slot, writes nothing, and resumes once the slot is free."
+        "A priority whose queue is full discards a Drop publication and counts it, and refuses a Block one as queue-full. Another priority with room still takes its publication. drain writes one publication into the send slot and stops. Called with the slot busy it writes nothing and is refused as send-busy, and it writes again once the slot is free."
         { "zenoh_priorities_check"; };
       h.req "refusals-keep-their-class"
-        "drain on a busy slot is refused as send-busy, and after close as send-after-close. Each refusal is reported by name and class."
+        "drain with the send slot busy is refused as send-busy, and after close as send-after-close. Each refusal is reported by name and class."
         { "zenoh_priorities_check"; };
       h.req "judge-refuses-corruption"
         "The judge refuses 88 corrupted transcripts of an honest run: a dropped, duplicated, reordered or unrecognised line, a frame with one digit changed, in capitals, with its sequence number moved by one or on another lane, a drain order reversed or short by one, a count one over or under, and a refusal with another class."

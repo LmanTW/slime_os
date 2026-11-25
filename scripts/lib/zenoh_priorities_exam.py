@@ -75,10 +75,12 @@ def frame_hex(lane_priority: int, sn: int, sequence: int, priority: int, block: 
 
 FRAME_HEX = tuple((name, frame_hex(lane, sn, seq, prio, block, express)) for name, lane, sn, seq, prio, block, express in FRAMES)
 
-# (label, the attachment sequences in the order they were written). Five publications are queued in the first, with
-# ids 1 to 5, and the second is the two that leave the queue of a link without lanes.
+# (label, the attachment sequences in the order they were written). The first queues five publications, ids 1 to 5, of
+# priorities 5, 2, 2, 0 and 7 in that order. The lowest priority number leaves first and a priority keeps its queue
+# order, so they leave as 4 (p0), 2 and 3 (p2), 1 (p5) and 5 (p7). The second is the two that leave the queue of a
+# link without lanes.
 ORDERS = (
-    ("drain-order", "5,3,4,2,1"),
+    ("drain-order", "4,2,3,1,5"),
     ("no-lanes-drain-order", "12,11"),
 )
 
@@ -90,7 +92,7 @@ COUNTS = (
 
 REFUSED_SCENARIOS = (
     ("block-on-a-full-queue", "queue-full"),
-    ("lane-publish-on-a-busy-slot", "send-busy"),
+    ("drain-on-a-busy-slot", "send-busy"),
     ("drain-after-close", "send-after-close"),
 )
 
