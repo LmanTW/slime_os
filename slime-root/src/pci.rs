@@ -112,8 +112,10 @@ impl core::fmt::Display for Address<'_> {
 /// The identity is read before any write, so a function with another identity
 /// leaves this call exactly as it was found. BAR sizing writes all ones and
 /// reads the mask back with decoding off, as the PCI specification requires.
-/// Every other refusal clears BAR 0, and BAR 1 of a 64-bit BAR, and leaves
-/// decoding off, so a refused function decodes nothing.
+/// Every refusal after the identity and bus checks leaves decoding off, so a
+/// refused function decodes nothing. An I/O-space BAR 0 is refused before
+/// sizing and keeps its value; every refusal after sizing clears BAR 0, and
+/// BAR 1 of a 64-bit BAR.
 pub fn bind(
     config: &mut impl ConfigSpace,
     declared: &PciFunction,
