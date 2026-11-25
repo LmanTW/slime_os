@@ -628,6 +628,25 @@ Known limits:
 - The captures show no liveliness token, no `Put` with the encoding flag, no sample larger than one frame and no router
   with a non-default configuration.
 
+## Queries
+
+A Profile 0 session carries one query. It takes a queryable declaration, a request, its responses and the final response
+that a stock eclipse-zenoh 1.0.0 peer sends. It reads the one capture of that peer, in peer mode, on the plain key
+`slime_demo/query`.
+
+- **Our queryable.** `send_declare_queryable` declares the queryable through an alias with the sender mapping, as the
+  stock peer does. The alias takes a slot of the alias table. A second queryable is refused as `queryable-limit`.
+  `send_undeclare_queryable` withdraws it by id and keeps the alias.
+- **Their query.** The session reports `QueryReceived` for a request on a key our queryable holds. A request with no
+  queryable declared is refused as `undeclared-key`. `send_response` answers with one payload, and
+  `send_response_final` ends the replies.
+- **Our query.** `send_request` asks for the latest value on a key or an alias. One request is outstanding each way, and a
+  second is refused as `request-limit`. The session reports `ReplyDelivered` for each response and `QueryFinished` for the final
+  response. A response or final response nobody asked for is refused.
+- **Stays refused.** A wildcard key, query parameters, a target, a budget, a consolidation other than latest, an
+  error reply, a Delete reply, a fragmented reply and a best-effort request or response.
+- **No service.** The plain link ignores query events, and the Zenoh service answers no query.
+
 ## Limitations
 
 - `sel4-zenoh` crosses the loopback backend, so there is no packet capture there. The
@@ -649,8 +668,8 @@ Known limits:
 - The plain link, `zenoh_link.rs`, cannot carry a graph session, because it matches `Event` exhaustively.
   The graph link does. No component, composition or QEMU gate runs it, so it is judged on the host over a
   scripted byte stream.
-- The graph holds each entity's QoS and does not match a publisher to a subscription. The session and
-  the link answer no query. A client-role plain link declares tokens, as the client role section says. In one earlier run,
+- The graph holds each entity's QoS and does not match a publisher to a subscription. The link answers
+  no query, and neither does the service. A client-role plain link declares tokens, as the client role section says. In one earlier run,
   with no token declared, `ros2 topic list` and `ros2 node list` showed no Slime node, and `ros2 topic echo` received the
   Puts of a Slime publisher.
 - The data session is observed by replaying two captured sessions, one talker and one listener, of
@@ -691,6 +710,10 @@ Known limits:
   one refused as `SendBusy`, the frame before and the frame after three discards equal to the host reference
   with the next sequence number, and the retry limit on the fourth stalled send with Block publications
   refused between the pumps;
+- `just zenoh_queries_check` — the 14 batches two stock eclipse-zenoh 1.0.0 peers sent, one answering a query and one
+  asking it, replayed into sessions of ours, with the host reference `scripts/lib/zenoh_queries_exam.py`
+  reproducing the queryable declaration, request, both responses, final response and undeclaration byte for byte,
+  and 15 variants refused by name and class;
 - `just zenoh_rmw_check` — 60 batches from three sessions of an `rmw_zenoh_cpp` peer, replayed into a graph
   session. The host reference `scripts/lib/zenoh_rmw_wire.py` writes every captured frame again byte for
   byte. The session's `INIT_ACK` and its silence after the handshake are judged. 11 variants are
