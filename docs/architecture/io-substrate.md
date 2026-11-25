@@ -16,7 +16,7 @@ Current owners:
 - generic queue/epoch/lease format: `contracts/io-queue/v1/`;
 - hardware authority and budgets: `contracts/io-resource/v2/`,
   `contracts/block-authority/v1/`, `boot-contracts/src/io_resource.rs`, and
-  `slime-root/src/{device,io_resource}.rs`;
+  `slime-root/src/{device,io_resource,pci}.rs`;
 - shared ring adapters: `components/lib/src/`;
 - virtio-blk, virtio-net and virtio-rng drivers:
   `components/services/virtio-*-driver/`;
@@ -94,14 +94,48 @@ reads its table through the root's identity-gated cursor-paged path (label 69).
 The root authenticates the reader and bounds bytes; it interprets no block rights.
 IO1's budget supplies a per-instance device ordinal throughout device identity.
 Since io-resource v2, a budget entry may also declare one PCI function: its
-bus, device and function, and its vendor and device identity. No root binds a
-PCI function yet, so admission refuses a generation that declares one.
+bus, device and function, and its vendor and device identity. The
+[PCI function binding](#pci-function-binding) section states which root binds it.
 `sel4-recovery` declares a writable recovery disk and byte-identity-checked
 read-only guard disk; `sel4-transfer` declares a source and receiver. Each has two
 driver instances; read-only refusal belongs to driver ring authority.
 `virtio-blk-driver` reports the rights its own ring holds and each request it
 refuses for them, so a gate observes the refusal from the component that
 enforces it rather than from the refused client.
+
+### PCI function binding
+
+Only the qemu-arm-virt product root binds a declared PCI function. Every other
+root, the boot selector included, refuses a generation that declares one at
+admission. A generation declares at most one function; a second one stops the root.
+
+The root binds the function after the virtio scan, at the budget's device
+ordinal. `slime-root/src/pci.rs` holds the binding logic and the pinned
+qemu-arm-virt facts. The root does these steps in order:
+
+1. It maps the function's configuration page from ECAM at `0x40_1000_0000`.
+2. It reads the vendor and device identity before any write. A mismatch stops
+   the root with `SLIME_ROOT FATAL pci function=… declared=… found=…`.
+3. It sizes BAR 0 and places it at the base of the 32-bit window, `0x1000_0000`.
+   The root refuses a BAR 0 larger than four 4 KiB granules.
+4. It routes INTx to IRQ `35 + (device + pin − 1) mod 4`.
+5. It writes command `0x0002`: memory decoding on, bus mastering off.
+6. It prints `SLIME_PCI bind` with the function, identity, BAR, command and IRQ.
+
+Every refusal by `pci::bind` after the identity and bus checks leaves decoding
+off. An I/O-space BAR 0 is refused before sizing and keeps its value. A refusal
+after sizing (BAR, window or interrupt pin) clears BAR 0, and BAR 1 for a 64-bit
+BAR. A root stop after `pci::bind` returns leaves the function placed and
+decoding memory.
+
+Only the root reads or writes configuration space; no component receives ECAM
+authority. The bound BAR becomes one device with a bank of page regions. Unlike
+the virtio transports, no other device shares the BAR's pages, so its driver maps the whole
+bank directly. `MAP_MMIO` covers the bank, and teardown unmaps it by device.
+`IRQ_ACK` binds the routed IRQ when its sequence is zero. The binding leaves bus
+mastering off, and `sel4-io-pci` declares no DMA account.
+`just io_pci_binding_check` boots the `sel4-io-pci` composition with qemu-xhci,
+and a second boot checks that the root refuses a wrong identity.
 
 ### Data volumes
 

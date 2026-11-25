@@ -214,6 +214,7 @@ For how the planes work and how to add one, read
 | `just io_http_public_check` | Explicit opt-in: DNS and HTTP are performed by the guest, not a host proxy. |
 | `just io_http_qualification_check` | Completion gate includes a fresh live observation rather than cached evidence. |
 | `just io_link_check` | IO3 gate: a supervised userspace virtio-net driver serves LinkDevice over IO0/IO1. |
+| `just io_pci_binding_check` | The qemu-arm-virt root binds one declared PCI function at the window base with memory decoding only, a supervised driver maps its BAR and IRQ, and a wrong identity stops the root before any write. |
 | `just io_local_check` | The loopback listen/accept arm: duplex bytes, EOF, readiness draining, authority refusals. |
 | `just console_record_check` | Actual-source root/console contention and whole local producer operations, then twenty consecutive local QEMU boots with exclusive raw captures; [qualification boundary](../plans/console-record-qualification.md). |
 | `just console_lines_check` | Every component console write is one whole line: a lexical audit of tracked Rust and C component sources, after the planes whose markers were observed split; fails until the implementation lands. |
