@@ -723,8 +723,7 @@ fn io_resource_budget_admission(
     // cannot run as declared. Refusing it at admission keeps a driver from
     // booting against a function nothing configured.
     if (0..budget.driver_count())
-        .filter_map(|index| budget.driver(index))
-        .any(|quota| quota.pci_function.is_some())
+        .any(|i| budget.driver(i).is_some_and(|q| q.pci_function.is_some()))
     {
         return Err(GenerationError::UnsatisfiableIoResourceBudget);
     }
