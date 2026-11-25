@@ -6,6 +6,7 @@
 //! is refused, never truncated, and an input the decoder would refuse is
 //! refused here with the matching class. Nothing allocates.
 
+use super::lane::{DEFAULT_PRIORITY, EXT_QOS as EXT_QOS_LANE};
 use super::{
     ATTACHMENT_GID_LEN_AT, Bounds, CONSOLIDATION_LATEST, EXT_ATTACHMENT, EXT_QOS_NETWORK,
     EXT_QOS_UNIT, EXT_RESPONDER, EXT_TIMEOUT, EXT_WIRE_EXPR, FLAG_BIT5, FLAG_BIT6, FLAG_Z,
@@ -625,6 +626,29 @@ impl<'a> FrameEncoder<'a> {
         let mut writer = Writer::with_cap(out, bounds.batch);
         writer.byte(ID_FRAME | FLAG_BIT5)?;
         writer.leb(sn)?;
+        Ok(Self {
+            writer,
+            messages: 0,
+            bounds,
+        })
+    }
+
+    /// Starts a reliable FRAME on the lane of `priority`, which is 0 to 7: the default priority writes no extension,
+    /// and any other the mandatory transport QoS extension `31 <priority>`, as `zenoh-codec` 1.0.0 does.
+    pub fn with_lane(
+        out: &'a mut [u8],
+        sn: u32,
+        priority: u8,
+        bounds: Bounds,
+    ) -> Result<Self, EncodeError> {
+        let stated = priority != DEFAULT_PRIORITY;
+        let mut writer = Writer::with_cap(out, bounds.batch);
+        writer.byte(ID_FRAME | FLAG_BIT5 | if stated { FLAG_Z } else { 0 })?;
+        writer.leb(sn)?;
+        if stated {
+            writer.byte(EXT_QOS_LANE)?;
+            writer.leb(u32::from(priority))?;
+        }
         Ok(Self {
             writer,
             messages: 0,

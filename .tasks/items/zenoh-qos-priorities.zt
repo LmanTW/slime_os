@@ -5,7 +5,7 @@ item :: s.Item = (h.task "01a20e10-a8b0-77ba-be09-1c27af5d4291" "zenoh-qos-prior
   "A Profile 0 link sends by priority: a lane for each priority and a queue"
   "A Profile 0 link sends every publication on the default lane, with one sequence counter, in the order it was called. The receive side already keeps a counter for each pair of a priority and a reliability (zenoh-fragment-lanes), and a PUSH already states its priority (zenoh-qos-wire). Nothing sends the priority in a FRAME header, so a stock peer cannot tell a priority 0 publication from a priority 7 one, and a publication that waits for the one send slot waits in the owner's order, not the priority's. The change: when both INITs offered the QoS unit extension, a publication of priority p goes in a FRAME of lane (p, reliable), with the mandatory transport QoS extension for any priority but 5 and a sequence counter of its own for each lane. A bounded PriorityQueue holds publications for each priority and drains them into the send slot, the lowest priority number first and first in first out within a priority. A link without lanes keeps one counter, and the number is given when a publication leaves the queue.")
   with {
-    intent = #planned;
+    intent = #active;
     owns = {
       "components/lib/src/zenoh_profile0.rs";
       "components/lib/src/zenoh_profile0/session.rs";
