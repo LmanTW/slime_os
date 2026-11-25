@@ -90,8 +90,6 @@ pub enum Error {
     StaleHandle,
     /// A Put too large for one frame, which a link that reassembles sends with [`PutSend`].
     NeedsFragments,
-    /// The queue of the publication's priority is full and the publication blocks.
-    QueueFull,
 }
 
 impl From<SessionError> for Error {

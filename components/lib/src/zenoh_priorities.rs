@@ -9,7 +9,7 @@
 
 use crate::zenoh_link::{ByteLink, Error, LinkError, LinkHandle, LinkOf, Published};
 use crate::zenoh_profile0::lane::{Lane, decode_lane_frame};
-use crate::zenoh_profile0::priority_queue::PriorityQueue;
+use crate::zenoh_profile0::priority_queue::{PriorityQueue, PushError};
 use crate::zenoh_profile0::session::{Config, MAX_EVENTS, Params, Role, SessionError};
 use crate::zenoh_profile0::{
     Bounds, MAX_BATCH_BYTES, MAX_KEY_BYTES, MAX_PAYLOAD_BYTES, Network, Qos, STREAM_LENGTH_BYTES,
@@ -258,7 +258,13 @@ fn class(error: Error) -> &'static str {
     match error {
         Error::SendBusy => "send-busy",
         Error::SendAfterClose => "send-after-close",
-        Error::QueueFull => "queue-full",
+        other => panic!("a refusal the exam does not name: {other:?}"),
+    }
+}
+
+fn push_class(error: PushError) -> &'static str {
+    match error {
+        PushError::QueueFull => "queue-full",
         other => panic!("a refusal the exam does not name: {other:?}"),
     }
 }
@@ -441,7 +447,7 @@ fn the_priorities_exam() {
     );
     line(
         "refused",
-        &format!("block-on-a-full-queue {}", class(refused)),
+        &format!("block-on-a-full-queue {}", push_class(refused)),
     );
     line("ok", "a-full-queue-drops-or-refuses");
     assert_eq!(

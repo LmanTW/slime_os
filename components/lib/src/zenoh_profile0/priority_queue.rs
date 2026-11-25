@@ -9,9 +9,24 @@ use super::MAX_ATTACHMENT_BYTES;
 use super::Qos;
 use super::encode::EncodeError;
 use super::lane::PRIORITIES;
-use crate::zenoh_link::{Error, Published};
+use crate::zenoh_link::Published;
 
 const PRIORITY_COUNT: usize = PRIORITIES as usize;
+
+/// Why [`PriorityQueue::push`] refuses a publication.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PushError {
+    /// The ring of the publication's priority is full and the publication blocks.
+    QueueFull,
+    /// The key, the attachment or the payload is one the queue cannot hold.
+    Encode(EncodeError),
+}
+
+impl From<EncodeError> for PushError {
+    fn from(error: EncodeError) -> Self {
+        Self::Encode(error)
+    }
+}
 
 /// One queued publication, copied in so the caller's buffers are free after the push.
 #[derive(Clone, Copy)]
@@ -74,7 +89,7 @@ impl<const DEPTH: usize, const KEY: usize, const PAYLOAD: usize>
     }
 
     /// Queues a publication on the ring of its priority. A full ring discards a Drop publication and counts it, and
-    /// refuses a Block one as [`Error::QueueFull`]. A key, attachment or payload the queue cannot hold is refused as
+    /// refuses a Block one as [`PushError::QueueFull`]. A key, attachment or payload the queue cannot hold is refused as
     /// the encoder refuses it, and changes nothing. A ring that is full does not stop another priority.
     pub fn push(
         &mut self,
@@ -82,7 +97,7 @@ impl<const DEPTH: usize, const KEY: usize, const PAYLOAD: usize>
         attachment: &[u8],
         payload: &[u8],
         qos: Qos,
-    ) -> Result<Published, Error> {
+    ) -> Result<Published, PushError> {
         if key.len() > KEY {
             return Err(EncodeError::KeyTooLong.into());
         }
@@ -95,7 +110,7 @@ impl<const DEPTH: usize, const KEY: usize, const PAYLOAD: usize>
         let priority = usize::from(qos.priority());
         if self.held[priority] >= DEPTH {
             if qos.block() {
-                return Err(Error::QueueFull);
+                return Err(PushError::QueueFull);
             }
             self.dropped = self.dropped.saturating_add(1);
             return Ok(Published::Dropped);
