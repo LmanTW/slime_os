@@ -286,7 +286,7 @@ STOCK_RETAINED_TESTS = (*STOCK_DECODER_TESTS, *STOCK_SESSION_TESTS, *STOCK_ENCOD
 # capture and none matches, because the stock peer attaches a QoS extension and a body those
 # vectors do not have. An implementation accepts the shapes the capture shows, and the 19 replays
 # below prove it does.
-STOCK_MAY_CHANGE = frozenset({"transport_keep_alive", "transport_fragment", "declare_queryable", "frame_network_request", "frame_network_response"})
+STOCK_MAY_CHANGE = frozenset({"transport_keep_alive", "transport_fragment", "declare_queryable", "frame_network_request", "frame_network_response", "declare_token", "frame_network_interest"})
 # transport_fragment is the single reliable final fragment `2601aa`. Once the decoder reads a
 # FRAGMENT message it is a valid one, so the row cannot stay refused; it cannot become an accepted
 # row either, for the reason the keep-alive row cannot. The link-limits change removes it
@@ -296,12 +296,17 @@ STOCK_MAY_CHANGE = frozenset({"transport_keep_alive", "transport_fragment", "dec
 # declaration and the other two are no longer refused as unsupported-message but as truncated, so none can stay
 # as it is; none can become an accepted row either, for the reason the keep-alive row cannot. The queries change
 # removes them, and `--slice queries` requires the messages they stood for to be taken.
+# declare_token and frame_network_interest are the two that name a token declaration and an INTEREST. Once the
+# decoder reads them neither is refused as unsupported-message, so neither can stay as it is, and neither can
+# become an accepted row. The peer-tokens change removes them.
 STOCK_MAY_CHANGE_BYTES = {
     "transport_keep_alive": "04",
     "transport_fragment": "2601aa",
     "declare_queryable": "25011e64010003612f62",
     "frame_network_request": "25011c00",
     "frame_network_response": "25011b00",
+    "declare_token": "25011e66010003612f62",
+    "frame_network_interest": "25011900",
 }
 # The class it is refused with today. While the row stays it keeps its class too: the retained
 # corpus test agrees with whatever the row says, so a class changed in the row and the decoder
@@ -312,6 +317,8 @@ STOCK_MAY_CHANGE_CLASS = {
     "declare_queryable": "unsupported-message",
     "frame_network_request": "unsupported-message",
     "frame_network_response": "unsupported-message",
+    "declare_token": "unsupported-message",
+    "frame_network_interest": "unsupported-message",
 }
 # The refused vectors that must stay exactly as they were when the exam landed, by name, with a
 # digest of `<name> <class> <bytes>` for each in name order. The checker reads the working tree's
@@ -321,12 +328,12 @@ STOCK_CORPUS = ROOT / "components" / "lib" / "src" / "zenoh_profile0" / "vectors
 STOCK_FIXED_NAMES = tuple((
     "batch_513_bytes close_extension_present close_reason_unknown close_reserved_flag "
     "close_trailing_byte close_truncated declare_extension_flag declare_interest_flag "
-    "declare_keyexpr_alias declare_reserved_flag declare_token "
+    "declare_keyexpr_alias declare_reserved_flag "
     "declare_truncated_kind dsub_double_slash dsub_empty_suffix dsub_extension_flag "
     "dsub_id_overflow dsub_invalid_utf8 dsub_key_130_bytes dsub_leading_slash dsub_no_suffix "
     "dsub_nonzero_scope dsub_truncated_suffix dsub_wildcard_double_star dsub_wildcard_star "
     "dsub_wildcard_sub empty_batch frame_best_effort frame_empty frame_extension_present "
-    "frame_network_interest frame_network_oam "
+    "frame_network_oam "
     "frame_partial_network_message frame_reserved_flag frame_sn_missing frame_sn_overflow "
     "init_ack_cookie_65_bytes init_ack_cookie_empty init_ack_cookie_len_noncanonical "
     "init_ack_cookie_len_over_u16 init_ack_cookie_len_u16_max init_ack_cookie_truncated "
@@ -347,7 +354,7 @@ STOCK_FIXED_NAMES = tuple((
     "usub_missing_wire_expr_ext usub_no_suffix usub_nonzero_scope usub_reserved_header_bit "
     "usub_wildcard usub_wrong_ext_id usub_zbuf_length_132 usub_zbuf_truncated"
 ).split())
-STOCK_FIXED_DIGEST = "c6c2e2f7d49b0600686f6f4052feccff45b062bcfd0ef7d23a378c67b0d3bffd"
+STOCK_FIXED_DIGEST = "0d240fade98096600a826406fd65e3225667afb37645902a2e3f90b270356158"
 # The accepted batches are the upstream encoder's output and are pinned by name, bytes and
 # summary: replacing one, dropping one or renaming a copy all change the digest.
 STOCK_ACCEPTED_NAMES = tuple((
