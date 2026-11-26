@@ -85,7 +85,8 @@ publication into the send slot and stops: it takes the oldest of the lowest prio
 any, so priority 0 leaves before priority 7 and a priority keeps its queue order. With the slot busy it
 writes nothing, is refused as `SendBusy`, and the publication stays queued. A publication refused as
 `NotOpen` or `UndeclaredKey` stays queued too, because the handshake or the peer's declaration may still
-arrive. Any other refusal takes it off the queue, so it cannot block the ones behind it.
+arrive. A refusal of the handle, `SendAfterClose` or `StaleHandle`, also leaves the queue as it is. Any refusal
+of the publication itself takes it off the queue, so it cannot block the ones behind it.
 
 A publication takes its sequence number when it leaves the queue, not when it is queued. A session that
 negotiated lanes (`Session::lanes`) then sends it in a `FRAME` of lane (priority, reliable). The header
