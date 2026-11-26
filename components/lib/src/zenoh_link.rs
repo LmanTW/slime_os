@@ -36,6 +36,10 @@ mod put_tests;
 #[path = "zenoh_link/token_tests.rs"]
 mod token_tests;
 
+#[cfg(test)]
+#[path = "zenoh_link/entity_tests.rs"]
+mod entity_tests;
+
 /// Consecutive stalled sends tolerated before the link gives up; the demo contract's `maxRetries`.
 pub const MAX_RETRIES: u32 = 3;
 /// The framed size of the first release's batch.

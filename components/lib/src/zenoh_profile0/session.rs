@@ -45,8 +45,9 @@ mod lane_frames_tests;
 #[path = "lanes_handshake_tests.rs"]
 mod lanes_handshake_tests;
 
-/// The liveliness tokens a session holds at once: a node, a publisher and a subscription each, and one to spare.
-pub const MAX_TOKENS: usize = 4;
+/// The liveliness tokens a session holds at once: a node, a publisher, a subscription, a service server and a service
+/// client, and one to spare.
+pub const MAX_TOKENS: usize = 6;
 /// Events one received batch can yield; this is the contract's outstanding-sample bound.
 pub const MAX_EVENTS: usize = 4;
 /// The batch size the first release advertises in INIT.

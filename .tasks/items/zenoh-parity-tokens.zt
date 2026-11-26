@@ -5,6 +5,7 @@ item :: s.Item = (h.task "01a2169e-731e-71ab-bfb9-8323b3b7fa10" "zenoh-parity-to
   "A client-role link declares the subscription, service server and service client tokens of a Slime node"
   "`rmw_zenoh_cpp` declares a liveliness token for each entity of a node: `NN`, `MP`, `MS`, `SS` and `SC`. The client-role link declares a node token and a publisher token, and its exam judges only those. A live probe with this link showed that `rmw_zenohd` and `ros2` take an `MS`, an `SS` and an `SC` token in the plain form. The session holds 4 token ids, so it cannot hold five.")
   with {
+    intent = #active;
     owns = {
       "components/lib/src/zenoh_profile0.rs";
       "components/lib/src/zenoh_profile0/**";
