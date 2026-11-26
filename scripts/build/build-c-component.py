@@ -52,12 +52,16 @@ ARCHITECTURES = {
         # the address it links to, so position independence buys nothing and
         # the absolute addressing the model permits is correct.
         "machine_flags": ("-mno-red-zone", "-fno-pic", "-mcmodel=small"),
-        # `--no-pie` at the linker, not `-no-pie` at the driver: on this bare
-        # target the driver reports the latter as unused and still produces a
-        # `ET_DYN` image whose 32-bit absolute relocations `ld.lld` refuses.
-        # A component is loaded at the exact address it links to, so a
-        # position-independent image would be strictly worse.
-        "link_flags": ("-Wl,--no-pie",),
+        # The builder runs `ld.lld` itself for this target. Clang's bare-metal
+        # toolchain does not handle `x86_64-none-elf`, so the driver hands the
+        # link to a host program named `gcc`. No component pin names that
+        # program. `scripts/check/check-c-component-link.py` refuses a build
+        # that runs it.
+        #
+        # `--no-pie` keeps the output `ET_EXEC`. A component is loaded at the
+        # exact address it links to, and its 32-bit absolute relocations do
+        # not fit a position-independent image.
+        "direct_link_flags": ("--no-pie",),
     },
 }
 COMMON_FLAGS = ("-ffreestanding", "-fno-stack-protector", "-fno-builtin", "-nostdlib")
@@ -159,21 +163,37 @@ def main() -> None:
                     str(component_object),
                 ]
             )
-        run(
-            [
-                compiler,
-                *common_flags,
-                "-fuse-ld=lld",
-                *architecture.get("link_flags", ()),
-                f"-Wl,-T,{architecture['linker']}",
-                "-Wl,--build-id=none",
-                str(start_object),
-                str(runtime_object),
-                *[str(component_object) for component_object in component_objects],
-                "-o",
-                str(output),
-            ]
-        )
+        objects = [
+            str(start_object),
+            str(runtime_object),
+            *[str(component_object) for component_object in component_objects],
+        ]
+        if "direct_link_flags" in architecture:
+            run(
+                [
+                    "ld.lld",
+                    *architecture["direct_link_flags"],
+                    "-T",
+                    str(architecture["linker"]),
+                    "--build-id=none",
+                    *objects,
+                    "-o",
+                    str(output),
+                ]
+            )
+        else:
+            run(
+                [
+                    compiler,
+                    *common_flags,
+                    "-fuse-ld=lld",
+                    f"-Wl,-T,{architecture['linker']}",
+                    "-Wl,--build-id=none",
+                    *objects,
+                    "-o",
+                    str(output),
+                ]
+            )
     print(output)
 
 

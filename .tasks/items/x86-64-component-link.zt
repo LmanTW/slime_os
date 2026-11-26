@@ -5,7 +5,7 @@ item :: s.Item = (h.bug "01a1f14c-a92d-7c08-ba24-869ece42ec46" "x86-64-component
   "The x86-64 C component link runs the host gcc"
   "scripts/build/build-c-component.py links a C component through the Clang driver. The bare-metal toolchain of the pinned Clang 21.1.8 handles aarch64-none-elf and riscv64-none-elf and runs ld.lld itself. It does not handle x86_64-none-elf, so the driver runs a program named gcc from PATH and adds -m64. On the AArch64 runner of the Evidence workflow that gcc refused -m64, and x86_64_sel4_root_boot_check failed in the image build after 30 s (run 44321295747, job 134874252504, main at ba33e0a). On an x86-64 host the link passes, and a host program that no component pin names takes part in a product link.")
   with {
-    intent = #planned;
+    intent = #active;
     owns = {
       "scripts/build/build-c-component.py";
     };
