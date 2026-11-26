@@ -43,6 +43,8 @@ pub mod zenoh_link_limits_v3;
 #[cfg(test)]
 mod zenoh_links;
 pub mod zenoh_node;
+#[cfg(test)]
+mod zenoh_priorities;
 pub mod zenoh_profile0;
 #[cfg(test)]
 mod zenoh_qos;

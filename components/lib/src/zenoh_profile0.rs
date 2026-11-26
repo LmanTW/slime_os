@@ -29,6 +29,7 @@ pub mod graph;
 pub mod lane;
 pub mod lane_limits;
 pub mod limits;
+pub mod priority_queue;
 pub mod reassembly;
 pub mod session;
 pub mod tables;

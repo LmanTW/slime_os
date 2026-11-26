@@ -19,7 +19,9 @@ use super::fragment::{
     Fragment, FragmentError, PutMessage, PutRules, Source, Splitter, decode_fragment, decode_put,
     fits_one_frame, is_fragment,
 };
-use super::lane::{Lane, decode_lane_fragment, decode_lane_frame, is_frame, peek_fragment_lane};
+use super::lane::{
+    DEFAULT_PRIORITY, Lane, decode_lane_fragment, decode_lane_frame, is_frame, peek_fragment_lane,
+};
 use super::lane_limits::MAX_RUNS_LIMIT;
 use super::limits::{Limits, Mode};
 use super::reassembly::{Progress, Run};
@@ -566,6 +568,9 @@ pub struct SessionOf<
     lease_ms: u64,
     peer_lease_ms: u64,
     tx_sn: u32,
+    /// The next sequence number each priority's reliable lane sends, indexed by priority. The default priority's
+    /// is `tx_sn`, which every frame without a lane shares, so its entry is not read.
+    lane_tx: [u32; 8],
     cookie: [u8; MAX_COOKIE_BYTES],
     cookie_len: usize,
     last_rx_ms: u64,
@@ -716,6 +721,7 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
             lease_ms: config.lease_ms,
             peer_lease_ms: 0,
             tx_sn: config.initial_sn,
+            lane_tx: [config.initial_sn; 8],
             cookie,
             cookie_len,
             last_rx_ms: 0,
@@ -2259,6 +2265,43 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
         })
     }
 
+    /// The next sequence number the reliable lane of `priority` sends. Without lanes, and for the default priority,
+    /// it is the one counter every frame shares.
+    pub const fn next_lane_tx_sn(&self, priority: u8) -> u32 {
+        if self.lanes() && priority != DEFAULT_PRIORITY && (priority as usize) < 8 {
+            self.lane_tx[priority as usize]
+        } else {
+            self.tx_sn
+        }
+    }
+
+    /// [`send_put_qos`](Self::send_put_qos) on the lane of the priority the QoS states. A session without lanes
+    /// writes the frame it always wrote, on the default lane. A session with lanes writes a FRAME of lane
+    /// `(priority, reliable)`: the mandatory transport QoS extension for any priority but the default, and the
+    /// next number of that lane, spent only when the frame was built.
+    pub fn send_put_lane<'a>(
+        &mut self,
+        key: &str,
+        attachment: &[u8],
+        payload: &[u8],
+        qos: Qos,
+        out: &mut [u8],
+    ) -> Result<Outcome<'a, E>, SessionError> {
+        if !self.lanes() || qos.priority() == DEFAULT_PRIORITY {
+            return self.send_put_qos(key, attachment, payload, qos, out);
+        }
+        let priority = qos.priority();
+        self.check_whole_put_on(key, attachment, payload.len(), priority)?;
+        let bounds = self.send_bounds();
+        let sn = self.lane_tx[usize::from(priority)];
+        let mut frame = FrameEncoder::with_lane(out, sn, priority, bounds)?;
+        frame.push_put_qos(Mapping::Sender, key, qos, attachment, payload)?;
+        let sent = frame.finish()?;
+        self.lane_tx[usize::from(priority)] = sn.wrapping_add(1);
+        self.sent_now(self.now_ms);
+        Ok(Outcome::sending(sent))
+    }
+
     /// What `send_put` checks before it builds a frame, and nothing more: that the session is open, the Put's key,
     /// attachment and size, and that it travels in one FRAME. It changes nothing, so a caller that is about to
     /// discard the Put refuses the same Puts `send_put` refuses.
@@ -2268,11 +2311,36 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
         attachment: &[u8],
         payload_len: usize,
     ) -> Result<(), SessionError> {
+        self.check_whole_put_on(key, attachment, payload_len, DEFAULT_PRIORITY)
+    }
+
+    /// [`check_whole_put`](Self::check_whole_put) for the frame of the lane `priority` names, whose header is longer
+    /// by the QoS extension and whose number is the lane's.
+    pub fn check_whole_put_on(
+        &self,
+        key: &str,
+        attachment: &[u8],
+        payload_len: usize,
+        priority: u8,
+    ) -> Result<(), SessionError> {
         self.check_put(key, attachment, payload_len, true)?;
         if self.state != State::Open {
             return Err(SessionError::NotOpen);
         }
-        if !self.put_fits_one_frame(key, attachment, payload_len) {
+        let message = PutMessage::new(key.as_bytes(), attachment, &[]);
+        let size =
+            Source::len(&message) - 1 + super::limits::leb_bytes(payload_len as u64) + payload_len;
+        let extension = if self.lanes() && priority != DEFAULT_PRIORITY {
+            2
+        } else {
+            0
+        };
+        let sn = self.next_lane_tx_sn(priority);
+        if !fits_one_frame(
+            size + extension,
+            self.send_body_max() + STREAM_LENGTH_BYTES,
+            sn,
+        ) {
             return Err(if self.params.fragments {
                 SessionError::NeedsFragments
             } else {

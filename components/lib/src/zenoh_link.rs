@@ -11,6 +11,7 @@
 
 use crate::zenoh_profile0::encode::{self, EncodeError};
 use crate::zenoh_profile0::lane::{Lane, peek_fragment_lane};
+use crate::zenoh_profile0::priority_queue::PriorityQueue;
 use crate::zenoh_profile0::session::{
     Config, DropCause, Event, MAX_EVENTS, Outcome, Params, Role, SessionError, SessionOf, State,
 };
@@ -539,6 +540,49 @@ impl<
         Ok(Published::Queued)
     }
 
+    /// Writes the next publication of `queue` into the send slot and returns its priority, or `None` when the queue
+    /// is empty. It writes one and stops. With the slot busy it writes nothing and is refused as
+    /// [`Error::SendBusy`], and the publication stays queued. The publication takes its sequence number here, from
+    /// the lane of its priority when the session has lanes and from the one counter otherwise. A publication the link
+    /// could never send is taken off the queue and its refusal returned, so it cannot block the ones behind it. One
+    /// refused as [`SessionError::NotOpen`] or [`SessionError::UndeclaredKey`] stays queued, because the handshake or
+    /// the peer's declaration may still arrive.
+    pub fn drain<const D: usize, const KB: usize, const PB: usize>(
+        &mut self,
+        handle: LinkHandle,
+        queue: &mut PriorityQueue<D, KB, PB>,
+    ) -> Result<Option<u8>, Error> {
+        self.check(handle)?;
+        if self.send_len != 0 {
+            return Err(Error::SendBusy);
+        }
+        let Some((priority, entry)) = queue.next() else {
+            return Ok(None);
+        };
+        let mut body = [0u8; FRAMED];
+        let built = self.session.send_put_lane(
+            entry.key(),
+            entry.attachment(),
+            entry.payload(),
+            entry.qos(),
+            &mut body,
+        );
+        // A refusal that depends on the link's state, not on the publication, keeps it queued for a later drain.
+        if !matches!(
+            built,
+            Err(SessionError::NotOpen | SessionError::UndeclaredKey)
+        ) {
+            queue.discard(priority);
+        }
+        let outcome = match built {
+            Err(SessionError::NeedsFragments) => return Err(Error::NeedsFragments),
+            other => other?,
+        };
+        let batch = outcome.batch(&body);
+        self.queue(batch)?;
+        Ok(u8::try_from(priority).ok())
+    }
+
     /// How many publications [`publish_qos`](Self::publish_qos) discarded because the send slot was busy.
     pub const fn dropped(&self) -> u32 {
         self.dropped
@@ -832,7 +876,7 @@ impl<
             self.session.note_sent(now_ms);
         }
         self.fill(&mut report)?;
-        self.drain(now_ms, heap, &mut report)?;
+        self.receive(now_ms, heap, &mut report)?;
         if !self.closed {
             let mut body = [0u8; FRAMED];
             // The single send slot decides whether a keep-alive may be written at all: with a batch
@@ -913,7 +957,7 @@ impl<
         }
     }
 
-    fn drain(
+    fn receive(
         &mut self,
         now_ms: u64,
         heap: &mut [u8],
