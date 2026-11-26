@@ -1,0 +1,71 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a216ef-7456-735f-8c6f-894825a08e20" "zenoh-qos-best-effort" "zenoh-transport"
+  "A Profile 0 link sends a publication on a best-effort lane"
+  "A Profile 0 link with lanes sends every publication on a reliable lane (zenoh-qos-priorities), and its receive side already takes a best-effort FRAME (zenoh-fragment-lanes). A publication that may be lost cannot say so on the wire: a stock peer reads the reliable flag of the FRAME header, and a reliable lane makes the peer refuse a gap in the numbers, where a best-effort lane takes a number ahead of the last and counts the gap. The change adds Link::publish_best_effort. When both INITs offered the QoS unit extension, it writes a FRAME of lane (p, best-effort): the header of the reliable lane with the reliable flag clear, and a sequence counter of its own for each priority, counting from the number the connector's OPEN announced. A link without lanes refuses it, because upstream reads a best-effort FRAME only on a connection that negotiated the extension. The congestion rule is the one of Link::publish_qos.")
+  with {
+    intent = #planned;
+    owns = {
+      "components/lib/src/zenoh_profile0.rs";
+      "components/lib/src/zenoh_profile0/session.rs";
+      "components/lib/src/zenoh_profile0/encode.rs";
+      "components/lib/src/zenoh_link.rs";
+      "components/lib/src/zenoh_link/**";
+      "components/lib/src/zenoh_best_effort*";
+      "components/lib/src/lib.rs";
+    };
+    nonGoals = {
+      h.nonGoal "Best-effort fragments. A best-effort publication must fit one FRAME, and a larger one is refused as needs-fragments. A best-effort fragment sender would need its own run and its own fragment numbers." h.agentDefault;
+      h.nonGoal "A queue. publish_best_effort writes into the one send slot, as publish_qos does. A best-effort lane in PriorityQueue is a later item." h.agentDefault;
+      h.nonGoal "A change to Link::publish, Link::publish_qos, Link::drain or Session::send_put_lane. They keep their signatures and bytes." h.agentDefault;
+      h.nonGoal "A component, a composition or a QEMU gate. This item judges the link on the host, and nothing calls the new method yet." h.agentDefault;
+      h.nonGoal "Any peer but the bytes zenoh-codec 1.0.0 writes. The exam compares frames with the host reference that scripts/lib/zenoh_lanes_exam.py proves against those bytes, and no live peer was observed reading a best-effort publication." h.agentDefault;
+      h.nonGoal "Reliable delivery with credits. That is the item zenoh-qos-reliable-credits." h.agentDefault;
+    };
+    requirements = {
+      h.req "best-effort-lane-header"
+        "When both INITs offered the QoS unit extension, publish_best_effort of a publication of priority p sends a FRAME of lane (p, best-effort): the header of the reliable lane with bit 5 clear, no extension for priority 5 and the mandatory extension 31 p for any other. The PUSH states priority p. The exam compares 4 best-effort frames to scripts/lib/zenoh_lanes_exam.py frame_header and to zenoh_wire.push_put_qos, byte for byte."
+        { "zenoh_best_effort_check"; };
+      h.req "lanes-count-apart"
+        "Each best-effort lane counts its own numbers from the number the connector's OPEN announced, apart from the reliable lane of the same priority. Two best-effort publications on lane 2 carry n and n+1, the first on best-effort lane 5 carries n, and a reliable publication on lane 2 sent after them still carries n."
+        { "zenoh_best_effort_check"; };
+      h.req "busy-slot-follows-congestion-control"
+        "With the send slot busy, publish_best_effort of a Drop publication returns Dropped, writes nothing and adds one to Link::dropped. It builds no frame, so the session spends no number: the next best-effort frame on that lane carries the number that follows the last one sent. A Block publication is refused as send-busy and leaves the count."
+        { "zenoh_best_effort_check"; };
+      h.req "no-lanes-refuses"
+        "A link whose peer did not offer the QoS unit extension refuses publish_best_effort as unexpected-message, writes nothing and spends no number, whether the slot is busy or not."
+        { "zenoh_best_effort_check"; };
+      h.req "refusals-keep-their-class"
+        "publish_best_effort refuses a publication after the link is closed as send-after-close. A publication that needs fragments is refused as needs-fragments. Each refusal is reported by name and class."
+        { "zenoh_best_effort_check"; };
+      h.req "judge-refuses-corruption"
+        "The judge refuses 57 corrupted transcripts of an honest run: a dropped, duplicated, reordered or unrecognised line, a frame with one digit changed, in capitals, with its reliable flag toggled, with its sequence number moved by one or on another lane, a count one over or under, and a refusal with another class."
+        { "zenoh_best_effort_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_best_effort_check" {
+        h.count "casesObserved" 18;
+        h.count "negativeControlsRefused" 57;
+      };
+    };
+    decisions = {
+      h.decided "separate-method-for-best-effort"
+        "Link::publish_best_effort is a new method, and Qos does not carry the reliability."
+        "the PUSH QoS extension of eclipse-zenoh 1.0.0 has no reliability bit, so a Qos value that said best-effort would be a state the wire cannot carry. The reliability belongs to the FRAME header, and a method makes the caller choose it"
+        h.agentDefault
+        { "best-effort-lane-header"; };
+      h.decided "best-effort-lane-counts-apart"
+        "A best-effort lane has a send counter of its own, apart from the reliable lane of the same priority."
+        "the receive side keeps one counter for each pair of a priority and a reliability, and a best-effort number drawn from the reliable counter would leave a gap on the reliable lane, which a reliable lane refuses"
+        h.agentDefault
+        { "lanes-count-apart"; };
+      h.decided "no-lanes-refuses-not-falls-back"
+        "A link without lanes refuses a best-effort publication as unexpected-message, and does not send it on the reliable default lane."
+        "a silent fallback would turn a publication the owner marked as loss-tolerant into a reliable one, and its number would take part in the one counter a peer refuses a gap in"
+        h.agentDefault
+        { "no-lanes-refuses"; };
+    };
+  };
+
+item

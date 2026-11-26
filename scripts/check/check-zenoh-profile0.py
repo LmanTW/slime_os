@@ -137,6 +137,7 @@ from typing import NoReturn
 import devloop_observations
 import zenoh_congestion_exam
 import zenoh_exchange
+import zenoh_best_effort_exam
 import zenoh_priorities_exam
 import zenoh_rmw_exam
 import zenoh_rmw_graph_exam
@@ -3340,6 +3341,43 @@ def priorities_main(controls_only: bool) -> int:
     return 0
 
 
+BEST_EFFORT_FILTER = "zenoh_best_effort::"
+# The exam's own Rust test, by name: a filter that matches nothing passes silently.
+BEST_EFFORT_TESTS = ("zenoh_best_effort::the_best_effort_exam",)
+
+
+def run_best_effort() -> list[str]:
+    stdout, output = cargo_tests((BEST_EFFORT_FILTER,), {**_os.environ})
+    missing = [name for name in BEST_EFFORT_TESTS if name not in tests_passed(output)]
+    if missing:
+        fail(f"best-effort: the exam's tests did not run and pass ({len(missing)} of {len(BEST_EFFORT_TESTS)}): {', '.join(missing)}")
+    return exam_lines(stdout)
+
+
+def best_effort_main(controls_only: bool) -> int:
+    neighbour_controls(subscribers=False)
+    try:
+        refused_controls = zenoh_best_effort_exam.all_controls()
+        positive, refusals = zenoh_best_effort_exam.judge(zenoh_best_effort_exam.good_lines())
+    except zenoh_best_effort_exam.BestEffortError as error:
+        fail(str(error))
+    if positive + refusals != zenoh_best_effort_exam.PINNED_CASES:
+        fail(f"best-effort: an honest transcript is {positive + refusals} cases, the checker pins {zenoh_best_effort_exam.PINNED_CASES}")
+    if refused_controls != zenoh_best_effort_exam.PINNED_CONTROLS:
+        fail(f"best-effort: {refused_controls} controls, the checker pins {zenoh_best_effort_exam.PINNED_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 best-effort judge: refused {refused_controls} corrupted records")
+        return 0
+    try:
+        cases, refusals = zenoh_best_effort_exam.judge(run_best_effort())
+    except zenoh_best_effort_exam.BestEffortError as error:
+        fail(str(error))
+    print(f"[zenoh-profile0] slice=best-effort cases={cases} refusals={refusals} controls={refused_controls}")
+    devloop_observations.record(casesObserved=cases + refusals, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 best-effort check: a link sends a publication on the best-effort lane of its priority, and refuses it without lanes")
+    return 0
+
+
 def grants_main(controls_only: bool) -> int:
     try:
         refused_controls = zenoh_grants_exam.all_controls()
@@ -4514,7 +4552,7 @@ def lost_holder_main(controls_only: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "liveliness", "queries", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-client", "rmw-router-link", "rmw-client-put", "rmw-token", "rmw-entity", "rmw-live", "rmw-discover", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "qos", "congestion", "priorities", "lanes", "link-limits-v3", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service-peer", "service-four", "service-fault", "stack-boot", "service", "service-link", "holder-fault", "service-stack", "link-v3-reader", "lost-holder", "tls-dependency", "serial-frame"), required=True)
+    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "liveliness", "queries", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-client", "rmw-router-link", "rmw-client-put", "rmw-token", "rmw-entity", "rmw-live", "rmw-discover", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "qos", "congestion", "priorities", "best-effort", "lanes", "link-limits-v3", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service-peer", "service-four", "service-fault", "stack-boot", "service", "service-link", "holder-fault", "service-stack", "link-v3-reader", "lost-holder", "tls-dependency", "serial-frame"), required=True)
     parser.add_argument("--controls-only", action="store_true")
     arguments = parser.parse_args()
     if arguments.slice == "composition":
@@ -4571,6 +4609,8 @@ def main() -> int:
         return qos_main(arguments.controls_only)
     if arguments.slice == "congestion":
         return congestion_main(arguments.controls_only)
+    if arguments.slice == "best-effort":
+        return best_effort_main(arguments.controls_only)
     if arguments.slice == "priorities":
         return priorities_main(arguments.controls_only)
     if arguments.slice == "grants":
