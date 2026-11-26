@@ -40,10 +40,14 @@ LINE = arm.STACK
 
 FACTS: tuple[facts.Fact, ...] = (
     ("stack-module", MAIN, r"^mod stack;$", "mod stack;"),
-    ("main-paints", MAIN, r"\bstack::paint\(stack::PAINT_DEPTH\);", "    let painted = stack::paint(stack::PAINT_DEPTH);"),
+    # The paint is the first statement of `main`, so no frame of the service's work is painted over or left unpainted.
+    ("main-paints-first", MAIN, r"^fn main\(_startup_arg: u32\) \{\n    let painted = stack::paint\(stack::PAINT_DEPTH\);$",
+     "fn main(_startup_arg: u32) {\n    let painted = stack::paint(stack::PAINT_DEPTH);"),
     ("main-prints", MAIN, r'\.bytes\(b"\[zenoh-service\] stack used="\)', '        .bytes(b"[zenoh-service] stack used=")'),
     ("main-declares", MAIN, r"^const STACK_BYTES: u32 = 32768;$", "const STACK_BYTES: u32 = 32768;"),
     ("paint-depth", STACK, r"^pub const PAINT_DEPTH: usize = 60 \* 1024;$", "pub const PAINT_DEPTH: usize = 60 * 1024;"),
+    ("paint-margin", STACK, r"^const MARGIN: usize = 512;$", "const MARGIN: usize = 512;"),
+    ("paint-starts-below-the-margin", STACK, r"^    let start = stack_pointer\(\) - MARGIN;$", "    let start = stack_pointer() - MARGIN;"),
     ("paint-byte", STACK, r"^const PAINT: u8 = 0xa5;$", "const PAINT: u8 = 0xa5;"),
     # The entry code loads the symbol's contents into the stack pointer. Its address is not the top of the stack.
     ("top-is-a-value", STACK, r"core::ptr::read\(core::ptr::addr_of!\(__sel4_runtime_common__stack_bottom\)\)",

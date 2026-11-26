@@ -3958,7 +3958,7 @@ def service_fault_main(controls_only: bool) -> int:
     return 0
 
 
-SERVICE_STACK_BOOT_CONTROLS = 30
+SERVICE_STACK_BOOT_CONTROLS = 32
 
 
 def stack_boot_main(controls_only: bool) -> int:

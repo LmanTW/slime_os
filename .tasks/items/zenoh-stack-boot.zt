@@ -30,13 +30,13 @@ item :: s.Item = (h.task "01a2169b-24fe-7081-af19-d16e67b2a535" "zenoh-stack-boo
         "`zenoh_service_arm` lists the stack line as a line of the service. The judges of `sel4-zenoh-service`, `sel4-zenoh-service-four`, `sel4-zenoh-service-peer` and `sel4-zenoh-service-fault` accept a transcript that holds it."
         { "zenoh_stack_boot_check"; };
       h.req "controls-are-refused"
-        "The judge refuses 30 inputs. 9 remove one declaration from a synthetic file set. 21 corrupt an honest transcript."
+        "The judge refuses 32 inputs. 11 remove one declaration from a synthetic file set. 21 corrupt an honest transcript."
         { "zenoh_stack_boot_check"; };
     };
     acceptance = {
       h.observedWhere "zenoh_stack_boot_check" {
-        h.count "casesObserved" 10;
-        h.count "negativeControlsRefused" 30;
+        h.count "casesObserved" 12;
+        h.count "negativeControlsRefused" 32;
       };
     };
     decisions = {
