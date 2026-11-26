@@ -1,0 +1,74 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a2169e-731e-71ab-bfb9-8323b3b7fa10" "zenoh-parity-tokens" "zenoh-transport"
+  "A client-role link declares the subscription, service server and service client tokens of a Slime node"
+  "`rmw_zenoh_cpp` declares a liveliness token for each entity of a node: `NN`, `MP`, `MS`, `SS` and `SC`. The client-role link declares a node token and a publisher token, and its exam judges only those. A live probe with this link showed that `rmw_zenohd` and `ros2` take an `MS`, an `SS` and an `SC` token in the plain form. The session holds 4 token ids, so it cannot hold five.")
+  with {
+    owns = {
+      "components/lib/src/zenoh_profile0.rs";
+      "components/lib/src/zenoh_profile0/**";
+      "components/lib/src/zenoh_link.rs";
+      "components/lib/src/zenoh_link/**";
+    };
+    nonGoals = {
+      h.nonGoal "A live router, a ROS install or a registry. This item judges the bytes the link writes, and a later item runs `ros2` against them." h.agentDefault;
+      h.nonGoal "A component, a composition, a system spec, a QEMU gate or a NIC. This item judges the link on the host over a scripted byte stream." h.agentDefault;
+      h.nonGoal "A service that answers a request. The service tokens announce an entity, and the query path of a ROS service is the `zenoh-parity-services` item." h.agentDefault;
+      h.nonGoal "A second node, a namespace other than `/`, a node id other than 0, and a QoS wrapper or key alias on a token." h.agentDefault;
+      h.nonGoal "Any change to what a link with no client role writes or accepts, and any change to the node token or publisher token." h.agentDefault;
+    };
+    requirements = {
+      h.req "client-link-declares-every-entity-kind"
+        "A link with the client role, open with a router, declares five tokens of `slime_node`: the node, a publisher, a subscription, a service server and a service client. Each is one FRAME equal to the bytes the exam builds from `build_token`, with the key in full and the sender mapping."
+        { "zenoh_rmw_entity_check"; };
+      h.req "each-key-is-its-kind"
+        "The subscription token is an `MS` entity on `/chatter` with depth 10. The two service tokens are an `SS` and an `SC` entity on `/add_two_ints` with the type and hash of `AddTwoInts`. Each key parses back to the entity it was built from."
+        { "zenoh_rmw_entity_check"; };
+      h.req "client-link-withdraws-one-and-keeps-the-rest"
+        "The link withdraws the subscription token by its id. The transcript prints the tokens the link holds afterwards, read from the link, as the other four in the order declared."
+        { "zenoh_rmw_entity_check"; };
+      h.req "the-session-holds-six-tokens"
+        "The session holds up to 6 token ids. A seventh is refused as `token-limit`, and so is an id already declared."
+        { "zenoh_rmw_entity_check"; };
+      h.req "client-link-refuses-what-it-must"
+        "A link with no client role refuses a token as `invalid-config`. A client-role link refuses a token before the session is open as `not-open`. It refuses a key over the bound as `encode`. It refuses a withdrawal of an id never declared as `unknown-token`. It refuses a token while the send slot is busy as `send-busy`."
+        { "zenoh_rmw_entity_check"; };
+      h.req "client-link-closes-on-request"
+        "A local close writes a `CLOSE` and nothing for the tokens. The link then holds none, and reports the close with reason 0."
+        { "zenoh_rmw_entity_check"; };
+      h.req "controls-are-refused"
+        "The judge refuses 99 corrupted records before it judges the run."
+        { "zenoh_rmw_entity_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_rmw_entity_check" {
+        h.count "casesObserved" 33;
+        h.count "negativeControlsRefused" 99;
+      };
+    };
+    decisions = {
+      h.decided "the-cap-is-six"
+        "`MAX_TOKENS` rises from 4 to 6. The exam declares five tokens and a seventh is refused."
+        "five tokens fill a node with a publisher, a subscription and one service of each side. A cap of six leaves one slot of margin"
+        h.agentDefault
+        { "the-session-holds-six-tokens"; };
+      h.decided "the-withdrawn-token-is-the-subscription"
+        "The exam withdraws the subscription token and not the publisher token."
+        "the token exam already withdraws the publisher token, and a second withdrawal of another kind shows the link withdraws by id and not by kind"
+        h.agentDefault
+        { "client-link-withdraws-one-and-keeps-the-rest"; };
+      h.decided "the-service-tokens-are-a-fixture-service"
+        "The exam names the service `/add_two_ints` with the `AddTwoInts` type and hash from the `rmw_zenoh_cpp` design document."
+        "no ROS importer exists here, and the hash is the one the original's documentation gives for that service"
+        h.agentDefault
+        { "each-key-is-its-kind"; };
+      h.decided "the-held-line-is-read-from-the-link"
+        "The Rust test prints the held tokens from the link's own token set and does not type them."
+        "the exam compares text, and a typed line would pass for any link"
+        h.agentDefault
+        { "client-link-withdraws-one-and-keeps-the-rest"; };
+    };
+  };
+
+item
