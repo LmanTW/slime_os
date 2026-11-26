@@ -72,9 +72,29 @@ the session spends no sequence number. A Put the link could never send, one that
 or that the session refuses for its key, attachment or size, or that arrives before the session is
 open, is refused with the class `Link::publish` gives it and is not counted, whether the slot is
 busy or not. `Link::publish` keeps refusing every publication on a busy
-slot. The link keeps one send slot, so a discarded publication is lost and not queued. Priority does
-not order anything and an express message is batched like any other. The `Put` and the `FRAME` and
-`FRAGMENT` headers still refuse the extension.
+slot. The link keeps one send slot, so a publication that goes through `publish_qos` and is discarded is
+lost and not queued. The `Put` still refuses the extension, and an express message is batched like any
+other: the link writes one message in each `FRAME`.
+
+A caller that wants priority to order its sends queues them in a `PriorityQueue` and lends it to
+`Link::drain`. The queue is the caller's type, with its own depth, key and payload bounds as const
+generics, so `contracts/zenoh-link-limits` does not count it. It holds one ring for each priority. A
+full ring discards a Drop publication and counts it in `PriorityQueue::dropped`, and refuses a Block
+one as `PushError::QueueFull`. A ring that is full does not stop another priority. `drain` writes one
+publication into the send slot and stops: it takes the oldest of the lowest priority number that holds
+any, so priority 0 leaves before priority 7 and a priority keeps its queue order. With the slot busy it
+writes nothing, is refused as `SendBusy`, and the publication stays queued. A publication refused as
+`NotOpen` or `UndeclaredKey` stays queued too, because the handshake or the peer's declaration may still
+arrive. Any other refusal takes it off the queue, so it cannot block the ones behind it.
+
+A publication takes its sequence number when it leaves the queue, not when it is queued. A session that
+negotiated lanes (`Session::lanes`) then sends it in a `FRAME` of lane (priority, reliable). The header
+has no extension for priority 5 and the mandatory transport QoS extension `31 <priority>` for any other,
+as `zenoh-codec` 1.0.0 writes it, and each priority counts its own numbers from the one the connector's
+`OPEN` announced. A session without lanes sends every `FRAME` on the default lane with one counter,
+whatever the priority, and numbers them in the order they leave the queue. Every lane this code writes is
+reliable, and `publish_part` still writes the default lane, so a Put too large for one `FRAME` is sent as
+before.
 
 Bounds are enforced before any byte is taken. The first release's are the demo
 contract's: a 512-byte batch, 129-byte key expression, 33-byte attachment, 12-byte
@@ -711,6 +731,10 @@ that a stock eclipse-zenoh 1.0.0 peer sends. It reads two captures of that peer,
   one refused as `SendBusy`, the frame before and the frame after three discards equal to the host reference
   with the next sequence number, and the retry limit on the fourth stalled send with Block publications
   refused between the pumps;
+- `just zenoh_priorities_check` — 5 frames on a link that negotiated lanes (priorities 0, 2, 2, 5 and an express 7),
+  each compared with the host reference `scripts/lib/zenoh_lanes_exam.py` and `scripts/lib/zenoh_wire.py` byte for
+  byte, 2 frames on a link without lanes, 2 frames that leave a queue, the drain orders `4,2,3,1,5` and `12,11`, 2
+  counts of a full queue, and 3 refusals by name and class. The judge refuses 88 corrupted records;
 - `just zenoh_queries_check` — the 14 batches two stock eclipse-zenoh 1.0.0 peers sent, one answering a query and one
   asking it, replayed into sessions of ours, with the host reference `scripts/lib/zenoh_queries_exam.py`
   reproducing the queryable declaration, request, both responses, final response and undeclaration byte for byte,
