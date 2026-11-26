@@ -1,0 +1,37 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a216b4-1e4e-7511-9e3e-04a1e27b80c1" "zenoh-peer-tokens-exam" "zenoh-transport"
+  "The stock exam lets a Profile 0 session take a token declaration and an INTEREST"
+  "zenoh-peer-tokens plans a decoder for the token declaration and the INTEREST, but zenoh_stock_check pins the corpus vectors declare_token and frame_network_interest as unsupported-message. A session that takes a token fails it. This item moves the two vectors out of the pinned refused set and re-pins the digest of the rest. It adds no decoder. zenoh_queries_check still pins the scenario refuse-token-declaration, which is left to a later pull request.")
+  with {
+    intent = #planned;
+    owns = {
+      "scripts/check/check-zenoh-profile0.py";
+    };
+    nonGoals = {
+      h.nonGoal "A decoder, an encoder or a session table for tokens or INTEREST. zenoh-peer-tokens owns them." h.agentDefault;
+      h.nonGoal "The scenario refuse-token-declaration in scripts/lib/zenoh_queries_exam.py and its generated constants in components/lib/src/zenoh_queries/fixtures.rs. Both change together, and no single pull request class may carry both." h.agentDefault;
+      h.nonGoal "The host reference encoders in scripts/lib/zenoh_wire.py and the xcheck declarations line. They land with zenoh-peer-tokens, which a later planning PR amends." h.agentDefault;
+    };
+    requirements = {
+      h.req "stock-exam-releases-two-vectors"
+        "declare_token and frame_network_interest may leave the corpus or stay refused with their captured bytes and class, and may not become accepted rows. The other 95 pinned refused vectors keep their name, class and bytes, and the exam still reports 69 cases with 158 controls."
+        { "zenoh_stock_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_stock_check" {
+        h.count "casesObserved" 69;
+        h.atLeast "negativeControlsRefused" 158;
+      };
+    };
+    decisions = {
+      h.decided "stock-only"
+        "This item changes the stock checker alone and leaves the queries exam pinned"
+        "the exam scenario and its generated fixtures break zenoh_queries_check when either changes alone, and V1 refuses one pull request that carries both classes"
+        h.agentDefault
+        { "stock-exam-releases-two-vectors"; };
+    };
+  };
+
+item
