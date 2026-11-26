@@ -1,0 +1,46 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a2173c-91c1-72ab-88a2-9fbbff5299ed" "zenoh-rmw-exam-queryable" "zenoh-transport"
+  "Repair the rmw exam's queryable refusal so a default session is graded against what it does now"
+  "The exam of `zenoh-rmw-session` pins `refuse-rmw-default-queryable` as refused with class `unsupported-message` by the default session. `zenoh-queryables` landed in #1231 and the default session now takes a queryable declaration. It reads the captured alias scope as an unknown alias and refuses it as `invalid-keyexpr`. Five slices fail on `main`: `rmw`, `rmw-graph`, `rmw-link`, `rmw-data` and `rmw-data-link`.")
+  with {
+    owns = {
+      "scripts/lib/zenoh_rmw_exam.py";
+      "components/lib/src/zenoh_rmw/fixtures.rs";
+    };
+    nonGoals = {
+      h.nonGoal "Any change to the decoder, the session or the query path. The default session keeps the behaviour #1231 gave it." h.agentDefault;
+      h.nonGoal "A change to the count of cases or controls of `zenoh-rmw-session`. This item replaces one refusal and keeps 75 cases and 182 controls." h.agentDefault;
+      h.nonGoal "A change to any other refusal of that exam, including `refuse-rmw-default-token`." h.agentDefault;
+      h.nonGoal "Moving the rmw exams out of `check-zenoh-profile0.py`. Every later edit of an rmw exam file is still a grader change for the Zenoh promises that checker runs." h.agentDefault;
+    };
+    requirements = {
+      h.req "default-session-refuses-a-request-it-has-no-queryable-for"
+        "The refusal named `refuse-rmw-default-request-undeclared` is a REQUEST for an alias on a default session that declared no queryable. The session refuses it with class `undeclared-key`."
+        { "zenoh_rmw_check"; };
+      h.req "the-fixture-equals-the-exam"
+        "`components/lib/src/zenoh_rmw/fixtures.rs` is the file the generator renders from the exam's record. `generate-zenoh-rmw-bindings.py --check` reports it current."
+        { "zenoh_rmw_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_rmw_check" {
+        h.count "casesObserved" 75;
+        h.count "negativeControlsRefused" 182;
+      };
+    };
+    decisions = {
+      h.decided "one-case-replaced-with-a-request"
+        "The queryable declaration is replaced by a REQUEST built by `zenoh_queries_exam.request`. The case keeps testing a query refusal by the default session."
+        "a queryable declaration is no longer refused by the default session, and a request with no declared queryable still is"
+        h.agentDefault
+        { "default-session-refuses-a-request-it-has-no-queryable-for"; };
+      h.decided "the-fixture-is-regenerated-not-edited"
+        "The generated fixture file changes only by running `scripts/generate/generate-zenoh-rmw-bindings.py`."
+        "the file is `@generated`, and a hand edit would be refused by the generator's `--check`"
+        h.agentDefault
+        { "the-fixture-equals-the-exam"; };
+    };
+  };
+
+item

@@ -12,8 +12,8 @@ module owns what those lines must be, and nothing here reads the Rust:
 * a count of each kind of message the session saw, equal to the count `zenoh_rmw_wire` reads from the
   bytes, so the session is not graded against itself;
 * the decoder's properties on each captured batch;
-* the variants the session must keep refusing, each with the class it is refused as, and the three the
-  default configuration must refuse because the graph is opt-in.
+* the variants the session must keep refusing, each with the class it is refused as, and the two the
+  default configuration must refuse because the graph is opt-in, and a REQUEST on a key it never declared a queryable for.
 
 `zenoh_rmw_wire.rebuild` writes every captured frame again from what it read, and the result must equal
 the capture. Like the other judges, this one is trusted only after it refuses a mutation of an honest
@@ -30,6 +30,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import zenoh_rmw_peer
+import zenoh_queries_exam as queries
 import zenoh_rmw_wire as wire
 import zenoh_wire
 import zutai_cli
@@ -151,7 +152,6 @@ def _refusals() -> tuple[tuple[str, str, str, str], ...]:
     """
     base = _frame_of("talker-03-frame")[0]
     _name, token = _first("talker", "token")
-    _name, query = _first("talker", "queryable")
     push = _unsubscribed_push()
     init = captured("talker-01-init-syn")
     first_extension = len(init) - 3
@@ -160,7 +160,7 @@ def _refusals() -> tuple[tuple[str, str, str, str], ...]:
     qos = bytes([wire.ID_DECLARE | wire.FLAG_Z, wire.EXT_QOS | (wire.ENC_Z64 << 5), 8])
     scoped_alias = qos + bytes([wire.D_KEYEXPR | wire.FLAG_N]) + wire.leb128(94) + wire.leb128(1) + wire.leb128(1) + b"x"
     return (
-        ("refuse-rmw-default-queryable", _frame(base, _declare("queryable", 99, scope=query.scope or 0)).hex(), "unsupported-message", "default"),
+        ("refuse-rmw-default-request-undeclared", _frame(base, queries.request()).hex(), "undeclared-key", "default"),
         ("refuse-rmw-default-token", _frame(base, _declare("token", 98, scope=token.scope or 0)).hex(), "unsupported-message", "default"),
         ("refuse-rmw-default-push-undeclared", _frame(base, push).hex(), "undeclared-key", "default"),
         ("refuse-rmw-init-extension-mandatory", mandatory.hex(), "unsupported-extension", "graph"),
