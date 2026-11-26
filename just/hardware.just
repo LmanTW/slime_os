@@ -467,6 +467,15 @@ zenoh_service_stack_check:
 zenoh_service_fault_check:
     python3 scripts/check/check-zenoh-profile0.py --slice service-fault
 
+# Judges the stack depth the Zenoh service measures on seL4. The service fills 61440 bytes of its stack with a known byte, and
+# prints one line at exit with the depth the run reached. The judge requires the paint, the line and the declared stack in
+# the source, and then boots `sel4-zenoh-service-four` and requires the depth to exceed the unpainted part and not exceed the
+# declared 32768 bytes. The expectation is scripts/lib/zenoh_stack_boot_exam.py. The recipe is in no aggregate. It fails until
+# the service prints the line.
+[group('hardware')]
+zenoh_stack_boot_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice stack-boot
+
 # Judges that the Zenoh service builds its session parameters from a configuration of `contracts/zenoh-link-limits/v3`. The judge
 # requires the link type with 2 aliases, the module of the reader, and the service's call of it, and requires the literal
 # `local: 3` to be gone. A Rust test prints the configuration, the stack it requires and the parameters it derives, and the
