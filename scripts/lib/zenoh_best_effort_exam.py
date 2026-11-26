@@ -58,6 +58,7 @@ REFUSED_SCENARIOS = (
     ("best-effort-block-on-a-busy-slot", "send-busy"),
     ("best-effort-without-lanes", "unexpected-message"),
     ("best-effort-after-close", "send-after-close"),
+    ("best-effort-needs-fragments", "needs-fragments"),
 )
 
 SHAPES = {
@@ -232,5 +233,5 @@ def all_controls() -> int:
 
 
 # Held here as well as in the item, so the gate stays correct once the item is retired. Both are exact.
-PINNED_CASES = 15
-PINNED_CONTROLS = 57
+PINNED_CASES = 16
+PINNED_CONTROLS = 59

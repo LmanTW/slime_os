@@ -37,16 +37,16 @@ item :: s.Item = (h.task "01a216ef-7456-735f-8c6f-894825a08e20" "zenoh-qos-best-
         "A link whose peer did not offer the QoS unit extension refuses publish_best_effort as unexpected-message, writes nothing and spends no number, whether the slot is busy or not."
         { "zenoh_best_effort_check"; };
       h.req "refusals-keep-their-class"
-        "publish_best_effort refuses a publication after the link is closed as send-after-close. A publication that needs fragments is refused as needs-fragments. Each refusal is reported by name and class."
+        "publish_best_effort refuses a publication after the link is closed as send-after-close. A publication too large for one FRAME is refused as needs-fragments, writes nothing and spends no number. Each refusal is reported by name and class. The exam counts 4 refusals: send-busy, unexpected-message, send-after-close and needs-fragments."
         { "zenoh_best_effort_check"; };
       h.req "judge-refuses-corruption"
-        "The judge refuses 57 corrupted transcripts of an honest run: a dropped, duplicated, reordered or unrecognised line, a frame with one digit changed, in capitals, with its reliable flag toggled, with its sequence number moved by one or on another lane, a count one over or under, and a refusal with another class."
+        "The judge refuses 59 corrupted transcripts of an honest run: a dropped, duplicated, reordered or unrecognised line, a frame with one digit changed, in capitals, with its reliable flag toggled, with its sequence number moved by one or on another lane, a count one over or under, and a refusal with another class."
         { "zenoh_best_effort_check"; };
     };
     acceptance = {
       h.observedWhere "zenoh_best_effort_check" {
-        h.count "casesObserved" 18;
-        h.count "negativeControlsRefused" 57;
+        h.count "casesObserved" 16;
+        h.count "negativeControlsRefused" 59;
       };
     };
     decisions = {
