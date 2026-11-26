@@ -67,7 +67,9 @@ judges on every boundary it claims:
   `scripts/spec/` judge, evidence recording, closeout and publication
   automation, CI selection, any test of a checker) needs no control. Adding one is a new
   exam and a human decision; see
-  `docs/decisions/negative-controls-for-product-judges.md`.
+  `docs/decisions/negative-controls-for-product-judges.md`. How an author
+  proves that each control reaches the assertion it names is in
+  [`work-item-authoring`](../work-item-authoring/SKILL.md), section 4.
 - A gate that runs a subset of an exam (a `--slice`, an `--arm`) still runs
   the pinned corpus judge and the controls that protect what the subset
   relies on; an implementation must not be able to alter a pinned refusal

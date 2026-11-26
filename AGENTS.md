@@ -75,6 +75,8 @@ A work item is one task/v2 Zutai file, `.tasks/items/<slug>.zt`; identity is its
 
 The rules V1 to V11 and their reasons are [`docs/decisions/work-item-devloop.md`](docs/decisions/work-item-devloop.md) and [`docs/decisions/independent-review.md`](docs/decisions/independent-review.md). The walkthrough is [`docs/getting-started/06-work-item-lifecycle.md`](docs/getting-started/06-work-item-lifecycle.md). Read both before opening a PR that touches `.tasks/`, `specs/`, `scripts/spec/`, or a checker. [`CONTRIBUTING.md`](CONTRIBUTING.md) owns the human-facing PR workflow and the PR class table.
 
+An exam freezes when its planning PR merges, so an author checks the item and its exam before that PR opens. [`.agents/skills/work-item-authoring/SKILL.md`](.agents/skills/work-item-authoring/SKILL.md) is the pre-flight. Read it before writing an item or opening a planning PR.
+
 ## Code review
 
 These rules bind every reviewer of a PR — a person, a review bot, or an agent asked to review — and the author answering the review. A review's job is to find where the diff, the checker it binds, and the landed work item disagree, and to say so with a file and line.
