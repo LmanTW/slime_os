@@ -447,7 +447,13 @@ fn the_client_entity_exam() {
         "a refused declaration holds no token"
     );
 
-    // One token more than the session holds.
+    // One token more than the session holds. The item fixes the cap at six, so the test asserts the constant before it
+    // fills the session from it.
+    assert_eq!(
+        crate::zenoh_profile0::session::MAX_TOKENS,
+        6,
+        "the item fixes the cap at six"
+    );
     let mut full = Rig::connector(true);
     full.open(run, Mode::Whole);
     let full_handle = full.link.handle();
@@ -508,12 +514,26 @@ fn the_client_entity_exam() {
         rig.link.send_pending(),
         "the stalled stream left the token in the slot"
     );
+    // The refusal comes from the link's own guard. A refusal from the send slot after the session took the token would
+    // print the same line and leave the token held and a sequence number spent, so the test reads both.
+    let held_before = rig.link.session().tokens_held().to_vec();
+    let sequence_before = rig.link.session().next_tx_sn();
     let error = rig
         .link
-        .withdraw_token(handle, NODE_ID)
+        .declare_token(handle, SUBSCRIPTION_ID, &subscription_key())
         .expect_err("a token while the send slot is busy");
     line(&std::format!(
         "refused token-while-the-send-slot-is-busy {}",
         class(error)
     ));
+    assert_eq!(
+        rig.link.session().tokens_held(),
+        held_before.as_slice(),
+        "a declaration refused for a busy slot holds no token"
+    );
+    assert_eq!(
+        rig.link.session().next_tx_sn(),
+        sequence_before,
+        "a declaration refused for a busy slot spends no sequence number"
+    );
 }
