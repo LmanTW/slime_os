@@ -1,0 +1,66 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a2169b-24fe-7081-af19-d16e67b2a535" "zenoh-stack-boot" "zenoh-service-core"
+  "The Zenoh service measures its own stack depth on seL4 and the four-holder boot judges it"
+  "The Zenoh service declares a stack of 32768 bytes, and the runtime reserves 65536. A host test measures the call path in a debug build on x86_64 and needs 24932 bytes at the built size. No run on seL4 measures the stack. The image builds with another profile and target, so the host figure does not show the depth of the booted service.")
+  with {
+    owns = {
+      "components/services/zenoh-service/**";
+    };
+    nonGoals = {
+      h.nonGoal "A depth at another size or on another path. The boot is one composition with four holders and one run of four samples. A fault, a stalled link or more rows can need more." h.agentDefault;
+      h.nonGoal "A change to `STACK_BYTES`, to the runtime's `STACK_SIZE`, to the host stack exam or to the component spec. This item reads the declared stack and changes none." h.agentDefault;
+      h.nonGoal "A judge of the stack line of `sel4-zenoh-service` and `sel4-zenoh-service-fault`. Both print the line, because they run the same service. Their judges list it and read no number from it." h.agentDefault;
+      h.nonGoal "A stack that overflows the 65536 bytes the runtime reserves. The stack has no guard page, and the line is printed only by a run that returned." h.agentDefault;
+      h.nonGoal "The stacks of the other components and of a worker thread. Only the service paints." h.agentDefault;
+      h.nonGoal "A pin of the measured number. The judge requires the number to be at most the declared stack. A change that moves the depth within the declared stack passes." h.agentDefault;
+    };
+    requirements = {
+      h.req "the-service-paints-its-stack"
+        "The service fills 61440 bytes of the runtime's stack with the byte `0xa5` before it does any work. The fill starts 512 bytes below the frame of `main`. It reads the top of the stack as the value of the runtime's symbol and not as its address."
+        { "zenoh_stack_boot_check"; };
+      h.req "the-service-prints-one-line"
+        "After its last line the service prints `[zenoh-service] stack used=<n> span=61440 above=<a> declared=32768` once. `used` counts from the top of the stack to the lowest changed byte. `above` is the part the fill does not cover."
+        { "zenoh_stack_boot_check"; };
+      h.req "the-run-fits-the-declared-stack"
+        "`used` is more than `above` and at most 32768. A `used` of 32769, of 61440 or of `above` is refused. The declared stack in the line is the 32768 of the component spec."
+        { "zenoh_stack_boot_check"; };
+      h.req "the-existing-judges-list-the-line"
+        "`zenoh_service_arm` lists the stack line as a line of the service. The judges of `sel4-zenoh-service`, `sel4-zenoh-service-four`, `sel4-zenoh-service-peer` and `sel4-zenoh-service-fault` accept a transcript that holds it."
+        { "zenoh_stack_boot_check"; };
+      h.req "controls-are-refused"
+        "The judge refuses 30 inputs. 9 remove one declaration from a synthetic file set. 21 corrupt an honest transcript."
+        { "zenoh_stack_boot_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_stack_boot_check" {
+        h.count "casesObserved" 10;
+        h.count "negativeControlsRefused" 30;
+      };
+    };
+    decisions = {
+      h.decided "the-service-paints-its-own-stack"
+        "The service paints and reads its stack, and prints one line. The judge reads the line from the four-holder boot."
+        "the runtime has no helper for a stack depth, and a measurement made by another component would not see the service's frames"
+        (h.fromHuman "Paint inside the service, print one line" "Board question 'How should the seL4 stack depth be measured?', answered 2026-11-26")
+        { "the-service-paints-its-stack"; "the-service-prints-one-line"; };
+      h.decided "the-count-starts-at-the-top"
+        "`used` counts from the top of the runtime's stack, so it includes the frame of `main` and the frames above the fill."
+        "the host exam counts the main frame, and a count that starts below it would not compare with the host figure. The first prototype counted below it and printed 6175, which the judge would have accepted"
+        h.agentDefault
+        { "the-service-prints-one-line"; };
+      h.decided "the-judge-bounds-the-number"
+        "The judge requires `used` to be at most the declared stack and does not pin the number."
+        "the claim is that the service fits its declared stack. Three boots of the build printed 19840 bytes, and a pin would fail on a change that stays inside the claim"
+        h.agentDefault
+        { "the-run-fits-the-declared-stack"; };
+      h.decided "the-arm-judge-lists-the-line"
+        "`zenoh_service_arm.KINDS` holds the stack line. The four-holder arm is not changed, and the new recipe runs that arm."
+        "every judge refuses a line of the service that it does not list, and four compositions run the service. Adding the line to the shared list keeps each judge as it is"
+        h.agentDefault
+        { "the-existing-judges-list-the-line"; };
+    };
+  };
+
+item

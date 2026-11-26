@@ -40,7 +40,9 @@ PUBLISHED = re.compile(rf"\[{SERVICE}\] published holder=([\w-]+) row=(\d+) sequ
 DELIVERED = re.compile(rf"\[{SERVICE}\] delivered holder=([\w-]+) row=(\d+) sequence=(\d+)")
 DENIAL = re.compile(rf"\[{SERVICE}\] denial class=([\w-]+) holder=([\w-]+) refused=(\d+)")
 DETACHED = re.compile(rf"\[{SERVICE}\] holder detached holder=([\w-]+)")
-KINDS = (GRANTS, ATTACHED, PUBLISHED, DELIVERED, DENIAL, DETACHED)
+# The service prints one stack line at exit. `zenoh_stack_boot_exam` judges its numbers. This judge only lists it as a line of the service.
+STACK = re.compile(rf"\[{SERVICE}\] stack used=(\d+) span=(\d+) above=(\d+) declared=(\d+)")
+KINDS = (GRANTS, ATTACHED, PUBLISHED, DELIVERED, DENIAL, DETACHED, STACK)
 
 
 ROW = re.compile(r'\{ holder = "([\w-]+)"; key = "([^"]+)"; publish = (true|false); subscribe = (true|false); \}')

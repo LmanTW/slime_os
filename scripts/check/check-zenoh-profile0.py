@@ -182,6 +182,7 @@ import zenoh_grants_table_exam
 import zenoh_limits_exam
 import zenoh_service_exam
 import zenoh_service_link_exam
+import zenoh_stack_boot_exam
 import zenoh_stack_exam
 import zenoh_qos_exam
 import zenoh_stock_peer
@@ -3957,6 +3958,43 @@ def service_fault_main(controls_only: bool) -> int:
     return 0
 
 
+SERVICE_STACK_BOOT_CONTROLS = 30
+
+
+def stack_boot_main(controls_only: bool) -> int:
+    """The stack the service measures on seL4. The facts are read first. The arm then boots the four-holder image under QEMU,
+    and the judge reads the stack line the service prints after its last line."""
+    exam = zenoh_stack_boot_exam
+    try:
+        refusals = exam.fact_controls() + exam.controls()
+        if refusals != SERVICE_STACK_BOOT_CONTROLS:
+            fail(f"stack-boot: {refusals} controls, the checker pins {SERVICE_STACK_BOOT_CONTROLS}")
+        if controls_only:
+            print(f"zenoh profile 0 stack-boot judge: refused {refusals} corrupted inputs")
+            return 0
+        cases = exam.check_facts()
+    except exam.StackBootError as error:
+        fail(f"stack-boot: {error}")
+    with tempfile.TemporaryDirectory() as scratch:
+        transcript = _Path(scratch) / "transcript.txt"
+        arm = subprocess.run(
+            [_sys.executable, str(ROOT / "scripts" / "check" / "check-sel4-io-network-plane.py"), "--arm", "zenoh-service-four", "--transcript", str(transcript)],
+            cwd=ROOT, capture_output=True, text=True, env={**_os.environ},
+        )
+        if arm.returncode != 0:
+            _sys.stderr.write((arm.stdout + arm.stderr)[-4000:])
+            fail(f"stack-boot: the zenoh-service-four arm exited {arm.returncode}")
+        lines = [line.strip() for line in transcript.read_text(encoding="utf-8").splitlines() if line.strip().startswith("[zenoh-service] ")]
+    try:
+        used, span, declared = exam.judge(lines)
+    except exam.StackBootError as error:
+        fail(f"stack-boot: {error}")
+    print(f"[zenoh-profile0] slice=stack-boot used={used} span={span} declared={declared} cases={cases + 1} controls={refusals}")
+    devloop_observations.record(casesObserved=cases + 1, negativeControlsRefused=refusals)
+    print("zenoh profile 0 stack-boot check: the service ran four holders in less stack than it declares")
+    return 0
+
+
 GRANTS_TABLE_TEST = "every_table_decodes_to_its_rows_or_is_refused"
 TABLE_LINE = re.compile(r"\[zenoh-exam\] (grantstable .*)$")
 
@@ -4469,7 +4507,7 @@ def lost_holder_main(controls_only: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "liveliness", "queries", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-client", "rmw-router-link", "rmw-client-put", "rmw-token", "rmw-entity", "rmw-live", "rmw-discover", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "qos", "congestion", "priorities", "lanes", "link-limits-v3", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service-peer", "service-four", "service-fault", "service", "service-link", "holder-fault", "service-stack", "link-v3-reader", "lost-holder", "tls-dependency", "serial-frame"), required=True)
+    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "liveliness", "queries", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-client", "rmw-router-link", "rmw-client-put", "rmw-token", "rmw-entity", "rmw-live", "rmw-discover", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "qos", "congestion", "priorities", "lanes", "link-limits-v3", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service-peer", "service-four", "service-fault", "stack-boot", "service", "service-link", "holder-fault", "service-stack", "link-v3-reader", "lost-holder", "tls-dependency", "serial-frame"), required=True)
     parser.add_argument("--controls-only", action="store_true")
     arguments = parser.parse_args()
     if arguments.slice == "composition":
@@ -4554,6 +4592,8 @@ def main() -> int:
         return service_booted_main(arguments.controls_only)
     if arguments.slice == "service-fault":
         return service_fault_main(arguments.controls_only)
+    if arguments.slice == "stack-boot":
+        return stack_boot_main(arguments.controls_only)
     if arguments.slice == "service-four":
         return service_four_main(arguments.controls_only)
     if arguments.slice == "service-peer":
