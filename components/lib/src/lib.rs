@@ -58,6 +58,7 @@ mod zenoh_rmw_data;
 mod zenoh_rmw_data_link;
 pub mod zenoh_rmw_graph;
 pub mod zenoh_rmw_link;
+pub mod zenoh_serial;
 pub mod zenoh_service;
 #[cfg(feature = "component-runtime")]
 pub mod zenoh_service_client;
