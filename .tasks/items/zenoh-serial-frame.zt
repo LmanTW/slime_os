@@ -5,7 +5,7 @@ item :: s.Item = (h.task "01a20dc1-d977-7470-98cf-3175b7529a16" "zenoh-serial-fr
   "A Rust framer writes and reads z-serial frames as the stock crate does"
   "`zenoh-link-serial` 1.0.0 puts each Zenoh batch on a serial line as one z-serial frame. The frame is a COBS body ended by a zero byte. The body holds a 2-byte length, the data and a 4-byte CRC. That CRC is not the standard CRC-32. The repository holds no code for this frame, and `StreamFramerOf` reads a 2-byte length prefix that this link does not use. The decision record `docs/decisions/zenoh-link-transports.md` plans a serial link and needs this framer first.")
   with {
-    intent = #planned;
+    intent = #active;
     owns = {
       "components/lib/src/zenoh_serial*";
       "components/lib/src/lib.rs";
