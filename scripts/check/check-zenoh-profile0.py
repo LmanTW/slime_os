@@ -147,6 +147,7 @@ import zenoh_rmw_data_exam
 import zenoh_rmw_client_exam
 import zenoh_rmw_client_put_exam
 import zenoh_rmw_token_exam
+import zenoh_rmw_entity_exam
 import zenoh_rmw_live_exam
 import zenoh_rmw_discover_exam
 import zenoh_rmw_router
@@ -2821,6 +2822,68 @@ def rmw_token_main(controls_only: bool) -> int:
     return 0
 
 
+RMW_ENTITY_FILTER = "zenoh_link::entity_tests::"
+# The exam's own Rust tests, by name: a filter that matches nothing passes silently.
+RMW_ENTITY_TESTS = tuple(f"zenoh_link::entity_tests::{name}" for name in (
+    "the_client_entity_exam",
+))
+
+
+def exam_lines_entity(output: str) -> list[str]:
+    """The `[zenoh-exam] cliententity ...` lines of a run, with the marker removed."""
+    return [line for line in exam_lines(output) if line.startswith("cliententity ")]
+
+
+def run_rmw_entity() -> list[str]:
+    try:
+        zenoh_rmw_client_put_exam.judge(run_rmw_client_put())
+    except zenoh_rmw_client_put_exam.ClientPutExamError as error:
+        fail(str(error))
+    rows = ("\n".join(" ".join((name, syn, ack, open_ack, *forwarded)) for name, syn, ack, open_ack, forwarded in zenoh_rmw_router_data.RUNS))
+    stdout, output = cargo_tests((RMW_ENTITY_FILTER,), {**_os.environ, "ZENOH_RMW_ROUTER_DATA_RUNS": rows})
+    passed = tests_passed(output)
+    missing = [name for name in RMW_ENTITY_TESTS if name not in passed]
+    if missing:
+        fail(f"rmw-entity: the exam's tests did not run and pass ({len(missing)} of {len(RMW_ENTITY_TESTS)}): {', '.join(missing[:4])}")
+    return exam_lines_entity(stdout)
+
+
+def rmw_entity_main(controls_only: bool) -> int:
+    try:
+        zenoh_rmw_client_put_exam.all_controls()
+    except zenoh_rmw_client_put_exam.ClientPutExamError as error:
+        fail(str(error))
+    sample = "\n".join(f"test {name} ... ok" for name in RMW_ENTITY_TESTS[1:])
+    if all(name in tests_passed(sample) for name in RMW_ENTITY_TESTS):
+        fail("control: a run with an rmw-entity exam test missing was read as complete")
+    exam = zenoh_rmw_entity_exam
+    try:
+        refused_controls = exam.all_controls()
+        item_cases, item_controls = exam.item_pins()
+        positive, refusals = exam.judge(exam.good_lines())
+    except exam.EntityExamError as error:
+        fail(str(error))
+    if positive + refusals != exam.PINNED_CASES:
+        fail(f"rmw-entity: an honest transcript is {positive + refusals} cases, the checker pins {exam.PINNED_CASES}")
+    if refused_controls != exam.PINNED_CONTROLS:
+        fail(f"rmw-entity: {refused_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if item_cases and item_cases != exam.PINNED_CASES:
+        fail(f"rmw-entity: the item fixes {item_cases} cases, the checker pins {exam.PINNED_CASES}")
+    if item_controls and item_controls != exam.PINNED_CONTROLS:
+        fail(f"rmw-entity: the item requires {item_controls} controls, the checker pins {exam.PINNED_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 rmw-entity judge: refused {refused_controls} corrupted records")
+        return 0
+    try:
+        cases, refusals = exam.judge(run_rmw_entity())
+    except exam.EntityExamError as error:
+        fail(str(error))
+    print(f"[zenoh-profile0] slice=rmw-entity cases={cases} refusals={refusals} controls={refused_controls}")
+    devloop_observations.record(casesObserved=cases + refusals, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 rmw-entity check: a client-role link declared the node, publisher, subscription, service server and service client tokens of a Slime node, withdrew one and closed")
+    return 0
+
+
 def rmw_data_link_main(controls_only: bool) -> int:
     try:
         zenoh_rmw_exam.all_controls()
@@ -4406,7 +4469,7 @@ def lost_holder_main(controls_only: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "liveliness", "queries", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-client", "rmw-router-link", "rmw-client-put", "rmw-token", "rmw-live", "rmw-discover", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "qos", "congestion", "priorities", "lanes", "link-limits-v3", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service-peer", "service-four", "service-fault", "service", "service-link", "holder-fault", "service-stack", "link-v3-reader", "lost-holder", "tls-dependency", "serial-frame"), required=True)
+    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "liveliness", "queries", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-client", "rmw-router-link", "rmw-client-put", "rmw-token", "rmw-entity", "rmw-live", "rmw-discover", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "qos", "congestion", "priorities", "lanes", "link-limits-v3", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service-peer", "service-four", "service-fault", "service", "service-link", "holder-fault", "service-stack", "link-v3-reader", "lost-holder", "tls-dependency", "serial-frame"), required=True)
     parser.add_argument("--controls-only", action="store_true")
     arguments = parser.parse_args()
     if arguments.slice == "composition":
@@ -4437,6 +4500,8 @@ def main() -> int:
         return rmw_client_put_main(arguments.controls_only)
     if arguments.slice == "rmw-token":
         return rmw_token_main(arguments.controls_only)
+    if arguments.slice == "rmw-entity":
+        return rmw_entity_main(arguments.controls_only)
     if arguments.slice == "rmw-live":
         return rmw_live_main(arguments.controls_only)
     if arguments.slice == "rmw-discover":

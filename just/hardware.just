@@ -164,6 +164,14 @@ zenoh_rmw_live_check:
 zenoh_rmw_discover_check:
     python3 scripts/check/check-zenoh-profile0.py --slice rmw-discover
 
+# A client-role Profile 0 link declares the liveliness tokens of five entities of one node: the node, a publisher, a
+# subscription, a service server and a service client. It withdraws the subscription token and closes. The frames equal
+# what scripts/lib/zenoh_rmw_graph.py and scripts/lib/zenoh_rmw_wire.py build, and the held tokens are read from the link.
+# No router runs here. The expectation is scripts/lib/zenoh_rmw_entity_exam.py. Nothing needs a registry or a ROS install.
+[group('hardware')]
+zenoh_rmw_entity_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice rmw-entity
+
 # A Profile 0 graph link that declares its owner's subscription, writes its owner's Puts and holds the samples
 # it receives in a bounded queue. The two captured data sessions of an rmw_zenoh_cpp peer are written to it
 # whole, one byte at a time and all at once. A talker's 11 samples reach the queue in order and 28 other pushes
