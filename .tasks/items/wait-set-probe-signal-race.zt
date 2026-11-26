@@ -5,6 +5,7 @@ item :: s.Item = (h.bug "01a20820-646c-7e29-b769-5015679f9da6" "wait-set-probe-s
   "The wait-set probe requires one wake of two sources before both sources have signalled"
   "The waiter of components/testkit/wait-set-probe requires one poll of its wait set to return the stream source and the supervision source together. It polls in a loop and keeps the widest single answer. Nothing orders its first poll after both signals. The signaller is a separate root-launched instance, and the root raises the supervision badge when the supervised peer exits. If a poll runs between the two signals, two polls return one source each. The waiter then prints [wait-set] FAIL two independently signalled sources did not coalesce into one wake. On qemu-riscv-virt 2 of 55 boots printed that marker, in one development container on 2026-11-18. 40 boots on qemu-arm-virt and 20 on qemu-pc99 did not. This cause is read from the code of the probe, not from the transcripts of those two boots.")
   with {
+    intent = #active;
     owns = {
       "components/testkit/wait-set-probe/**";
     };

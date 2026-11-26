@@ -23,15 +23,20 @@ use boot_contracts::wait_set::SourceKind;
 use slime_rt::console_line::Line;
 use slime_rt::wait_set::{MAX_CALLBACKS_PER_WAKE, MAX_SOURCES};
 use slime_rt::{
-    ERR_SUCCESS, WaitError, WaitSet, debug_write, exit, resolve_binding, send, spawn, timer_arm,
-    yield_now,
+    ERR_SUCCESS, MAX_CAPS_PER_MSG, MAX_MSG, WaitError, WaitSet, debug_write, exit, recv_blocking,
+    resolve_binding, send, spawn, supervision_status, timer_arm, yield_now,
 };
 
 /// The waiter's declared wait binding on `wait-set-wake`.
 const WAKE_SLOT: u32 = 0;
-/// Spins the waiter allows the signaller and its peer before concluding a
-/// missing wake. Bounded so a stall is a named failure rather than a hang.
-const SETTLE_SPINS: usize = 200_000;
+/// The waiter's slot that carries the signaller's message endpoint.
+const STREAM_SLOT: u32 = 0;
+/// The waiter's slot that holds the supervised peer's handle.
+const PEER_SLOT: u32 = 1;
+/// Status queries the waiter makes before it reports that the supervised peer
+/// never ended. The bound turns a stall into a named failure. The loop ends on
+/// the peer's recorded termination, not on this count.
+const PEER_EXIT_QUERIES: usize = 200_000;
 
 slime_rt::entry!(main);
 
@@ -109,13 +114,16 @@ fn run_waiter(mut set: WaitSet) -> ! {
     }
     debug_write(b"[wait-set:waiter] ceilings duplicate=1 undeclared=1 callbacks=1 usable=1\n");
 
-    // Make two sources ready *before* the first block, so the coalescing this
-    // milestone exists to demonstrate is deterministic rather than a scheduling
-    // accident: seL4 ORs the badges of signals that arrive while nobody is
-    // waiting, so a wake that follows both must carry both bits.
+    // Invariant: the waiter touches the Notification for the first time only
+    // after both the stream badge and the supervision badge are raised. Every
+    // poll clears the badge word, so a poll between the two signals would split
+    // them into two single-source answers. seL4 ORs the badges of signals that
+    // arrive while nobody polls, so the one poll after both signals returns
+    // both bits. Each signal is ordered before that poll through a channel
+    // other than the Notification, as follows.
     //
-    // The supervised peer is the first: it exits immediately, and the root
-    // signals the declared supervision badge when it does.
+    // The supervised peer exits immediately. The root records its termination
+    // and signals the declared supervision badge in one request handler.
     let peer = spawn(
         // The grant's own name, not `executable:` — that axis is the bootstrap
         // instance's layout view, and this component is not it. A grant name is
@@ -125,29 +133,39 @@ fn run_waiter(mut set: WaitSet) -> ! {
         &[],
     )
     .unwrap_or_else(|_| fail(b"spawn supervised peer"));
-    if peer.supervision_slot != 1 {
+    if peer.supervision_slot != PEER_SLOT {
         fail(b"supervised peer handle did not land in its declared slot")
     }
-    // The second is the signaller's message badge. Poll until both are pending,
-    // recording the widest *single* answer rather than the running total: a sum
-    // reaching two cannot tell one coalesced word carrying two badges from two
-    // separate single-badge wakes, and the coalescing is the whole property this
-    // plane exists to observe. Both sources are made ready before any block, so
-    // the kernel ORs their badges onto the one notification and a single poll
-    // must see both.
-    let mut queued = 0;
-    let mut widest = 0;
-    let mut settled = 0;
-    while settled < SETTLE_SPINS && queued < 2 {
-        let batch = set.poll().unwrap_or_else(|error| fail_with(b"poll", error));
-        if batch > widest {
-            widest = batch;
+    // The signaller signals the stream badge and then sends its one message on
+    // a blocking seL4 Send. This receive completes only after that Send, so the
+    // stream badge is raised once it returns. The message is the one the stream
+    // source stands for.
+    let mut buffer = [0u8; MAX_MSG];
+    let mut caps = [0u64; MAX_CAPS_PER_MSG];
+    if recv_blocking(STREAM_SLOT, &mut buffer, &mut caps) < 0 {
+        fail(b"receive the signaller's message")
+    }
+    // The root answers this query only between request handlers. A recorded
+    // termination therefore means the supervision badge is already raised. A
+    // completed answer consumes the handle in `PEER_SLOT`. Nothing below uses
+    // that slot: the supervision source is dispatched and retired by badge.
+    let mut queries = 0;
+    loop {
+        match supervision_status(PEER_SLOT) {
+            Ok(Some(_)) => break,
+            Ok(None) => {}
+            Err(_) => fail(b"query the supervised peer"),
         }
-        queued += batch;
-        settled += 1;
+        queries += 1;
+        if queries == PEER_EXIT_QUERIES {
+            fail(b"the supervised peer never ended")
+        }
         yield_now();
     }
-    if widest != 2 || queued != 2 || set.ready_queued() != 2 {
+    // Both badges are raised and no poll has run, so this one poll must carry
+    // both. A smaller answer is a failure, not a reason to poll again.
+    let coalesced = set.poll().unwrap_or_else(|error| fail_with(b"poll", error));
+    if coalesced != 2 || set.ready_queued() != 2 {
         fail(b"two independently signalled sources did not coalesce into one wake")
     }
     // Dispatch that ready set: both sources recovered from one badge word, in
@@ -165,17 +183,18 @@ fn run_waiter(mut set: WaitSet) -> ! {
                 SourceKind::Stream => {
                     seen_stream = true;
                     // A badge means readiness, not a message count, so the
-                    // endpoint is drained until it would block.
+                    // endpoint is drained until it would block. The signaller
+                    // sends exactly one message, and the waiter received it
+                    // before the poll, so the drain must find nothing more.
                     let slot = ready
                         .drain_slot
                         .unwrap_or_else(|| fail(b"stream source slot"));
-                    let mut buffer = [0u8; slime_rt::MAX_MSG];
                     let mut drained = 0;
                     while let Ok(Some(_)) = slime_rt::wait_set::drain(slot, &mut buffer) {
                         drained += 1;
                     }
-                    if drained == 0 {
-                        fail(b"a ready stream source drained nothing")
+                    if drained != 0 {
+                        fail(b"the stream source carried more than its one message")
                     }
                 }
                 SourceKind::Supervision => seen_supervision = true,
@@ -192,13 +211,12 @@ fn run_waiter(mut set: WaitSet) -> ! {
     if order[0] != stream.badge || order[1] != supervision.badge {
         fail(b"dispatch order did not follow the declared badge order")
     }
-    // Both numbers are live and read *after* dispatch: `widest` is what one
-    // badge word actually carried — the widest single poll, not the running
-    // total, so two separate single-badge wakes cannot produce this line — and
-    // `dispatched` is what the ready queue actually handed out.
+    // Both numbers are live and read after dispatch: `coalesced` is what the
+    // one badge word carried, and `dispatched` is what the ready queue handed
+    // out.
     write_pair(
         b"[wait-set:waiter] wake ready=",
-        widest as u64,
+        coalesced as u64,
         b" dispatched=",
         dispatched as u64,
     );
@@ -213,10 +231,9 @@ fn run_waiter(mut set: WaitSet) -> ! {
         fail(b"timer arm")
     }
     // Passes that dispatched something, counting the coalesced one above. A
-    // pass, not a wake: `set.wakes()` counts every kernel answer including the
-    // empty polls the loop above may have made, and the two numbers are printed
-    // together precisely so the gate can see that the ready sets were fewer than
-    // the sources.
+    // pass, not a wake: `set.wakes()` counts every kernel answer, including a
+    // block that queued nothing. The gate reads both numbers to see that the
+    // ready sets were fewer than the sources.
     let mut waits = 1;
     let mut blocks = 0;
     loop {
