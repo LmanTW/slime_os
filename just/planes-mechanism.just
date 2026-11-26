@@ -15,6 +15,10 @@ usb_xhci_descriptor_check: sel4_pin_check
     python3 scripts/check/check-usb-xhci-descriptor.py
 
 [group('planes / mechanism')]
+io_interrupt_wait_check: sel4_pin_check
+    python3 scripts/check/check-io-interrupt-wait.py
+
+[group('planes / mechanism')]
 io_network_check: sel4_pin_check
     python3 scripts/check/check-sel4-io-network-plane.py
 

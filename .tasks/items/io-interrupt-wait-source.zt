@@ -1,0 +1,171 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a21579-f36d-77fa-a944-c3dadcce58f4" "io-interrupt-wait-source" "planes-mechanism"
+  "A driver waits on its declared interrupt through a root-dispatched wait-set source"
+  "The root binds a driver's interrupt to a notification that only the root holds, and nothing waits on it. No product path records an arrival, so `IRQ_ACK` can only bind a line or refuse an acknowledgement. Every driver polls its device, and the xHCI driver of usb-xhci-device-descriptor cannot wait for its event ring.")
+  with {
+    intent = #planned;
+    owns = {
+      "contracts/wait-set/v3/**";
+      "boot-contracts/src/lib.rs";
+      "boot-contracts/src/wait_set/**";
+      "boot-contracts/src/generated/wait_set.rs";
+      "scripts/build/generation_resources.py";
+      "scripts/build/build-generation.py";
+      "components/runtime/src/wait_set.rs";
+      "components/lib/src/virtio_mmio.rs";
+      "slime-root/src/lib.rs";
+      "slime-root/src/wait_set.rs";
+      "slime-root/src/device.rs";
+      "slime-root/src/io_resource.rs";
+      "slime-root/src/irq_control.rs";
+      "slime-root/src/notification.rs";
+      "slime-root/src/generation.rs";
+      "slime-root/src/graph_runtime.rs";
+      "slime-root/src/graph_runtime/**";
+      "components/testkit/irq-wait-probe/**";
+      "contracts/component-spec/v1/components/irq-wait-probe.zti";
+      "contracts/composition-inventory/v1/inventory.zti";
+      "contracts/system-spec/v1/systems/sel4-io-interrupt.zti";
+      "contracts/generation-manifest/v1/compositions/sel4-io-interrupt.zti";
+      "contracts/system-image-closure/v3/closures/sel4-io-interrupt.zti";
+      "Cargo.toml";
+      "Cargo.lock";
+    };
+    nonGoals = {
+      h.nonGoal "A change to a product driver. virtio-rng-driver, virtio-net-driver and virtio-blk-driver keep polling, and the implementation PR of usb-xhci-device-descriptor declares the xHCI driver's interrupt row." h.agentDefault;
+      h.nonGoal "MSI, MSI-X, edge-triggered lines and one line shared by two sources." h.agentDefault;
+      h.nonGoal "Interrupt coalescing, rate limits, storm handling and a timeout for a missing acknowledgement." h.agentDefault;
+      h.nonGoal "An interrupt row on a resident or restartable waiter, and a fault or restart while an arrival is pending. The probe is bounded and exits once." h.agentDefault;
+      h.nonGoal "Interrupt delivery on x86 q35, riscv-virt or the Framework." h.agentDefault;
+      h.nonGoal "A change to the component syscall transport. `scripts/lib/console_record_controls.py` pins `components/runtime/src/syscall.rs`, its transport and wire modules, and the runtime ABI bindings byte for byte. The probe therefore uses the existing `IRQ_ACK` and notification calls." h.agentDefault;
+      h.nonGoal "A change to `scripts/generate/` or `scripts/lib/` in an implementation PR of this item. The wait-set v3 format and its regenerated bindings, `scripts/lib/boot_contracts.py` included, land first in a separate format PR. The two generation builders under `scripts/build/` grade no bound target, so `owns` covers them." h.agentDefault;
+      h.nonGoal "The update of `docs/architecture/io-substrate.md`, `docs/architecture/runtime-authority.md` and a row in `docs/reference/just-targets.md`. The devloop judge gives `docs/` the process class, so a documentation PR after the implementation carries them." h.agentDefault;
+      h.nonGoal "A change to `scripts/check/check-root-size.py`. If the root outgrows a ceiling, a separate planning PR adds a size item, as root-size-pci-binding did." h.agentDefault;
+    };
+    invariants = {
+      h.invariant "acknowledgement-follows-arrival"
+        "The root acknowledges a line in the kernel only for the sequence of an arrival it recorded. No component re-arms a line without an arrival."
+        h.agentDefault;
+      h.invariant "wake-confers-no-authority"
+        "The root signals an interrupt badge only to the waiter whose declared drain slot holds the interrupt source that fired. The wake adds no capability."
+        h.agentDefault;
+      h.invariant "undeclared-sources-keep-their-binding"
+        "An interrupt source without an interrupt row keeps its root-private notification. The root dispatches nothing for it."
+        h.agentDefault;
+      h.invariant "root-reads-no-device-to-dispatch"
+        "The root learns an arrival from the kernel alone. It reads no device register to dispatch or to acknowledge."
+        h.agentDefault;
+    };
+    requirements = {
+      h.req "interrupt-kind-in-wait-set-v3"
+        "Wait-set v3 adds the source kind `interrupt`, number 8, and keeps every v2 field, bound and kind number. An interrupt row's drain slot names the waiter's own interrupt source."
+        { "io_interrupt_wait_check"; "contracts_check"; };
+      h.req "builder-refuses-undispatchable-rows"
+        "The builder encodes the composition's interrupt row with its badge and drain slot. It refuses a row that drains a slot without the waiter's interrupt source, and a row without a drain slot. It also refuses two rows on one source, and a badge that a declared signaller also produces."
+        { "io_interrupt_wait_check"; };
+      h.req "only-the-probe-holds-hardware"
+        "The derived manifest grants one device, one MMIO region, one interrupt source and one DMA account, all to the probe. The probe alone waits on the row's notification, and no declared signaller produces the row's badge."
+        { "io_interrupt_wait_check"; };
+      h.req "root-dispatches-each-arrival"
+        "When the declared line fires, the root records one arrival and signals the waiter's declared badge. The root prints one dispatch record before the probe reports the source bound. Its IRQ equals the device tree's route for the transport that holds the device."
+        { "io_interrupt_wait_check"; };
+      h.req "acknowledgement-only-after-arrival"
+        "The root acknowledges the line in the kernel only for a recorded arrival's sequence. It refuses an acknowledgement before any arrival and a repeated one. At the probe's exit it reports three arrivals, three acknowledgements and two refusals."
+        { "io_interrupt_wait_check"; };
+      h.req "each-request-completes-by-interrupt"
+        "The probe makes three requests. For each, QEMU's trace records in order the kick, the filled buffer, the line raised and the CPU taking it. Then the trace records the probe reading and clearing the interrupt status, and the line lowered. The probe reports each sequence, the status and the filled byte count."
+        { "io_interrupt_wait_check"; };
+      h.req "device-quiet-and-reclaimed-at-exit"
+        "The probe holds one interrupt source and a DMA mapping when it exits, and the root's exit reclaim leaves no charge. No component faults. QEMU's trace records a device reset after the last buffer, and its monitor reads status 0 and no interrupt pending."
+        { "io_interrupt_wait_check"; };
+      h.req "undeclared-sources-unchanged"
+        "A composition without an interrupt row keeps its current interrupt binding. The entropy, PCI binding and driver authority gates still pass, and the driver authority gate still refuses a spoofed acknowledgement."
+        { "sel4_entropy_check"; "io_pci_binding_check"; "io_driver_authority_check"; };
+      h.req "existing-wait-sets-decode-under-v3"
+        "Every existing wait set decodes under v3 with its v2 meaning. The wait-set plane and the link wake gate still pass."
+        { "wait_set_check"; "link_wake_check"; };
+      h.req "controls-are-refused"
+        "The judge refuses 80 inputs: 15 corrupted manifests, 8 encoders that accept or encode what the builder must not, and 57 corrupted boot records. The boot records span the serial transcript, the monitor replies, the trace and the judge's model of the routes."
+        { "io_interrupt_wait_check"; };
+    };
+    acceptance = {
+      h.observedWhere "io_interrupt_wait_check" {
+        h.count "casesObserved" 56;
+        h.count "negativeControlsRefused" 80;
+      };
+      h.observed "contracts_check";
+      h.observed "sel4_entropy_check";
+      h.observed "io_pci_binding_check";
+      h.observed "io_driver_authority_check";
+      h.observed "wait_set_check";
+      h.observed "link_wake_check";
+    };
+    decisions = {
+      h.decided "interrupt-before-the-xhci-driver"
+        "A separate item adds interrupt delivery before the xHCI driver is implemented. The driver does not poll the root through `IRQ_ACK`."
+        "polling `IRQ_ACK` changes what that operation means without a contract change, and the HID item and every later driver reuse a declared source"
+        (h.fromHuman "Plan an interrupt item" "Claude Code session 0946c66e-e6cf-4ff4-b073-74e1a653fb07, 2026-11-26, choosing a separate interrupt item over polling through IRQ_ACK within the xHCI item")
+        { "root-dispatches-each-arrival"; "acknowledgement-only-after-arrival"; };
+      h.decided "root-dispatches-the-arrival"
+        "The kernel signals a root notification. The root records the arrival, then signals the waiter's declared badge. The kernel does not signal the waiter directly."
+        "`IRQ_ACK` refuses an acknowledgement without a recorded arrival, as the driver authority promise and the io-resource model's `StaleAckRefused` require. A kernel signal straight to the waiter leaves the root no arrival to check"
+        h.agentDefault
+        { "root-dispatches-each-arrival"; "acknowledgement-only-after-arrival"; };
+      h.decided "interrupt-is-a-wait-set-kind"
+        "The waiter declares the source as a wait-set row of the new kind `interrupt`, root-signalled like `supervision`. Its drain slot names the waiter's interrupt source slot."
+        "a declared row states the badge and the notification the root signals, and its drain slot ties the wake to authority the waiter holds"
+        h.agentDefault
+        { "interrupt-kind-in-wait-set-v3"; "builder-refuses-undispatchable-rows"; };
+      h.decided "format-pr-past-the-judge"
+        "The format PR lands wait-set v3, its regenerated bindings, the decoders and the builder before the implementation PR. Root admission refuses an interrupt row until the implementation PR. The owner merges the format PR past the devloop judge."
+        "the generated binding `scripts/lib/boot_contracts.py` grades every bound seL4 target, so the judge refuses a wait-set format change in any PR, as #1235 found"
+        (h.fromHuman "Bypass format PR (Recommended)" "Claude Code session 0946c66e-e6cf-4ff4-b073-74e1a653fb07, 2026-11-26, choosing a minimal format PR merged past the judge over reusing the device kind without a format change")
+        { "interrupt-kind-in-wait-set-v3"; "existing-wait-sets-decode-under-v3"; };
+      h.decided "probe-on-virtio-rng"
+        "A testkit probe, `irq-wait-probe`, drives a QEMU virtio-rng device in the new composition `sel4-io-interrupt`. No product driver changes."
+        "virtio-rng completes a request without a peer, and a probe leaves the components of the entropy, network and block gates unchanged"
+        h.agentDefault
+        { "each-request-completes-by-interrupt"; "undeclared-sources-unchanged"; };
+      h.decided "three-cycles-two-refusals"
+        "The probe makes three requests. It also sends one acknowledgement before the first arrival and one repeated acknowledgement after the last, and the root counts both refusals."
+        "three cycles show the line re-armed twice, and a driver that polls `IRQ_ACK` until it succeeds raises the refusal count above two"
+        h.agentDefault
+        { "acknowledgement-only-after-arrival"; "each-request-completes-by-interrupt"; };
+      h.decided "clear-before-acknowledge"
+        "The probe reads and clears the device's interrupt status before it acknowledges the arrival."
+        "the virtio-mmio line is level-triggered, so an acknowledgement before the clear re-fires the line, and the trace then records a second take"
+        h.agentDefault
+        { "each-request-completes-by-interrupt"; };
+      h.decided "builder-judged-directly"
+        "The exam calls the builder's wait-set encoder, `validated_wait_set` in `scripts/build/generation_resources.py`, on the derived manifest and on four corrupted rows. The builder's interrupt-row refusals live in that function."
+        "a row the builder accepts reaches the root, and the encoder can be judged without booting a corrupt generation"
+        h.agentDefault
+        { "builder-refuses-undispatchable-rows"; };
+      h.decided "exam-outside-the-plane-inventory"
+        "The checker is `scripts/check/check-io-interrupt-wait.py`, and it names the closure through `INTERRUPT_CLOSURE`, not a top-level `CLOSURE` constant."
+        "a `check-sel4-*` file joins the test-run inventory, and a `CLOSURE` constant joins the devloop closure digest. Both resolve the closure, which this planning PR cannot add, so either name would fail a bound target on main"
+        h.agentDefault
+        { "controls-are-refused"; };
+    };
+    knownLimits = {
+      h.knownLimit "io_interrupt_wait_check"
+        "The exam does not observe the root's signal to the waiter. It judges the declared route, the dispatch record and the root's counts. A probe that polls the device, or its notification, passes the same records. The counts show only that no acknowledgement was refused beyond the probe's two."
+        h.agentDefault;
+      h.knownLimit "io_interrupt_wait_check"
+        "QEMU's virtio-mmio trace events do not name their transport. The judge relies on one attached virtio device, and the monitor shows which transport holds it."
+        h.agentDefault;
+      h.knownLimit "io_interrupt_wait_check"
+        "The trace event names and formats and the GIC's IRQ numbering are those of QEMU 11.0.1. A change of the QEMU pin needs a planning PR that checks them again."
+        h.agentDefault;
+      h.knownLimit "io_interrupt_wait_check"
+        "No boot admits a corrupt generation, so the root's own admission checks of an interrupt row are not judged in QEMU. The exam judges the builder's refusals."
+        h.agentDefault;
+      h.knownLimit "io_interrupt_wait_check"
+        "The digest of this target is coarse, and its QEMU arguments sit in the checker, not in a `system-test-run` record. The guest and the monitor share one serial stream."
+        h.agentDefault;
+    };
+  };
+
+item
