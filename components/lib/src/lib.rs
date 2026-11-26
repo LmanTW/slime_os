@@ -42,6 +42,8 @@ pub mod zenoh_link;
 pub mod zenoh_link_limits_v3;
 #[cfg(test)]
 mod zenoh_links;
+#[cfg(test)]
+mod zenoh_liveliness;
 pub mod zenoh_node;
 #[cfg(test)]
 mod zenoh_priorities;

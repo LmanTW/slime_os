@@ -27,9 +27,9 @@ use super::limits::{Limits, Mode};
 use super::reassembly::{Progress, Run};
 use super::tables::{InsertError, Keys, SlotTable};
 use super::{
-    Bounds, Frame, MAX_BATCH_BYTES, MAX_COOKIE_BYTES, MAX_KEY_BYTES, Mapping, Message, Network,
-    Qos, QueryKey, Refusal, STREAM_LENGTH_BYTES, decode_batch_client, decode_batch_qos,
-    decode_batch_with, frame_of,
+    Bounds, Frame, InterestMode, MAX_BATCH_BYTES, MAX_COOKIE_BYTES, MAX_KEY_BYTES, Mapping,
+    Message, Network, Qos, QueryKey, Refusal, STREAM_LENGTH_BYTES, decode_batch_admitting,
+    decode_batch_client, decode_batch_qos, decode_batch_with, frame_of,
 };
 use slime_proto::zenoh_profile as p;
 
@@ -608,6 +608,10 @@ pub struct SessionOf<
     /// The ids of the liveliness tokens this side declared and has not withdrawn. A withdrawal names the id and no key.
     tokens: [u32; MAX_TOKENS],
     token_n: usize,
+    /// The key of each token in `tokens`, by id: an INTEREST is answered with the keys.
+    token_keys: SlotTable<MAX_TOKENS, B>,
+    /// This listener takes an INIT_SYN that names a client.
+    admit_clients: bool,
     queries: Queries,
 }
 
@@ -741,8 +745,20 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
             client: false,
             tokens: [0; MAX_TOKENS],
             token_n: 0,
+            token_keys: SlotTable::new(),
+            admit_clients: false,
             queries: Queries::default(),
         })
+    }
+
+    /// The same listener, built to take an INIT_SYN that names a client and answer it with the INIT_ACK of a peer.
+    /// Without it such an INIT_SYN is refused as `UnsupportedWhatami`. Only a listener that has read nothing takes it.
+    pub fn with_client_admission(mut self) -> Result<Self, SessionError> {
+        if self.role != Role::Listener || self.state != State::Idle {
+            return Err(SessionError::InvalidConfig);
+        }
+        self.admit_clients = true;
+        Ok(self)
     }
 
     /// The same session with the client role: its INIT_SYN carries `whatami` 2, and it takes an INIT_ACK of
@@ -1003,6 +1019,7 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
         self.local_n = 0;
         self.remote_n = 0;
         self.token_n = 0;
+        self.token_keys.clear();
         self.queries = Queries::default();
         self.aliases.clear();
         for run in &mut self.run_table {
@@ -1095,6 +1112,8 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
     fn decode<'a>(&self, batch: &'a [u8]) -> Result<Message<'a>, Refusal> {
         if self.client {
             decode_batch_client(batch, &self.params.bounds, self.offers_qos())
+        } else if self.admit_clients {
+            decode_batch_admitting(batch, &self.params.bounds, self.offers_qos())
         } else if self.offers_qos() {
             decode_batch_qos(batch, &self.params.bounds)
         } else {
@@ -1167,7 +1186,7 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
             } => self.on_open_ack(lease_ms, initial_sn)?,
             Message::Close { reason, .. } => self.on_close(reason)?,
             Message::KeepAlive => self.on_keep_alive()?,
-            Message::Frame(frame) => self.on_frame(frame)?,
+            Message::Frame(frame) => self.on_frame(frame, out)?,
         };
         self.last_rx_ms = now_ms;
         self.now_ms = now_ms;
@@ -1311,7 +1330,11 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
 
     /// A frame is applied whole or not at all: every table change it makes is journaled and undone if a
     /// later message in it is refused, and the sequence number commits only after all were accepted.
-    fn on_frame<'a>(&mut self, frame: Frame<'a>) -> Result<Outcome<'a, E>, SessionError> {
+    fn on_frame<'a>(
+        &mut self,
+        frame: Frame<'a>,
+        out: &mut [u8],
+    ) -> Result<Outcome<'a, E>, SessionError> {
         if self.state != State::Open {
             return Err(SessionError::UnexpectedMessage);
         }
@@ -1325,15 +1348,18 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
         let mut journal = [None; JOURNAL];
         let mut used = 0;
         let mut events = Events::empty();
-        match self.apply_frame(&frame, &mut journal, &mut used, &mut events) {
-            Ok(()) => {
+        let applied = self
+            .apply_frame(&frame, &mut journal, &mut used, &mut events)
+            .and_then(|()| self.answer_interest(&frame, out));
+        match applied {
+            Ok(sent) => {
                 for change in journal.iter().take(used).flatten() {
                     if let Change::Unsubscribed(at) = *change {
                         self.subs.settle(at);
                     }
                 }
                 self.lane_sn[DEFAULT_LANE] = self.lane_sn[DEFAULT_LANE].wrapping_add(1);
-                Ok(Outcome { sent: 0, events })
+                Ok(Outcome { sent, events })
             }
             Err(error) => {
                 for change in journal.iter().take(used).rev().flatten() {
@@ -1353,6 +1379,50 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
                 Err(error)
             }
         }
+    }
+
+    /// The answer to the INTEREST a FRAME holds, written into `out`; returns the batch length, 0 when nothing is
+    /// answered. Mode Current and CurrentFuture are answered with one FRAME at the next sequence number: a token
+    /// declaration for each held token the INTEREST selects, in the order declared, then a DeclareFinal. Future and
+    /// Final answer nothing. A frame with two INTERESTs is refused whole. The sequence number is spent only when the
+    /// answer was built, so a refused answer leaves it for the next frame.
+    fn answer_interest(
+        &mut self,
+        frame: &Frame<'_>,
+        out: &mut [u8],
+    ) -> Result<usize, SessionError> {
+        let mut asked = None;
+        for network in frame.messages() {
+            if let Network::Interest { id, mode, prefix } = network
+                && asked.replace((id, mode, prefix)).is_some()
+            {
+                return Err(SessionError::TooManyMessages);
+            }
+        }
+        let Some((interest, mode, prefix)) = asked else {
+            return Ok(0);
+        };
+        if !matches!(mode, InterestMode::Current | InterestMode::CurrentFuture) {
+            return Ok(0);
+        }
+        let mut answer = FrameEncoder::with_bounds(out, self.tx_sn, self.send_bounds())?;
+        for &id in self.tokens_held() {
+            let Some(key) = self.token_keys.key_of(u64::from(id)) else {
+                continue;
+            };
+            let selected = prefix.is_none_or(|prefix| {
+                key.strip_prefix(prefix.as_bytes())
+                    .is_some_and(|rest| rest.first() == Some(&b'/'))
+            });
+            if selected {
+                let key = core::str::from_utf8(key).map_err(|_| SessionError::InvalidConfig)?;
+                answer.declare_token_answer(interest, id, key)?;
+            }
+        }
+        answer.declare_final(interest)?;
+        let sent = answer.finish()?;
+        self.tx_sn = self.tx_sn.wrapping_add(1);
+        Ok(sent)
     }
 
     /// One FRAME on a negotiated link, taken by the lane its header names. A reliable lane takes exactly its
@@ -1568,7 +1638,7 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
                             })?;
                     note(journal, used, Change::Alias(at));
                 }
-                Network::Oam | Network::DeclareFinal => {}
+                Network::Oam | Network::DeclareFinal | Network::Interest { .. } => {}
                 Network::DeclareQueryable { id, mapping, key } => {
                     room(used)?;
                     self.query_key(key, mapping)?;
@@ -2157,6 +2227,9 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
         }
         let outcome =
             self.send_frame(out, |frame| frame.declare_token(id, Mapping::Sender, key))?;
+        self.token_keys
+            .insert(u64::from(id), key.as_bytes())
+            .map_err(|error| table_error(error, SessionError::TokenLimit))?;
         self.tokens[self.token_n] = id;
         self.token_n += 1;
         Ok(outcome)
@@ -2177,6 +2250,9 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
             .position(|&held| held == id)
             .ok_or(SessionError::UnknownToken)?;
         let outcome = self.send_frame(out, |frame| frame.undeclare_token(id))?;
+        if let Some(slot) = self.token_keys.find(u64::from(id)) {
+            self.token_keys.remove(slot);
+        }
         self.tokens.copy_within(at + 1..self.token_n, at);
         self.token_n -= 1;
         Ok(outcome)

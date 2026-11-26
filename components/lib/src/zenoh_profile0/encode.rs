@@ -10,8 +10,8 @@ use super::lane::DEFAULT_PRIORITY;
 use super::{
     ATTACHMENT_GID_LEN_AT, Bounds, CONSOLIDATION_LATEST, EXT_ATTACHMENT, EXT_QOS_NETWORK,
     EXT_QOS_UNIT, EXT_RESPONDER, EXT_TIMEOUT, EXT_WIRE_EXPR, FLAG_BIT5, FLAG_BIT6, FLAG_Z,
-    GID_BYTES, ID_CLOSE, ID_D_QUERYABLE, ID_D_SUBSCRIBER, ID_DECLARE, ID_FRAME, ID_INIT,
-    ID_KEEP_ALIVE, ID_OPEN, ID_PUSH, ID_PUT, ID_QUERY, ID_REPLY, ID_REQUEST, ID_RESPONSE,
+    GID_BYTES, ID_CLOSE, ID_D_FINAL, ID_D_QUERYABLE, ID_D_SUBSCRIBER, ID_DECLARE, ID_FRAME,
+    ID_INIT, ID_KEEP_ALIVE, ID_OPEN, ID_PUSH, ID_PUT, ID_QUERY, ID_REPLY, ID_REQUEST, ID_RESPONSE,
     ID_RESPONSE_FINAL, ID_U_QUERYABLE, MAX_ATTACHMENT_BYTES, MAX_BATCH_BYTES, MAX_COOKIE_BYTES,
     Mapping, Qos, Refusal, STREAM_LENGTH_BYTES, U_SUBSCRIBER_HEADER, WIRE_EXPR_FLAG_NAMED,
     WIRE_EXPR_FLAG_SENDER, key_expression,
@@ -388,6 +388,31 @@ fn declare_token(
     writer.prefixed(key)
 }
 
+/// A DECLARE that answers the INTEREST `interest`: the interest flag and id, then the network QoS extension, then
+/// `sub`. This is the form upstream eclipse-zenoh 1.0.0 writes.
+fn declare_answer(writer: &mut Writer<'_>, interest: u32, sub: u8) -> Result<(), EncodeError> {
+    writer.byte(ID_DECLARE | FLAG_BIT5 | FLAG_Z)?;
+    writer.leb(interest)?;
+    writer.byte(EXT_QOS_NETWORK)?;
+    writer.byte(QOS_DECLARE)?;
+    writer.byte(sub)
+}
+
+/// A liveliness token in the answer to the INTEREST `interest`, its key in full under the sender mapping.
+fn declare_token_answer(
+    writer: &mut Writer<'_>,
+    interest: u32,
+    id: u32,
+    key: &str,
+    bounds: Bounds,
+) -> Result<(), EncodeError> {
+    let key = check_key(key, bounds.key)?;
+    declare_answer(writer, interest, ID_D_TOKEN | FLAG_BIT5 | FLAG_BIT6)?;
+    writer.leb(id)?;
+    writer.leb(GLOBAL_SCOPE)?;
+    writer.prefixed(key)
+}
+
 /// The withdrawal of the token `id`: a DECLARE, an UNDECLARE_TOKEN with its extension flag, the id and the captured
 /// extension.
 fn undeclare_token(writer: &mut Writer<'_>, id: u32) -> Result<(), EncodeError> {
@@ -704,6 +729,22 @@ impl<'a> FrameEncoder<'a> {
     ) -> Result<(), EncodeError> {
         let bounds = self.bounds;
         self.message(|writer| declare_token(writer, id, mapping, key, bounds))
+    }
+
+    /// A liveliness token `id` under `key` that answers the INTEREST `interest`.
+    pub fn declare_token_answer(
+        &mut self,
+        interest: u32,
+        id: u32,
+        key: &str,
+    ) -> Result<(), EncodeError> {
+        let bounds = self.bounds;
+        self.message(|writer| declare_token_answer(writer, interest, id, key, bounds))
+    }
+
+    /// The DeclareFinal that ends the answer to the INTEREST `interest`.
+    pub fn declare_final(&mut self, interest: u32) -> Result<(), EncodeError> {
+        self.message(|writer| declare_answer(writer, interest, ID_D_FINAL))
     }
 
     /// The withdrawal of the liveliness token `id`.

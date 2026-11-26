@@ -188,6 +188,7 @@ fn network_summary(message: &Network<'_>) -> String {
         Network::UndeclareSubscriberById { id } => format!("UNDECLARE_SUBSCRIBER_BY_ID:id={id}"),
         Network::Oam => "OAM".into(),
         Network::DeclareFinal => "DECLARE_FINAL".into(),
+        Network::Interest { .. } => "INTEREST".into(),
         Network::DeclareQueryable {
             id,
             mapping: m,

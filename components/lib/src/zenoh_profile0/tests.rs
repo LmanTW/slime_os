@@ -88,6 +88,7 @@ fn network_summary(message: &Network<'_>) -> String {
         Network::UndeclareSubscriberById { id } => format!("UNDECLARE_SUBSCRIBER_BY_ID:id={id}"),
         Network::Oam => "OAM".into(),
         Network::DeclareFinal => "DECLARE_FINAL".into(),
+        Network::Interest { .. } => "INTEREST".into(),
         Network::DeclareQueryable {
             id,
             mapping: m,
@@ -423,6 +424,7 @@ fn byte_flips_never_panic_and_stay_bounded() {
                             | Network::Request { .. }
                             | Network::Response { .. }
                             | Network::ResponseFinal { .. }
+                            | Network::Interest { .. }
                             | Network::DeclareFinal => {}
                             Network::PushPut {
                                 key,

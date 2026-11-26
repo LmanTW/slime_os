@@ -5,7 +5,7 @@ item :: s.Item = (h.task "01a208ef-1ac1-73c3-91bb-2a4315bf72a4" "zenoh-livelines
   "Answer a router's token INTEREST from a client-role session, and admit a Client INIT_SYN on a listener"
   "A client-role session declares and withdraws liveliness tokens (zenoh-rmw-token), but it refuses an INTEREST as an unsupported message. A router that asks a client for the tokens it holds therefore gets no answer, and a router that never saw the client declare them cannot list the node. A listener also refuses every INIT_SYN that names Client, so a Slime listener cannot serve a client. Upstream eclipse-zenoh 1.0.0 writes an INTEREST for tokens as `0x39 <id> 0x08`, or restricted to a key as `0x39 <id> 0x78 <key>`, and answers it with a DECLARE_TOKEN for each selected token carrying the interest id, then a DeclareFinal. An rmw_zenoh peer sends the restricted form, `0x79`, over `@ros2_lv/<domain>/**`.")
   with {
-    intent = #planned;
+    intent = #active;
     owns = {
       "components/lib/src/zenoh_profile0.rs";
       "components/lib/src/zenoh_profile0/**";

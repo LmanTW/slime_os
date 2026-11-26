@@ -53,6 +53,12 @@ const ID_U_QUERYABLE: u8 = p::ID_UNDECLARE_QUERYABLE as u8;
 const ID_REQUEST: u8 = p::ID_REQUEST as u8;
 const ID_RESPONSE: u8 = p::ID_RESPONSE as u8;
 const ID_RESPONSE_FINAL: u8 = p::ID_RESPONSE_FINAL as u8;
+const ID_INTEREST: u8 = 25;
+/// The options byte of an INTEREST for tokens, and of one restricted to a key: the restricted form adds R, N and M,
+/// and may add the key-expressions bit.
+const INTEREST_TOKENS: u8 = 0x08;
+const INTEREST_TOKENS_RESTRICTED: u8 = 0x78;
+const INTEREST_TOKENS_KEYEXPRS_RESTRICTED: u8 = 0x79;
 const ID_QUERY: u8 = p::ID_QUERY as u8;
 const ID_REPLY: u8 = p::ID_REPLY as u8;
 const CONSOLIDATION_LATEST: u8 = p::CONSOLIDATION_LATEST as u8;
@@ -325,6 +331,22 @@ pub enum Network<'a> {
     },
     /// The end of the replies to a request.
     ResponseFinal { id: u32 },
+    /// An INTEREST for liveliness tokens, read only by a session with the client role. `prefix` is the key before
+    /// the `/**` of a restricted INTEREST, and `None` selects every key.
+    Interest {
+        id: u32,
+        mode: InterestMode,
+        prefix: Option<&'a str>,
+    },
+}
+
+/// The mode of an INTEREST, from bits 5 and 6 of its header.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InterestMode {
+    Final,
+    Current,
+    Future,
+    CurrentFuture,
 }
 
 /// The key a query message names: in full, or the alias a peer declared for it.
@@ -552,6 +574,7 @@ fn init<'a>(
     graph: bool,
     offers_qos: bool,
     client: bool,
+    admit: bool,
 ) -> Result<Message<'a>, Refusal> {
     // An extension is refused before anything else is read, as it always was, except the QoS unit
     // extension a stock peer puts on an INIT_SYN that states its resolution and batch size. A side that
@@ -570,11 +593,15 @@ fn init<'a>(
     if packed & PACKED_RESERVED != 0 {
         return Err(Refusal::MalformedMessage);
     }
-    // A side with the client role takes an INIT_ACK of a router and no other `whatami`. Every other INIT, and
-    // every INIT a side without the role reads, is a peer's.
-    match (u32::from(packed & 0x03), client && header & FLAG_BIT5 != 0) {
-        (3, _) => return Err(Refusal::MalformedMessage),
-        (p::WHATAMI_PEER, false) | (p::WHATAMI_ROUTER, true) => {}
+    // A side with the client role takes an INIT_ACK of a router and no other `whatami`. A listener built to admit
+    // clients also takes an INIT_SYN of a client. Every other INIT, and every INIT a side without either reads,
+    // is a peer's.
+    let ack = header & FLAG_BIT5 != 0;
+    match (u32::from(packed & 0x03), client && ack, admit && !ack) {
+        (3, _, _) => return Err(Refusal::MalformedMessage),
+        (p::WHATAMI_PEER, false, _)
+        | (p::WHATAMI_ROUTER, true, _)
+        | (p::WHATAMI_CLIENT, _, true) => {}
         _ => return Err(Refusal::UnsupportedWhatami),
     }
     let zid = reader.take(1 + usize::from(packed >> 4))?;
@@ -1135,6 +1162,62 @@ fn word(bytes: &[u8], at: usize) -> [u8; 8] {
     out
 }
 
+/// The key of a restricted INTEREST: the global scope and `<prefix>/**`. Only a prefix with no wildcard in it is
+/// taken, and an alias is not.
+fn interest_prefix<'a>(reader: &mut Reader<'a>, bounds: &Bounds) -> Result<&'a str, Refusal> {
+    if reader.leb(p::LEB128_SHORT_BITS)? != 0 {
+        return Err(Refusal::UnsupportedMessage);
+    }
+    let length = reader.leb(p::LEB128_SHORT_BITS)? as usize;
+    if length > bounds.key + "/**".len() {
+        return Err(Refusal::OverBound);
+    }
+    let key = core::str::from_utf8(reader.take(length)?).map_err(|_| Refusal::InvalidKeyexpr)?;
+    let prefix = key
+        .strip_suffix("/**")
+        .filter(|prefix| !prefix.is_empty())
+        .ok_or(Refusal::UnsupportedMessage)?;
+    match key_expression(prefix.as_bytes()) {
+        Err(Refusal::WildcardKeyexpr) => Err(Refusal::UnsupportedMessage),
+        other => other,
+    }
+}
+
+/// An INTEREST for tokens, unrestricted (options 0x08) or restricted to `<prefix>/**` (0x78, 0x79), then the network
+/// QoS extension if the header says so. Every other kind of INTEREST is refused, and so is every INTEREST a session
+/// with no client role reads.
+fn interest<'a>(
+    reader: &mut Reader<'a>,
+    header: u8,
+    bounds: &Bounds,
+    client: bool,
+) -> Result<Network<'a>, Refusal> {
+    if !client {
+        return Err(Refusal::UnsupportedMessage);
+    }
+    let mode = match (header & FLAG_BIT5 != 0, header & FLAG_BIT6 != 0) {
+        (false, false) => InterestMode::Final,
+        (true, false) => InterestMode::Current,
+        (false, true) => InterestMode::Future,
+        (true, true) => InterestMode::CurrentFuture,
+    };
+    let id = reader.leb(p::LEB128_MAX_BITS)?;
+    let mut prefix = None;
+    if mode != InterestMode::Final {
+        match reader.u8()? {
+            INTEREST_TOKENS => {}
+            INTEREST_TOKENS_RESTRICTED | INTEREST_TOKENS_KEYEXPRS_RESTRICTED => {
+                prefix = Some(interest_prefix(reader, bounds)?);
+            }
+            _ => return Err(Refusal::UnsupportedMessage),
+        }
+    }
+    if header & FLAG_Z != 0 {
+        network_qos_extension(reader)?;
+    }
+    Ok(Network::Interest { id, mode, prefix })
+}
+
 fn parse_network<'a>(
     reader: &mut Reader<'a>,
     bounds: &Bounds,
@@ -1148,6 +1231,7 @@ fn parse_network<'a>(
         ID_REQUEST => request(reader, header, bounds),
         ID_RESPONSE => response(reader, header, bounds),
         ID_RESPONSE_FINAL => response_final(reader, header),
+        ID_INTEREST => interest(reader, header, bounds, client),
         _ => Err(Refusal::UnsupportedMessage),
     }
 }
@@ -1199,14 +1283,24 @@ pub fn decode_batch(batch: &[u8]) -> Result<Message<'_>, Refusal> {
 
 /// Decodes one batch body under `bounds`.
 pub fn decode_batch_with<'a>(batch: &'a [u8], bounds: &Bounds) -> Result<Message<'a>, Refusal> {
-    decode_batch_in(batch, bounds, false, false, false)
+    decode_batch_in(batch, bounds, false, false, false, false)
 }
 
 /// Decodes one batch body for a side that offers the QoS unit extension on its own INIT. It differs from
 /// [`decode_batch_with`] in the INIT only: an INIT_SYN or an INIT_ACK may carry the extension, with or
 /// without the size parameters, and the message says so. Any other extension is refused as before.
 pub fn decode_batch_qos<'a>(batch: &'a [u8], bounds: &Bounds) -> Result<Message<'a>, Refusal> {
-    decode_batch_in(batch, bounds, false, true, false)
+    decode_batch_in(batch, bounds, false, true, false, false)
+}
+
+/// Decodes one batch body for a listener built to admit clients. It differs from [`decode_batch_qos`], or from
+/// [`decode_batch_with`] when `qos` is false, in one place: an INIT_SYN of `whatami` 2, a client's, is taken.
+pub fn decode_batch_admitting<'a>(
+    batch: &'a [u8],
+    bounds: &Bounds,
+    qos: bool,
+) -> Result<Message<'a>, Refusal> {
+    decode_batch_in(batch, bounds, false, qos, false, true)
 }
 
 /// Decodes one batch body for a connector with the client role. It differs from [`decode_batch_qos`], or from
@@ -1217,7 +1311,7 @@ pub fn decode_batch_client<'a>(
     bounds: &Bounds,
     qos: bool,
 ) -> Result<Message<'a>, Refusal> {
-    decode_batch_in(batch, bounds, false, qos, true)
+    decode_batch_in(batch, bounds, false, qos, true, false)
 }
 
 /// Decodes one batch body. `graph` is the one difference a graph session makes to a handshake message:
@@ -1229,6 +1323,7 @@ fn decode_batch_in<'a>(
     graph: bool,
     qos: bool,
     client: bool,
+    admit: bool,
 ) -> Result<Message<'a>, Refusal> {
     if batch.is_empty() {
         return Err(Refusal::EmptyBatch);
@@ -1239,7 +1334,7 @@ fn decode_batch_in<'a>(
     let mut reader = Reader::new(batch);
     let header = reader.u8()?;
     match header & ID_MASK {
-        ID_INIT => init(reader, header, graph, qos, client),
+        ID_INIT => init(reader, header, graph, qos, client, admit),
         ID_OPEN => open(reader, header),
         ID_CLOSE => close(reader, header),
         ID_KEEP_ALIVE => keep_alive(reader, header),
