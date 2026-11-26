@@ -3,11 +3,15 @@ h ::= import "./helpers.zt";
 
 item :: s.Item = (h.task "01a20e0a-ffa7-7721-a468-30b0e8c47190" "zenoh-peer-tokens" "zenoh-transport"
   "A Profile 0 peer session decodes and tracks liveliness token declarations and INTEREST messages"
-  "The plain Profile 0 session refuses a token declaration, a token undeclaration and an INTEREST as unsupported-message, so a peer that declares a token or asks for declarations gets a refusal and the link ends. Only the graph session and the client role read these messages, and each has its own decoder. Upstream eclipse-zenoh 1.0.0 writes D_TOKEN as `1e 66 <id> 00 <key>`, U_TOKEN with a null wire-expression extension, and INTEREST as `<0x19 | mode << 5> <id> <options> [<key>]`. A working tree decoded and tracked all three in the plain session, wrote them with the encoder, and agreed with the upstream crates on 2,982 frames; it was held back because zenoh-queryables owns the same files. This item takes the token and INTEREST part of it.")
+  "The plain Profile 0 session refuses a token declaration, a token undeclaration and an INTEREST as unsupported-message, so a peer that declares a token or asks for declarations gets a refusal and the link ends. Only the graph session and the client role read these messages, and each has its own decoder. Upstream eclipse-zenoh 1.0.0 writes D_TOKEN as `1e 66 <id> 00 <key>`, U_TOKEN with a null wire-expression extension, and INTEREST as `<0x19 | mode << 5> <id> <options> [<key>]`. A working tree decoded and tracked all three in the plain session, wrote them with the encoder, and agreed with the upstream crates on 2,982 frames; it was held back because zenoh-queryables owns the same files. This item takes the token and INTEREST part of it. Its exam is not written: the acceptances below name recipes that grade neither tokens nor INTEREST today, and the stock checker and the queries exam still pin the refusal. A later planning pull request amends them and adds the session and xcheck exams with their predicates and negative controls. This item stays #planned until that pull request lands.")
   with {
     intent = #planned;
     depends = {
       "01a208f8-8fee-75a7-a7db-ea499dafbd6a";
+    };
+    supersedes = {
+      "01a208f8-8fee-75a7-a7db-ea499dafbd6a/refuses-what-stays-out";
+      "01a208f8-8fee-75a7-a7db-ea499dafbd6a/stock-exam-takes-queries";
     };
     owns = {
       "components/lib/src/zenoh_profile0.rs";
@@ -21,7 +25,6 @@ item :: s.Item = (h.task "01a20e0a-ffa7-7721-a468-30b0e8c47190" "zenoh-peer-toke
       "components/applications/lidar-publisher/**";
       "components/proto/src/zenoh_profile.rs";
       "contracts/zenoh-profile/v1/**";
-      "scripts/lib/zenoh_wire.py";
       "verification/zenoh-xcheck/**";
     };
     nonGoals = {
@@ -67,6 +70,16 @@ item :: s.Item = (h.task "01a20e0a-ffa7-7721-a468-30b0e8c47190" "zenoh-peer-toke
         "nothing in this item answers an INTEREST or lists a token, so a key would add 129 bytes of storage for each slot and move the arithmetic of contracts/zenoh-link-limits"
         h.agentDefault
         { "tracks-by-id"; "defaults-unchanged"; };
+      h.decided "supersede-the-token-refusal"
+        "The item supersedes the two requirements of zenoh-queryables that pin the token declaration and the INTEREST as refused, and does not edit specs/zenoh-transport.zt"
+        "V10 freezes requirements; a promise the implementation must break is replaced through supersedes. zenoh_stock_check pins declare_token and frame_network_interest, and zenoh_queries_check pins refuse-token-declaration"
+        h.agentDefault
+        { "stock-exam-takes-tokens"; "refuses-what-stays-out"; };
+      h.decided "exam-amendment-before-active"
+        "The graders move in a later planning pull request, not in the implementation: the host reference scripts/lib/zenoh_wire.py, STOCK_FIXED_NAMES and its digest, and refuse-token-declaration in scripts/lib/zenoh_queries_exam.py"
+        "V3 refuses an implementation pull request that touches a grader file, and V4 needs a human-owner approval for a grader change"
+        h.agentDefault
+        { "encodes-the-same-bytes"; "stock-exam-takes-tokens"; };
       h.decided "after-queryables"
         "This item depends on zenoh-queryables and starts after it merges"
         "both change the decoder, the session, the contract ids and the stock exam, and the queryable item already amends the three vectors it shares"
