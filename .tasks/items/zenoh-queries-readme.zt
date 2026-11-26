@@ -1,0 +1,25 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a21200-5b3e-7c41-9d2a-6f0e8a7c4b19" "zenoh-queries-readme" "zenoh-transport"
+  "The stock-queries fixture contract has a README, as the stock-undeclare contract has"
+  "contracts/zenoh-stock-undeclare holds a README that says what its fixture record fixes and which command writes it. contracts/zenoh-stock-queries, which zenoh-queryables added, holds only v1/schema.zt and v1/gen_rust.zt. A reader of that directory finds no statement of what the record is a container for, which command writes it, or which bounds a reader enforces. The README was held out of the documentation PR for the queries, because it is implementation class and no active item owned it.")
+  with {
+    intent = #planned;
+    owns = {
+      "contracts/zenoh-stock-queries/README.md";
+    };
+    nonGoals = {
+      h.nonGoal "A change to contracts/zenoh-stock-queries/v1. The README describes the record as the schema declares it." h.agentDefault;
+      h.nonGoal "A check of the README's statements against the schema. docs_check reads the links and command references of every markdown file under contracts/, and nothing reads its prose." h.agentDefault;
+    };
+    requirements = {
+      h.req "the-readme-states-the-record"
+        "contracts/zenoh-stock-queries/README.md states what the fixture record is a container for, the command that writes it (check-zenoh-profile0.py --slice queries) and the one that renders it as Rust (just zenoh_queries_gen), and the bounds a reader enforces before it allocates. Every link and command reference in it resolves."
+        { "docs_check"; };
+    };
+    acceptance = {
+      h.observed "docs_check";
+    };
+  };
+item
