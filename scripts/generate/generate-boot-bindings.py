@@ -62,7 +62,7 @@ GENERATORS = (
         "clock_authority.rs",
     ),
     (
-        ROOT / "contracts" / "wait-set" / "v2" / "schema.zt",
+        ROOT / "contracts" / "wait-set" / "v3" / "schema.zt",
         "wait_set.py",
         "wait_set.rs",
     ),

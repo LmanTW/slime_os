@@ -66,6 +66,10 @@ pub enum SourceKind {
     /// declared peer binding, and like a timer it names no slot: the waiter
     /// reads the device state it already owns.
     Device,
+    /// A hardware interrupt line the root dispatches to this waiter. Signalled
+    /// by the root, and its slot is the waiter's own interrupt source, through
+    /// which the waiter acknowledges the arrival after it clears the device.
+    Interrupt,
 }
 
 impl SourceKind {
@@ -79,6 +83,7 @@ impl SourceKind {
             Self::Supervision => KIND_SUPERVISION,
             Self::QosEvent => KIND_QOS_EVENT,
             Self::Device => KIND_DEVICE,
+            Self::Interrupt => KIND_INTERRUPT,
         }
     }
 
@@ -93,6 +98,7 @@ impl SourceKind {
             KIND_SUPERVISION => Self::Supervision,
             KIND_QOS_EVENT => Self::QosEvent,
             KIND_DEVICE => Self::Device,
+            KIND_INTERRUPT => Self::Interrupt,
             _ => return None,
         })
     }
@@ -410,9 +416,9 @@ mod tests {
     }
 
     /// A device completion names no drain slot, like a timer, and is refused
-    /// with one. A version 1 resource is refused whole.
+    /// with one. A version 2 resource is refused whole.
     #[test]
-    fn a_device_source_names_no_slot_and_version_one_is_refused() {
+    fn a_device_source_names_no_slot_and_version_two_is_refused() {
         let device = encoded(&[entry("w", 1 << 5, KIND_DEVICE, DRAIN_SLOT_ABSENT)]);
         let decoded = WaitSet::decode(&device).unwrap();
         assert_eq!(decoded.entry(0).unwrap().kind, SourceKind::Device);
@@ -421,11 +427,30 @@ mod tests {
             WaitSet::decode(&encoded(&[entry("w", 1 << 5, KIND_DEVICE, 3)])),
             Err(DecodeError::BadDrainSlot)
         ));
-        let mut version_one = encoded(&[entry("w", 1, KIND_STREAM, 1)]);
-        version_one[8..12].copy_from_slice(&1u32.to_le_bytes());
+        let mut version_two = encoded(&[entry("w", 1, KIND_STREAM, 1)]);
+        version_two[8..12].copy_from_slice(&2u32.to_le_bytes());
         assert!(matches!(
-            WaitSet::decode(&version_one),
+            WaitSet::decode(&version_two),
             Err(DecodeError::UnsupportedVersion)
+        ));
+    }
+
+    /// An interrupt source drains its waiter's interrupt source slot, so it is
+    /// refused without one.
+    #[test]
+    fn an_interrupt_source_names_its_slot() {
+        let interrupt = encoded(&[entry("w", 1 << 3, KIND_INTERRUPT, 3)]);
+        let decoded = WaitSet::decode(&interrupt).unwrap();
+        assert_eq!(decoded.entry(0).unwrap().kind, SourceKind::Interrupt);
+        assert_eq!(decoded.entry(0).unwrap().drain_slot, Some(3));
+        assert!(matches!(
+            WaitSet::decode(&encoded(&[entry(
+                "w",
+                1 << 3,
+                KIND_INTERRUPT,
+                DRAIN_SLOT_ABSENT
+            )])),
+            Err(DecodeError::BadDrainSlot)
         ));
     }
 
@@ -433,7 +458,7 @@ mod tests {
     /// generation it cannot honour, not a source to skip.
     #[test]
     fn an_undeclared_kind_is_refused() {
-        let bytes = encoded(&[entry("w", 1, KIND_DEVICE + 1, 1)]);
+        let bytes = encoded(&[entry("w", 1, KIND_INTERRUPT + 1, 1)]);
         assert!(matches!(
             WaitSet::decode(&bytes),
             Err(DecodeError::UnknownKind)

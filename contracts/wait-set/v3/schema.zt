@@ -1,0 +1,193 @@
+-- Slime OS bounded userspace wait sets, version 3.
+--
+-- Version 3 keeps every version 2 field, entry, bound and kind number, and adds
+-- the kind `interrupt`: a hardware interrupt line the root dispatches to its
+-- waiter. Like `supervision` it is signalled by the root, so no declared peer
+-- produces its badge. Unlike `device` it drains: its drain slot is the waiter's
+-- own interrupt source slot, and the waiter acknowledges the arrival through
+-- that slot after it clears the device. Version 2 named no such kind, so a
+-- driver had no declared wake for its own interrupt.
+--
+-- A generation resource object that declares, for each waiting component, which
+-- badge bits on its one declared Notification mean which kind of readiness, and
+-- which of its own capability slots to drain when that bit arrives.
+--
+-- # Why this is declared data rather than a runtime discovery
+--
+-- A component blocks on one Notification and reads the accumulated 64-bit badge
+-- word, because that is the only multi-source block seL4 offers a userspace
+-- thread: `notification_wait` is one `seL4_Wait` on one capability. Recovering
+-- *which* source spoke therefore means mapping badge bits back to sources, and a
+-- waiter cannot compute that map. `slime-root` derives a signaller's badge from
+-- the *signaller's* own declared slot (`1 << (slot % 63)`), which is a fact about
+-- the peer, not about the waiter; C9.1's timer badge is contract data chosen
+-- independently of any slot. So the waiter either asks the generation or compiles
+-- its peers' slot numbers in from a build-time table — which is exactly the
+-- coupling B70 removed.
+--
+-- The source *kind* is new declared data in any case. Nothing in the
+-- notification tables distinguishes a stream ingress from a call reply, an
+-- operation feedback edge, a timer expiry, a peer death, or a QoS event: they are
+-- all badge bits on one object. A wait set that dispatches by kind needs the
+-- generation to say which is which, and a wait set that does not dispatch by kind
+-- is the hand-rolled sweep this milestone replaces.
+--
+-- # The tie rule is part of the contract
+--
+-- Several sources ready at once arrive as one coalesced word, so "which first" is
+-- a choice, and an unstated choice is a nondeterministic dispatch order. The rule
+-- is **ascending badge bit**: entries are sorted by `(waiter_identity, badge)`,
+-- and a waiter drains its ready set in that order. Identical readiness therefore
+-- produces an identical dispatch sequence across boots, which is what makes a
+-- replayable trace possible at all.
+--
+-- # What this does not do
+--
+-- It grants nothing. Every source names a badge the generation already declares —
+-- a signaller's binding on the waiter's Notification, or C9.1's timer badge for
+-- that same holder — and a slot the waiter already holds. A component cannot
+-- register a source absent from its own entries, and the resource cannot name a
+-- badge no declared signaller produces; both are admission properties rather than
+-- runtime checks. `slime-root` gains no ready queue, no source registry, and no
+-- wait state: it answers a self-scoped read of the caller's own declared entries,
+-- and it signals a declared supervision badge when a task the waiter supervises
+-- terminates, which is the same shape as C9.1's timer delivery. An interrupt
+-- source has the same shape: the root signals its declared badge when the line
+-- held in the waiter's drain slot fires.
+--
+-- Logical records and concrete packed little-endian layouts live together.
+-- The renderer reflects every record, checks field order against its layout,
+-- and writes the Python and Rust binding fragments consumed by the boot binding
+-- assembler.
+
+env ::= import stdlib.env;
+fs ::= import stdlib.fs;
+gen ::= import "gen_rust.zt";
+t ::= import stdlib.text;
+
+formatVersion :: Int = 3;
+headerBytes :: Int = 32;
+entryBytes :: Int = 64;
+
+-- Sources one generation may declare across every waiter. Sized like
+-- `clock-authority/v1`'s holder bound: large enough that no shipped fixture
+-- approaches it, small enough that the resource stays one page.
+maxEntries :: Int = 48;
+
+-- Sources one waiter may register. The kernel bound on *distinguishable* sources
+-- is the badge width: `slime-root` assigns a signaller `1 << (slot % 63)`, so bits
+-- 0-62 are reachable and bit 63 is never selected. This is deliberately far below
+-- that, because a wait set is a ready queue as well as a mask: every registered
+-- source can be simultaneously ready, so the queue a waiter must hold is exactly
+-- this many entries. It matches `fabric-graph/v1`'s `maxIngressSources`, the
+-- widest park set any shipped component reaches (`fabric-op-worker`, at 9 of 9).
+maxSourcesPerWaiter :: Int = 9;
+
+-- Ready sources one wake may dispatch callbacks for.
+--
+-- Equal to `maxSourcesPerWaiter` and not independent of it: a single coalesced
+-- badge can carry every registered source at once, so a smaller number would
+-- refuse a wake the kernel is entitled to deliver. Declared separately anyway
+-- because it bounds a different thing — work done per wake rather than state held
+-- across wakes — and a future policy that batches dispatch across wakes would
+-- change one without the other.
+maxCallbacksPerWake :: Int = 9;
+
+-- The closed source vocabulary. A kind names what the waiter should *do* with a
+-- badged wake, which is why `timer` is a kind rather than an absence: it has no
+-- slot to drain, and a wait set that treated "no slot" as "unknown source" could
+-- not tell an expiry from a malformed entry.
+--
+-- Numbers are frozen. A component image built against one generation decodes the
+-- same kind a later builder must still emit.
+kindStream :: Int = 1;
+kindCall :: Int = 2;
+kindOperation :: Int = 3;
+kindTimer :: Int = 4;
+kindSupervision :: Int = 5;
+kindQosEvent :: Int = 6;
+kindDevice :: Int = 7;
+-- `interrupt` drains, because the arrival is acknowledged through the waiter's
+-- own interrupt source slot. One interrupt source has at most one row.
+kindInterrupt :: Int = 8;
+
+-- `drain_slot` for a source with nothing to drain. `timer` and `device` use it:
+-- an expiry is fully described by its badge, because C9.1 delivers no payload and
+-- the holder correlates timer ids through its own bookkeeping, and a device
+-- completion tells its waiter only to read the device state it already owns.
+drainSlotAbsent :: Int = 4294967295;
+
+WireField :: type { name : Text; width : Int; signed : Bool; byteArray : Bool; };
+
+WaitSetHeader :: type {
+  magic : Int;
+  format_version : Int;
+  header_size : Int;
+  required_flags : Int;
+  entry_count : Int;
+  total_len : Int;
+};
+
+WaitSetEntry :: type {
+  waiter_identity : Int;
+  badge : Int;
+  notification_grant_identity : Int;
+  source_kind : Int;
+  drain_slot : Int;
+  reserved : Int;
+};
+
+headerSchema ::= schema WaitSetHeader;
+entrySchema ::= schema WaitSetEntry;
+
+headerLayout :: List WireField = {
+  { name = "magic"; width = 8; signed = false; byteArray = true; };
+  { name = "format_version"; width = 4; signed = false; byteArray = false; };
+  { name = "header_size"; width = 4; signed = false; byteArray = false; };
+  { name = "required_flags"; width = 8; signed = false; byteArray = false; };
+  { name = "entry_count"; width = 4; signed = false; byteArray = false; };
+  { name = "total_len"; width = 4; signed = false; byteArray = false; };
+};
+
+entryLayout :: List WireField = {
+  { name = "waiter_identity"; width = 32; signed = false; byteArray = true; };
+  { name = "badge"; width = 8; signed = false; byteArray = false; };
+  { name = "notification_grant_identity"; width = 8; signed = false; byteArray = false; };
+  { name = "source_kind"; width = 4; signed = false; byteArray = false; };
+  { name = "drain_slot"; width = 4; signed = false; byteArray = false; };
+  { name = "reserved"; width = 8; signed = false; byteArray = false; };
+};
+
+format ::= {
+  formatVersion =;
+  headerBytes =;
+  entryBytes =;
+  maxEntries =;
+  maxSourcesPerWaiter =;
+  maxCallbacksPerWake =;
+  kindStream =;
+  kindCall =;
+  kindOperation =;
+  kindTimer =;
+  kindSupervision =;
+  kindQosEvent =;
+  kindDevice =;
+  kindInterrupt =;
+  drainSlotAbsent =;
+  headerFields = headerSchema.fields ?? {;};
+  entryFields = entrySchema.fields ?? {;};
+  headerLayout =;
+  entryLayout =;
+};
+
+main :: { write : FsWrite; env : Env; } -> Unit ! { * fs.WholeWriteEffects; * env.GetEffects; }
+  = caps => [
+    root := env.get caps.env "SLIME_BOOT_BINDINGS_ROOT" ?? ".";
+    bindings := gen.render format;
+    pythonPath := t.join "" { root; "/wait_set.py"; };
+    rustPath := t.join "" { root; "/wait_set.rs"; };
+    fs.writeAll caps.write pythonPath bindings.python;
+    fs.writeAll caps.write rustPath bindings.rust
+  ];
+
+main

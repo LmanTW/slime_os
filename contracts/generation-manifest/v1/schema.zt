@@ -390,9 +390,10 @@ ClockAuthorityEntry :: type {
 -- fact about the peer, and C9.1's timer badge is contract data independent of
 -- any slot; nothing in either table says whether a bit is a stream ingress, a
 -- call reply, or a peer death. `kind` is one of `stream`, `call`, `operation`,
--- `timer`, `supervision`, `qosEvent`, or `device` (wait-set/v2). `drainSlot` is
--- the waiter's own slot and is omitted exactly for `timer` and `device`, which
--- deliver no payload.
+-- `timer`, `supervision`, `qosEvent`, `device` (wait-set/v2), or `interrupt`
+-- (wait-set/v3). `drainSlot` is the waiter's own slot and is omitted exactly for
+-- `timer` and `device`, which deliver no payload. An `interrupt` row's
+-- `drainSlot` holds the waiter's own interrupt source.
 WaitSetSourceEntry :: type {
   waiter : Text;
   notification : Text;

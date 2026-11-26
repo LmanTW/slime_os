@@ -7,14 +7,16 @@
 //!
 //! # Why only supervision sources are here
 //!
-//! Of the seven declared source kinds, five are signalled by a peer: a publisher
+//! Of the eight declared source kinds, five are signalled by a peer: a publisher
 //! signals its subscriber's ring, a client signals a broker's control edge, a
 //! driver signals the service it completes work for, and
 //! `slime-root/src/notification.rs` already mints those caps from the
 //! generation's own `notificationBindings`. A timer is signalled by
-//! `crate::clock`, from C9.1's contract data. That leaves peer death, which no
-//! peer can signal — the peer is the thing that died. So the root signals it, and
-//! this module is that one delivery path rather than a general mechanism.
+//! `crate::clock`, from C9.1's contract data. Admission refuses an interrupt
+//! row, because the root dispatches no interrupt arrival. That leaves peer
+//! death, which no peer can signal — the peer is the thing that died. So the
+//! root signals it, and this module is that one delivery path rather than a
+//! general mechanism.
 //!
 //! # What a waiter has to already hold
 //!

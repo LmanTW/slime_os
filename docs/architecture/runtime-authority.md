@@ -141,12 +141,16 @@ because both put the same bytes on the same UART.
 
 Wait sets are userspace, implemented by `components/runtime/src/wait_set.rs`
 over one seL4 Notification plus explicit endpoint drains. The generation's
-`contracts/wait-set/v2/` resource maps badge bits to source kind and the waiter's
+`contracts/wait-set/v3/` resource maps badge bits to source kind and the waiter's
 own drain slot. The root exposes only a self-scoped read of those declared
 entries and signals declared timer or supervision badges. Version 2 adds the
 `device` kind: a driver's completion signal, sent through a declared peer binding
 on the waiter's Notification and, like a timer, naming no drain slot, because the
-waiter reads device state it already owns.
+waiter reads device state it already owns. Version 3 adds the `interrupt` kind.
+Its drain slot holds the waiter's own interrupt source, and no declared peer
+signals its badge. The builder encodes an interrupt row, and root admission
+refuses a generation that declares one, because the root dispatches no
+interrupt arrival.
 The waiter cannot derive this mapping itself: peer badges come from the
 signaller's slot, while timer badges are independent contract data. Each badge
 belongs to exactly one source; a supervision wake requires the waiter's declared

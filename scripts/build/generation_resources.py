@@ -129,6 +129,7 @@ from boot_contracts import (
     WAIT_SET_HEADER_BYTES,
     WAIT_SET_KIND_CALL,
     WAIT_SET_KIND_DEVICE,
+    WAIT_SET_KIND_INTERRUPT,
     WAIT_SET_KIND_OPERATION,
     WAIT_SET_KIND_QOS_EVENT,
     WAIT_SET_KIND_STREAM,
@@ -963,6 +964,7 @@ WAIT_SET_KIND = {
     "supervision": WAIT_SET_KIND_SUPERVISION,
     "qosEvent": WAIT_SET_KIND_QOS_EVENT,
     "device": WAIT_SET_KIND_DEVICE,
+    "interrupt": WAIT_SET_KIND_INTERRUPT,
 }
 
 
@@ -982,6 +984,14 @@ def validated_wait_set(manifest: dict) -> list[tuple[bytes, int, int, int, int, 
     grants = {entry["name"]: entry for entry in manifest.get("notificationGrants", [])}
     bindings = manifest.get("notificationBindings", [])
     clocks = {entry["holder"]: entry for entry in manifest.get("clockAuthority") or []}
+    hardware_kinds = {grant["name"]: (grant["capabilityKind"], grant["target"]) for grant in manifest.get("grants", [])}
+    interrupt_slots = {
+        (instance["name"], binding["slot"])
+        for instance in manifest["instances"]
+        for binding in instance.get("bindings") or []
+        if hardware_kinds.get(binding["grant"]) == ("interruptSource", instance["name"])
+    }
+    interrupt_rows: set[tuple[str, int]] = set()
     entries: list[tuple[bytes, int, int, int, int, int]] = []
     seen: set[tuple[str, int]] = set()
     per_waiter: dict[str, int] = {}
@@ -1017,10 +1027,11 @@ def validated_wait_set(manifest: dict) -> list[tuple[bytes, int, int, int, int, 
         ):
             fail(f"wait set: {waiter} has no wait binding on {notification}")
         # The badge must be one the generation actually produces on this object,
-        # and there are exactly three producers. A peer signals its declared
-        # `1 << (slot % 63)`; the root signals a C9.1 timer badge; and the root
-        # signals a supervision badge when a task the waiter supervises ends. A
-        # badge matching none of the three names a bit nothing can ever set,
+        # and there are exactly four producers. A peer signals its declared
+        # `1 << (slot % 63)`; the root signals a C9.1 timer badge; the root
+        # signals a supervision badge when a task the waiter supervises ends;
+        # and the root signals an interrupt badge when the waiter's line fires.
+        # A badge matching none of the four names a bit nothing can ever set,
         # which is a source that would look registered and never fire.
         signalled = any(
             binding["grant"] == notification
@@ -1045,15 +1056,15 @@ def validated_wait_set(manifest: dict) -> list[tuple[bytes, int, int, int, int, 
                     f"wait set: {waiter}'s timer badge collides with a declared "
                     "signaller on the same notification"
                 )
-        elif kind == WAIT_SET_KIND_SUPERVISION:
-            # Root-signalled, like the timer, because the peer whose death it
-            # reports is the thing that died. So it must *not* collide with a
-            # declared signaller or with the timer badge: all three producers
-            # write the same word, and two of them on one bit would make a wake
-            # ambiguous.
+        elif kind in (WAIT_SET_KIND_SUPERVISION, WAIT_SET_KIND_INTERRUPT):
+            # Root-signalled, like the timer: a supervision badge reports a peer
+            # that died, and an interrupt badge reports a line only the root
+            # receives. So neither may collide with a declared signaller or with
+            # the timer badge: every producer writes the same word, and two of
+            # them on one bit would make a wake ambiguous.
             if signalled or timer_badge:
                 fail(
-                    f"wait set: {waiter}'s supervision badge collides with a "
+                    f"wait set: {waiter}'s {declaration['kind']} badge collides with a "
                     "declared signaller or its timer badge"
                 )
         elif not signalled:
@@ -1076,6 +1087,15 @@ def validated_wait_set(manifest: dict) -> list[tuple[bytes, int, int, int, int, 
                 or not 0 <= drain_slot < WAIT_SET_DRAIN_SLOT_ABSENT
             ):
                 fail(f"wait set: {waiter}'s {declaration['kind']} source needs a drain slot")
+        # The root signals an interrupt badge for the line held in the drain
+        # slot, so the slot must hold the waiter's own interrupt source, and one
+        # line wakes one row.
+        if kind == WAIT_SET_KIND_INTERRUPT:
+            if (waiter, drain_slot) not in interrupt_slots:
+                fail(f"wait set: {waiter}'s interrupt source drains slot {drain_slot}, which holds no interrupt source of {waiter}")
+            if (waiter, drain_slot) in interrupt_rows:
+                fail(f"wait set: {waiter} declares two interrupt rows on slot {drain_slot}")
+            interrupt_rows.add((waiter, drain_slot))
         entries.append(
             (
                 wait_set_waiter_identity(waiter),

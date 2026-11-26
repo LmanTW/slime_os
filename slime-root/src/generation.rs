@@ -975,6 +975,11 @@ fn wait_set_admission(generation: &Generation<'_>) -> Result<Option<usize>, Gene
         let entry = sources
             .entry(index)
             .ok_or(GenerationError::UnsatisfiableWaitSet)?;
+        // The root dispatches no interrupt arrival to a waiter, so nothing
+        // would set an interrupt row's badge.
+        if entry.kind == wait_set::SourceKind::Interrupt {
+            return Err(GenerationError::UnsatisfiableWaitSet);
+        }
         // The grant must be one this waiter waits on, resolved through the
         // waiter's own identity so an entry cannot borrow a peer's grant.
         let mut target = None;
@@ -1040,7 +1045,9 @@ fn wait_set_admission(generation: &Generation<'_>) -> Result<Option<usize>, Gene
         });
         let root_signalled = matches!(
             entry.kind,
-            wait_set::SourceKind::Timer | wait_set::SourceKind::Supervision
+            wait_set::SourceKind::Timer
+                | wait_set::SourceKind::Supervision
+                | wait_set::SourceKind::Interrupt
         );
         // A root-signalled source must not also be a peer's badge; a
         // peer-signalled one must be exactly that and nothing else.
