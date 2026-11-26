@@ -331,13 +331,16 @@ pub enum Network<'a> {
     },
     /// The end of the replies to a request.
     ResponseFinal { id: u32 },
-    /// An INTEREST for liveliness tokens, read only by a session with the client role. `prefix` is the key before
-    /// the `/**` of a restricted INTEREST, and `None` selects every key.
-    Interest {
-        id: u32,
-        mode: InterestMode,
-        prefix: Option<&'a str>,
-    },
+}
+
+/// An INTEREST for liveliness tokens, read only by a session with the client role. `prefix` is the key before the
+/// `/**` of a restricted INTEREST, and `None` selects every key. A frame yields it through [`Frame::interests`]; its
+/// network messages read it as an [`Network::Oam`], which every consumer ignores.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Interest<'a> {
+    pub id: u32,
+    pub mode: InterestMode,
+    pub prefix: Option<&'a str>,
 }
 
 /// The mode of an INTEREST, from bits 5 and 6 of its header.
@@ -367,6 +370,22 @@ pub struct Frame<'a> {
 }
 
 impl<'a> Frame<'a> {
+    /// The INTERESTs the frame holds, in order. Only a frame read by a session with the client role holds any.
+    pub fn interests(&self) -> impl Iterator<Item = Interest<'a>> {
+        let mut reader = Reader::new(self.body);
+        let (bounds, client) = (self.bounds, self.client);
+        core::iter::from_fn(move || {
+            while reader.left() != 0 {
+                match parse_message(&mut reader, &bounds, client) {
+                    Ok(Parsed::Interest(found)) => return Some(found),
+                    Ok(Parsed::Network(_)) => {}
+                    Err(_) => break,
+                }
+            }
+            None
+        })
+    }
+
     pub fn messages(&self) -> Networks<'a> {
         Networks {
             reader: Reader::new(self.body),
@@ -1191,7 +1210,7 @@ fn interest<'a>(
     header: u8,
     bounds: &Bounds,
     client: bool,
-) -> Result<Network<'a>, Refusal> {
+) -> Result<Interest<'a>, Refusal> {
     if !client {
         return Err(Refusal::UnsupportedMessage);
     }
@@ -1215,7 +1234,13 @@ fn interest<'a>(
     if header & FLAG_Z != 0 {
         network_qos_extension(reader)?;
     }
-    Ok(Network::Interest { id, mode, prefix })
+    Ok(Interest { id, mode, prefix })
+}
+
+/// One message of a frame: a network message, or an INTEREST.
+enum Parsed<'a> {
+    Network(Network<'a>),
+    Interest(Interest<'a>),
 }
 
 fn parse_network<'a>(
@@ -1223,7 +1248,21 @@ fn parse_network<'a>(
     bounds: &Bounds,
     client: bool,
 ) -> Result<Network<'a>, Refusal> {
+    Ok(match parse_message(reader, bounds, client)? {
+        Parsed::Network(network) => network,
+        Parsed::Interest(_) => Network::Oam,
+    })
+}
+
+fn parse_message<'a>(
+    reader: &mut Reader<'a>,
+    bounds: &Bounds,
+    client: bool,
+) -> Result<Parsed<'a>, Refusal> {
     let header = reader.u8()?;
+    if header & ID_MASK == ID_INTEREST {
+        return interest(reader, header, bounds, client).map(Parsed::Interest);
+    }
     match header & ID_MASK {
         ID_DECLARE => declare(reader, header, bounds),
         ID_PUSH => push(reader, header, bounds, client),
@@ -1231,9 +1270,9 @@ fn parse_network<'a>(
         ID_REQUEST => request(reader, header, bounds),
         ID_RESPONSE => response(reader, header, bounds),
         ID_RESPONSE_FINAL => response_final(reader, header),
-        ID_INTEREST => interest(reader, header, bounds, client),
         _ => Err(Refusal::UnsupportedMessage),
     }
+    .map(Parsed::Network)
 }
 
 fn frame<'a>(

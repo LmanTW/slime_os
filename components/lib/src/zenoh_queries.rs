@@ -483,7 +483,6 @@ fn bounded(frame: &crate::zenoh_profile0::Frame<'_>) {
             | Network::UndeclareQueryable { .. }
             | Network::ResponseFinal { .. }
             | Network::Oam
-            | Network::Interest { .. }
             | Network::DeclareFinal => {}
         }
     }

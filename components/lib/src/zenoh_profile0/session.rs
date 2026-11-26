@@ -1392,9 +1392,10 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
         out: &mut [u8],
     ) -> Result<usize, SessionError> {
         let mut asked = None;
-        for network in frame.messages() {
-            if let Network::Interest { id, mode, prefix } = network
-                && asked.replace((id, mode, prefix)).is_some()
+        for found in frame.interests() {
+            if asked
+                .replace((found.id, found.mode, found.prefix))
+                .is_some()
             {
                 return Err(SessionError::TooManyMessages);
             }
@@ -1638,7 +1639,7 @@ impl<const K: usize, const S: usize, const B: usize, const E: usize, const R: us
                             })?;
                     note(journal, used, Change::Alias(at));
                 }
-                Network::Oam | Network::DeclareFinal | Network::Interest { .. } => {}
+                Network::Oam | Network::DeclareFinal => {}
                 Network::DeclareQueryable { id, mapping, key } => {
                     room(used)?;
                     self.query_key(key, mapping)?;

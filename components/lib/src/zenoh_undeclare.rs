@@ -260,7 +260,6 @@ fn bounded(frame: &crate::zenoh_profile0::Frame<'_>) {
             | Network::Request { .. }
             | Network::Response { .. }
             | Network::ResponseFinal { .. }
-            | Network::Interest { .. }
             | Network::DeclareFinal => {}
         }
     }
