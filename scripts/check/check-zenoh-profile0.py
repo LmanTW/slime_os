@@ -170,6 +170,8 @@ import zenoh_server_exam
 import zenoh_holder_fault_exam
 import zenoh_lost_holder_exam
 import zenoh_tls_dependency_exam
+import zenoh_serial_frame_exam
+import zserial_wire
 import zenoh_service_arm
 import zenoh_service_component_exam
 import zenoh_service_fault_exam
@@ -4290,6 +4292,59 @@ def holder_fault_main(controls_only: bool) -> int:
     return 0
 
 
+SERIAL_FRAME_CASES = 68
+SERIAL_FRAME_CONTROLS = 239
+SERIAL_FRAME_FILTER = "zenoh_serial::"
+# The exam's own Rust test, by name: a filter that matches nothing passes silently.
+SERIAL_FRAME_TESTS = ("zenoh_serial::the_frame_exam",)
+assert len(SERIAL_FRAME_TESTS) == 1
+
+
+def run_serial_frame() -> list[str]:
+    stdout, output = cargo_tests((SERIAL_FRAME_FILTER,), {**_os.environ})
+    passed = tests_passed(output)
+    missing = [name for name in SERIAL_FRAME_TESTS if name not in passed]
+    if missing:
+        fail(f"serial-frame: the exam's tests did not run and pass ({len(missing)} of {len(SERIAL_FRAME_TESTS)}): {', '.join(missing)}")
+    return [line[len("zserial "):] for line in exam_lines(stdout) if line.startswith("zserial ")]
+
+
+def serial_frame_main(controls_only: bool) -> int:
+    """The Rust z-serial framer writes the frames `z-serial` 0.2.3 wrote, takes the wires its reader took and refuses the ones
+    it refused. The reference reproduces every stock frame before it judges anything."""
+    exam = zenoh_serial_frame_exam
+    if all(name in tests_passed("") for name in SERIAL_FRAME_TESTS):
+        fail("control: a run with the serial-frame exam test missing was read as complete")
+    try:
+        held = zserial_wire.self_test()
+        refused_controls = exam.all_controls()
+        item_cases, item_controls = exam.item_pins()
+        honest = exam.judge(exam.good_lines())
+    except (exam.FrameError, zserial_wire.ZSerialError) as error:
+        fail(f"serial-frame: {error}")
+    if honest + len(exam.FACTS) != SERIAL_FRAME_CASES:
+        fail(f"serial-frame: an honest transcript and the facts are {honest + len(exam.FACTS)} cases, the checker pins {SERIAL_FRAME_CASES}")
+    if refused_controls != SERIAL_FRAME_CONTROLS:
+        fail(f"serial-frame: {refused_controls} controls, the checker pins {SERIAL_FRAME_CONTROLS}")
+    if item_cases and item_cases != SERIAL_FRAME_CASES:
+        fail(f"serial-frame: the item fixes {item_cases} cases, the checker pins {SERIAL_FRAME_CASES}")
+    if item_controls and item_controls != SERIAL_FRAME_CONTROLS:
+        fail(f"serial-frame: the item requires {item_controls} controls, the checker pins {SERIAL_FRAME_CONTROLS}")
+    if controls_only:
+        print(f"zenoh profile 0 serial-frame judge: reference holds {held} vectors, refused {refused_controls} corrupted inputs")
+        return 0
+    try:
+        cases = exam.check_facts() + exam.judge(run_serial_frame())
+    except (exam.FrameError, zserial_wire.ZSerialError) as error:
+        fail(f"serial-frame: {error}")
+    if cases != SERIAL_FRAME_CASES:
+        fail(f"serial-frame: the run observed {cases} cases, the checker pins {SERIAL_FRAME_CASES}")
+    print(f"[zenoh-profile0] slice=serial-frame cases={cases} controls={refused_controls}")
+    devloop_observations.record(casesObserved=cases, negativeControlsRefused=refused_controls)
+    print("zenoh profile 0 serial-frame check: the Rust framer writes, reads and refuses what z-serial does")
+    return 0
+
+
 def tls_dependency_main(controls_only: bool) -> int:
     """The TLS stack builds for the bare-metal target, passes `cargo deny` under the policy as it stands, and reaches only the
     component library's optional feature. Every command runs once and the judge reads what it printed."""
@@ -4351,7 +4406,7 @@ def lost_holder_main(controls_only: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "liveliness", "queries", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-client", "rmw-router-link", "rmw-client-put", "rmw-token", "rmw-live", "rmw-discover", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "qos", "congestion", "priorities", "lanes", "link-limits-v3", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service-peer", "service-four", "service-fault", "service", "service-link", "holder-fault", "service-stack", "link-v3-reader", "lost-holder", "tls-dependency"), required=True)
+    parser.add_argument("--slice", choices=(*JUDGES, "composition", "xcheck", "stock", "links", "undeclare", "liveliness", "queries", "rmw", "rmw-graph", "rmw-link", "rmw-data", "rmw-data-link", "rmw-client", "rmw-router-link", "rmw-client-put", "rmw-token", "rmw-live", "rmw-discover", "rmw-component", "rmw-peer", "rmw-booted", "subscribers", "qos", "congestion", "priorities", "lanes", "link-limits-v3", "grants", "client", "client-wire", "client-io", "client-abort", "grants-table", "grants-reader", "server", "grading", "limits", "service-component", "service-booted", "service-peer", "service-four", "service-fault", "service", "service-link", "holder-fault", "service-stack", "link-v3-reader", "lost-holder", "tls-dependency", "serial-frame"), required=True)
     parser.add_argument("--controls-only", action="store_true")
     arguments = parser.parse_args()
     if arguments.slice == "composition":
@@ -4452,6 +4507,8 @@ def main() -> int:
         return lost_holder_main(arguments.controls_only)
     if arguments.slice == "tls-dependency":
         return tls_dependency_main(arguments.controls_only)
+    if arguments.slice == "serial-frame":
+        return serial_frame_main(arguments.controls_only)
     refused_controls = controls(arguments.slice)
     if arguments.controls_only:
         print(f"zenoh profile 0 {arguments.slice} judge: refused {refused_controls} corrupted transcripts")

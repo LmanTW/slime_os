@@ -1,0 +1,65 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a20dc1-d977-7470-98cf-3175b7529a16" "zenoh-serial-frame" "zenoh-transport"
+  "A Rust framer writes and reads z-serial frames as the stock crate does"
+  "`zenoh-link-serial` 1.0.0 puts each Zenoh batch on a serial line as one z-serial frame. The frame is a COBS body ended by a zero byte. The body holds a 2-byte length, the data and a 4-byte CRC. That CRC is not the standard CRC-32. The repository holds no code for this frame, and `StreamFramerOf` reads a 2-byte length prefix that this link does not use. The decision record `docs/decisions/zenoh-link-transports.md` plans a serial link and needs this framer first.")
+  with {
+    intent = #planned;
+    owns = {
+      "components/lib/src/zenoh_serial*";
+      "components/lib/src/lib.rs";
+    };
+    nonGoals = {
+      h.nonGoal "A serial link, a `ByteLink` over a UART, a UART driver or any bytes on a device. This item is a framer with no I/O." h.agentDefault;
+      h.nonGoal "A Zenoh session over the framer. The batch inside a frame is a Profile 0 batch that the session already reads." h.agentDefault;
+      h.nonGoal "A frame whose data is longer than 1500 bytes. The stock reader takes up to 1512, and the exam pins the stock writer's bound." h.agentDefault;
+      h.nonGoal "Recovering a frame from a corrupted run. The receiver drops it and counts it. It does not repair it." h.agentDefault;
+      h.nonGoal "The stock peer, its baud rate and the pseudo-terminal. A later item owns them." h.agentDefault;
+    };
+    requirements = {
+      h.req "writes-the-stock-frame"
+        "For each of the 37 payloads that `z-serial` 0.2.3 framed, the Rust writer produces the same wire bytes. The payloads run from 0 to 1500 bytes and sit on every COBS block edge."
+        { "zenoh_serial_frame_check"; };
+      h.req "reads-and-refuses-as-the-stock-reader"
+        "The Rust reader returns the same data for each wire the stock reader took and refuses each wire the stock reader refused. It names the class the exam gives: `cobs`, `crc`, `length`, `short` or `size`."
+        { "zenoh_serial_frame_check"; };
+      h.req "refuses-over-1500-bytes"
+        "The Rust writer refuses a payload of 1501 bytes as `size`. The Rust reader refuses a frame whose length field names more than 1500 bytes, as `size`. It tests that bound before it compares the length with the body. It does so even where the stock reader takes the frame."
+        { "zenoh_serial_frame_check"; };
+      h.req "the-crc-is-the-stock-crc"
+        "The Rust CRC equals the stock CRC and differs from the standard CRC-32 on the same data. A frame that carries the standard CRC-32 is refused as `crc`."
+        { "zenoh_serial_frame_check"; };
+      h.req "a-receiver-resynchronizes"
+        "A receiver fed bytes in chunks delivers each good frame and counts each drop once. It delivers a frame of 1500 data bytes, whole or in 64-byte chunks, and a small frame after it. It resynchronizes after a bad frame and after a run of non-zero bytes that does not decode. Each of two leading zero bytes counts as one drop."
+        { "zenoh_serial_frame_check"; };
+      h.req "controls-are-refused"
+        "The judge refuses 239 inputs. 232 corrupt an honest transcript, 6 corrupt the vector file and 1 removes the declaration of the module."
+        { "zenoh_serial_frame_check"; };
+    };
+    acceptance = {
+      h.observedWhere "zenoh_serial_frame_check" {
+        h.count "casesObserved" 68;
+        h.count "negativeControlsRefused" 239;
+      };
+    };
+    decisions = {
+      h.decided "the-vectors-come-from-the-stock-crate"
+        "The 37 frames, the 18 reads and the one refused write come from `z-serial` 0.2.3 itself, built from its crates.io source with SHA-256 f113597c6b880587004169f14bc010e4b440981ab2ad669779d3654f9b1c4af1."
+        "a Python model of the frame matched all 37 frames the crate wrote, and the model alone would share its author's reading of the format. The crate's own bytes are the independent evidence"
+        h.agentDefault
+        { "writes-the-stock-frame"; "reads-and-refuses-as-the-stock-reader"; };
+      h.decided "the-exam-pins-the-writers-bound"
+        "The exam holds a data length of 1500 bytes, the stock writer's `MAX_MTU`, for both directions."
+        "the stock decoder takes frames of 1501 to 1512 data bytes. The stock read loop stops after 1516 wire bytes, so it never delivers a frame of more than 1508 data bytes. A reader that is stricter than the stock reader is safe, and the stock writer never sends those frames"
+        h.agentDefault
+        { "refuses-over-1500-bytes"; };
+      h.decided "no-length-prefix-on-a-serial-link"
+        "The framer has no 2-byte length prefix. A serial link carries one frame for each batch."
+        "`zenoh-link-serial` 1.0.0 reports `is_streamed` as false, so its batch has no stream length. The frame carries the length, so `StreamFramerOf` does not apply"
+        h.agentDefault
+        { "writes-the-stock-frame"; };
+    };
+  };
+
+item
