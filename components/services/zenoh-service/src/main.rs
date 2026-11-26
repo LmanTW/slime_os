@@ -13,6 +13,7 @@
 //! this crate is graded by the booted composition.
 
 mod holders;
+mod stack;
 
 use slime_components::network_io::{
     Connection as ServiceConnection, NetworkIo, NetworkNotifications,
@@ -104,6 +105,7 @@ fn reply_of(reply: &slime_components::network_io::NetworkReply) -> node::Reply {
 }
 
 fn main(_startup_arg: u32) {
+    let painted = stack::paint(stack::PAINT_DEPTH);
     // The limits come first. A generation that declares more than the service was built to hold is refused before any
     // storage is sized by the rows.
     let mut record = [0u8; limits_wire::RECORD_LEN];
@@ -237,6 +239,17 @@ fn main(_startup_arg: u32) {
         fail(b"close");
     }
     io.finish().unwrap_or_else(|_| fail(b"finish"));
+    Line::<128>::new()
+        .bytes(b"[zenoh-service] stack used=")
+        .decimal(painted.used().unwrap_or(painted.above()) as u64)
+        .bytes(b" span=")
+        .decimal(painted.span() as u64)
+        .bytes(b" above=")
+        .decimal(painted.above() as u64)
+        .bytes(b" declared=")
+        .decimal(STACK_BYTES as u64)
+        .bytes(b"\n")
+        .emit();
     exit(0)
 }
 
