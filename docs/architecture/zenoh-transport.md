@@ -631,8 +631,8 @@ Known limits:
 ## Queries
 
 A Profile 0 session carries one query. It takes a queryable declaration, a request, its responses and the final response
-that a stock eclipse-zenoh 1.0.0 peer sends. It reads the one capture of that peer, in peer mode, on the plain key
-`slime_demo/query`.
+that a stock eclipse-zenoh 1.0.0 peer sends. It reads two captures of that peer, in peer mode, on the plain key
+`slime_demo/query`: one where the peer answers a query and one where it asks.
 
 - **Our queryable.** `send_declare_queryable` declares the queryable through an alias with the sender mapping, as the
   stock peer does. The alias takes a slot of the alias table. A second queryable is refused as `queryable-limit`.
@@ -644,7 +644,8 @@ that a stock eclipse-zenoh 1.0.0 peer sends. It reads the one capture of that pe
   second is refused as `request-limit`. The session reports `ReplyDelivered` for each response and `QueryFinished` for the final
   response. A response or final response nobody asked for is refused.
 - **Stays refused.** A wildcard key, query parameters, a target, a budget, a consolidation other than latest, an
-  error reply, a Delete reply, a fragmented reply and a best-effort request or response.
+  error reply, a Delete reply and a fragmented reply. No exam judges a request or response on a best-effort lane of
+  a session with negotiated lanes. That session applies such a frame as it applies a reliable one.
 - **No service.** The plain link ignores query events, and the Zenoh service answers no query.
 
 ## Limitations
