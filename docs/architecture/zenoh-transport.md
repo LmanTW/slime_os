@@ -359,6 +359,17 @@ cause is not isolated. In one boot of this composition `alpha` published four sa
 received each once. The service refused `beta`'s publish once, and every instance exited with status 0.
 `just zenoh_service_four_check` judges it.
 
+The service measures its own stack on seL4. `main` fills the runtime's stack with `0xa5`, from 512 bytes below its frame down
+to 61440 bytes below the top. At exit the service reads the lowest byte the run changed and prints
+`[zenoh-service] stack used=<n> span=61440 above=<a> declared=32768`. `used` counts from the top of the stack, so it includes
+the frame of `main`. `above` is the part the fill does not cover. The top is the value of `__sel4_runtime_common__stack_bottom`,
+because the entry code loads that value into the stack pointer. A first prototype took the address of the symbol and faulted.
+In one boot of `sel4-zenoh-service-four` the line read `used=20176`, against the 32768 declared. Three boots of an earlier build
+read 19840. `just zenoh_stack_boot_check` judges the line: `used` must exceed `above` and must not exceed the declared stack. The
+judge does not pin the number. The image builds in release with `opt-level = "s"`, so the figure is not the host test's figure.
+The service prints the line in every composition that runs it. The judges of those compositions list the line and read no
+number from it. Only the four-holder composition was booted with the line.
+
 The composition `sel4-zenoh-service-fault` (generation 175) runs a holder that faults. A supervision handle must come from the
 instance that owns the holder, and `root` is not an instance a binding can name. A component `zenoh-supervisor` therefore owns
 the service, the peer, the network service and three holders: `alpha`, `beta` and `victim`. It derives a handle for `victim` and
@@ -383,8 +394,9 @@ server and the arrays of `main`.
 What is not shown: a second boot, a boot with more than four holders, a malformed request from a holder component, or a stalled
 link under QEMU. No boot has a holder that faults during an exchange, because the supervisor spawns `alpha` after it has read the
 fault. No boot has a fault of another kind than a null write. The release of a reclaimed holder's
-loans, ring and data page is not graded. The stack depth on seL4 is not measured, and neither is the stack of the network
-attachment, `holders::serve` or `holders::drive`.
+loans, ring and data page is not graded. The stack depth on seL4 is measured in one run of the four-holder composition, with
+four samples. A fault, a stalled link or more rows can need more. A run that overflows the stack prints no line. The host test
+does not cover the network attachment, `holders::serve` or `holders::drive`. The seL4 line counts them, in that one run.
 
 Known limits of the component:
 
