@@ -289,6 +289,16 @@ zenoh_liveliness_check:
 zenoh_priorities_check:
     python3 scripts/check/check-zenoh-profile0.py --slice priorities
 
+# Judges sending on a best-effort lane. When both INITs offered the QoS unit extension, Link::publish_best_effort
+# writes a FRAME of lane (priority, best-effort): the header of the reliable lane with its flag clear, and a
+# sequence counter of its own apart from the reliable lane of the same priority. A link without lanes refuses it,
+# and a busy slot follows the congestion control of the publication. The host references
+# scripts/lib/zenoh_lanes_exam.py and zenoh_wire.py reproduce every frame byte for byte; the expectation is
+# scripts/lib/zenoh_best_effort_exam.py. Nothing here needs a registry. The recipe fails until the Rust tests land.
+[group('hardware')]
+zenoh_best_effort_check:
+    python3 scripts/check/check-zenoh-profile0.py --slice best-effort
+
 # Judges what the Zenoh service may do for each holder. The decoder of
 # contracts/zenoh-service-grants/v1 takes the declarations it must take and refuses the ones it must
 # refuse. Each limit is held on both sides of its bound. Each check is removed in turn, and the
