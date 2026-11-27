@@ -1,0 +1,81 @@
+s ::= import "./schema.zt";
+h ::= import "./helpers.zt";
+
+item :: s.Item = (h.task "01a21b87-ff1b-7580-ad91-88c7a7c02e04" "zenoh-serial-port" "product"
+  "A component reads and writes the second PL011 port of QEMU virt"
+  "No component can read a byte from a serial line. The `serial-device` contract has one operation, a write, and its reply carries no data. The root declares no device region other than virtio-mmio and one PCI function, and no driver binds a PL011. The serial link of `docs/decisions/zenoh-link-transports.md` needs a driver that reads the second PL011 at `0x9040000`. `sel4_serial_graph_check` already judges the composition `sel4-serial` and fails because none of its parts exists.")
+  with {
+    intent = #planned;
+    owns = {
+      "contracts/serial-device/**";
+      "components/proto/src/serial_device*.rs";
+      "slime-root/src/device.rs";
+      "slime-root/src/graph_runtime/platform.rs";
+      "components/services/pl011-driver/**";
+      "components/lib/src/pl011*";
+      "components/lib/src/lib.rs";
+      "components/testkit/serial-probe/**";
+      "components/system/init/src/main.rs";
+      "contracts/component-spec/v1/components/pl011-driver.zti";
+      "contracts/component-spec/v1/components/serial-probe.zti";
+      "contracts/system-spec/v1/systems/sel4-serial.zti";
+      "contracts/system-spec/v1/baselines/sel4-serial.zti";
+      "contracts/generation-manifest/v1/compositions/sel4-serial.zti";
+      "contracts/boot-layout/v1/fixtures/sel4-serial.layout";
+      "contracts/system-image-closure/v3/closures/sel4-serial.zti";
+      "contracts/system-test-run/v2/runs/sel4-serial.zti";
+      "scripts/generate/generate-system-test-runs.py";
+      "Cargo.toml";
+      "Cargo.lock";
+    };
+    nonGoals = {
+      h.nonGoal "A Zenoh link over the port. This item gives a component raw bytes in and out. The framer exists, and a link is a later item." h.agentDefault;
+      h.nonGoal "An interrupt on receive. The driver polls the FIFO, and the exam's 24-byte burst needs no interrupt." h.agentDefault;
+      h.nonGoal "Setting the baud rate or the line format. QEMU's PL011 takes every byte at once, and the loader configures the console UART only." h.agentDefault;
+      h.nonGoal "The Raspberry Pi 5 PL011. This item names QEMU virt only." h.agentDefault;
+      h.nonGoal "The existing 16550 driver. It stays bound to an ordinal the platform did not inventory, so it answers `no-device`." h.agentDefault;
+      h.nonGoal "A change to `scripts/check/check-sel4-component-graph.py`. The arm `sel4-serial` is the exam, and this item makes it pass." h.agentDefault;
+    };
+    requirements = {
+      h.req "writes-reach-the-host-end"
+        "The probe's two writes of 12 and 4 bytes reach the host end of the second port. The first port still answers `(+ 1 1)` with `=> 2`."
+        { "sel4_serial_graph_check"; };
+      h.req "reads-concatenate-in-order"
+        "The probe reads a burst of 24 bytes, which exceeds the 16-deep FIFO. Its read line shows all 24 bytes in order over at least 2 reads."
+        { "sel4_serial_graph_check"; };
+      h.req "an-empty-read-returns-at-once"
+        "A read on an empty FIFO returns status `ok` with 0 bytes and does not block. The run reaches its terminal marker."
+        { "sel4_serial_graph_check"; };
+      h.req "an-uninventoried-ordinal-refuses"
+        "A driver bound to an ordinal that the root did not inventory refuses a read and a write with `no-device`."
+        { "sel4_serial_graph_check"; };
+      h.req "malformed-requests-are-refused"
+        "A request with an unknown operation, a bad length or a non-zero reserved field is refused as `bad-op`, `bad-length` or `malformed`. The next well-formed write answers `ok`."
+        { "sel4_serial_graph_check"; };
+    };
+    acceptance = {
+      h.observedWhere "sel4_serial_graph_check" {
+        h.count "negativeControlsRefused" 5;
+        h.count "bytesObserved" 40;
+      };
+    };
+    decisions = {
+      h.decided "a-read-operation-is-a-new-contract-version"
+        "`contracts/serial-device/v2` adds a read operation and a reply that carries data. `v1` does not change."
+        "the record says an existing operation does not change and a grant with read and write extends the contract in a new version. The v1 reply has no field for data"
+        h.agentDefault
+        { "reads-concatenate-in-order"; "an-empty-read-returns-at-once"; };
+      h.decided "the-root-pins-the-second-uart"
+        "The root of the QEMU virt image declares the PL011 at `0x9040000` as device ordinal 0, from a constant beside the console UART's."
+        "no budget field names a physical address, and adding one changes the boot-contracts schema. A pinned constant is the smallest change, and the arm sets `devices=1`"
+        h.agentDefault
+        { "an-uninventoried-ordinal-refuses"; };
+      h.decided "the-driver-polls"
+        "The PL011 driver reads the flag register for each byte and keeps no interrupt."
+        "the exam needs only that several reads give one burst in order, and a polled receive needs no interrupt source from the root"
+        h.agentDefault
+        { "reads-concatenate-in-order"; };
+    };
+  };
+
+item
