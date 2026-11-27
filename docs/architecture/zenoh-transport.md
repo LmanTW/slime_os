@@ -590,12 +590,12 @@ client role refuses both as `invalid-config`.
 
 | Call | What the link writes | What the session holds |
 | --- | --- | --- |
-| Declare token `id` under `key` | A `DECLARE` with a named token, the sender mapping, the id, the global scope and the key in full | The id, up to 4 at once |
+| Declare token `id` under `key` | A `DECLARE` with a named token, the sender mapping, the id, the global scope and the key in full | The id, up to 6 at once |
 | Withdraw token `id` | A `DECLARE` with an `UNDECLARE_TOKEN`, the id and the extension `5f 02 00 00` | The other ids stay |
 | Close | A `CLOSE` and nothing for the tokens | None |
 
-A repeated id is refused as `token-limit`, and a withdrawal of an id never declared as `unknown-token`. The key is written in
-full and with no QoS wrapper. A real `rmw_zenoh_cpp` peer declares a key alias first and wraps each declaration, and the plain
+A repeated id and a seventh token are refused as `token-limit`, and a withdrawal of an id never declared as `unknown-token`.
+The key is written in full and with no QoS wrapper. A real `rmw_zenoh_cpp` peer declares a key alias first and wraps each declaration, and the plain
 link has no alias writer.
 
 `scripts/lib/zenoh_rmw_token_exam.py` judges a client-role link through the two handshakes of `zenoh_rmw_router_data`, fed
@@ -603,6 +603,26 @@ whole, one byte at a time and all at once. The link declares the node token and 
 the publisher token and closes. The exam compares every byte with `zenoh_rmw_graph.build_token` and `zenoh_rmw_wire`. The `held`
 line prints the tokens the link holds after the withdrawal, which is the node token alone. The Rust test reads it from the
 link. The judge refuses 87 corrupted records, and the router is not in the exam.
+
+The link writes a token of any entity kind, because the call takes the key. `scripts/lib/zenoh_rmw_entity_exam.py` judges five
+tokens of one node `slime_node`: the node, a publisher, a subscription, a service server and a service client.
+
+| Entity | Kind in the key | Topic or service | QoS substring |
+| --- | --- | --- | --- |
+| Node | `NN` | None | None |
+| Publisher | `MP` | `/chatter` | `::,:,:,:,,` |
+| Subscription | `MS` | `/chatter` | `::,10:,:,:,,`, a history depth of 10 |
+| Service server | `SS` | `/add_two_ints` | `::,:,:,:,,` |
+| Service client | `SC` | `/add_two_ints` | `::,:,:,:,,` |
+
+The exam withdraws the subscription token and closes. The `held` line prints the other four tokens, read from the link. The
+Rust test asserts that the cap is 6. It also asserts that a declaration refused for a busy send slot holds no token and
+spends no sequence number. The exam judges 33 cases and refuses 99 corrupted records. No router runs in it.
+
+A probe with a throwaway edit of the Rust link declared the subscription, service server and service client tokens through a
+live `rmw_zenohd`. `ros2 topic info /chatter -v` listed one subscription with a depth of 10. `ros2 node info /slime_node`
+listed the service on both sides. This ROS install has no `ros2 service` command. The edit is not in the repository, and
+no checked-in run shows it.
 
 Two host probes used the Python wire library and the repo's token builder. They declared a node token and a publisher token for
 `slime_node` through a live `rmw_zenohd`. A separate `ros2` listed `/slime_node` and `/chatter`, and `ros2 topic info /chatter`
@@ -772,6 +792,8 @@ that a stock eclipse-zenoh 1.0.0 peer sends. It reads two captures of that peer,
   and 52 controls. A connector with no role still refuses them; explicit, not part of `all`;
 - `just zenoh_rmw_token_check` — a client-role link declares the node and publisher tokens of a node, withdraws one and
   closes: 32 cases and 87 controls. No router runs, and a link with no role refuses a token; explicit, not part of `all`;
+- `just zenoh_rmw_entity_check` — a client-role link declares the node, publisher, subscription, service server and service
+  client tokens of a node, withdraws one and closes: 33 cases and 99 controls. No router runs; explicit, not part of `all`;
 - `just zenoh_rmw_discover_check` — a client-role link declares the node and publisher tokens of `slime_node` through a live
   `rmw_zenohd`, and `ros2` lists them while the session is open and not after it closes: 8 cases and 39 controls; an
   operator target, explicit, not part of `all`;
