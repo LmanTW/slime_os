@@ -5,6 +5,7 @@ item :: s.Item = (h.task "01a2169b-24fe-7081-af19-d16e67b2a535" "zenoh-stack-boo
   "The Zenoh service measures its own stack depth on seL4 and the four-holder boot judges it"
   "The Zenoh service declares a stack of 32768 bytes, and the runtime reserves 65536. A host test measures the call path in a debug build on x86_64 and needs 24932 bytes at the built size. No run on seL4 measures the stack. The image builds with another profile and target, so the host figure does not show the depth of the booted service.")
   with {
+    intent = #active;
     owns = {
       "components/services/zenoh-service/**";
     };
