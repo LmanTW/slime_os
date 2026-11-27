@@ -5,7 +5,7 @@ item :: s.Item = (h.task "01a21200-5b3e-7c41-9d2a-6f0e8a7c4b19" "zenoh-queries-r
   "The stock-queries fixture contract has a README, as the stock-undeclare contract has"
   "contracts/zenoh-stock-undeclare holds a README that says what its fixture record fixes and which command writes it. contracts/zenoh-stock-queries, which zenoh-queryables added, holds only v1/schema.zt and v1/gen_rust.zt. A reader of that directory finds no statement of what the record is a container for, which command writes it, or which bounds a reader enforces. The README was held out of the documentation PR for the queries, because it is implementation class and no active item owned it.")
   with {
-    intent = #planned;
+    intent = #active;
     owns = {
       "contracts/zenoh-stock-queries/README.md";
     };
